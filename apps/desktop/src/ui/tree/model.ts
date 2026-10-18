@@ -220,8 +220,33 @@ export interface ItemRow {
   /** This row's slice of every box around it (the box pass). */
   readonly boxes: readonly Box[];
 }
-/** Why a run of siblings is left out of the Map: outside the focus, not matching the filter, or hidden by the owner. */
-export type StripReason = 'hidden' | 'filter' | 'focus';
+/**
+ * Why a run of siblings is left out of the Map: outside the focus, not matching the filter, or hidden by the owner; or,
+ * in the place of one item or topic (E29), removed by the owner (during the Undo window), removed by the agent (in the
+ * bin), or archived this visit.
+ */
+export type StripReason = 'hidden' | 'filter' | 'focus' | PlaceReason;
+export type PlaceReason = 'removed' | 'agent-removed' | 'archived';
+/** A strip standing where one item (and what's below it) or one topic was, so the rows around it don't move (E29). */
+export interface PlaceStrip {
+  readonly reason: PlaceReason;
+  readonly topicId: string;
+  /** The item it stands for; null for a whole topic. */
+  readonly itemId: string | null;
+  /** The item's parent (null at the top of its topic). */
+  readonly parent: string | null;
+  /** The item's ordinal among its siblings, or the topic's order. */
+  readonly order: number;
+  readonly name: string;
+  /** The item and everything below it, or the topic's items. */
+  readonly count: number;
+  /** Who removed it, for "Claude Code removed “x”". */
+  readonly agent?: string;
+  /** The row keys it stands for: the item and everything below it, or the topic and its items. */
+  readonly covers: readonly string[];
+  /** A removed strip whose Undo window ended: its command is running, so it offers no Undo. */
+  readonly ended?: boolean;
+}
 /**
  * The Map's one strip row: a run of consecutive omitted siblings. Its reason is the first that applies, focus then
  * filter then hidden. Only a hidden strip opens (per parent, as `hiddenGroupKey`); the others are undone by Clear and Unfocus.
@@ -245,8 +270,15 @@ export interface StripRow {
   /** The branch's hue slot, or null for a top-level strip, which sits in no branch. */
   readonly branch: number | null;
   readonly delivery: null;
+  /** A strip in one item's or topic's place: what it stands for. */
+  readonly place?: PlaceStrip;
 }
 export type Row = TopicRow | ItemRow | StripRow;
+
+/** The strip that now stands where the row `key` was (an item below a removed one, or a topic's item), if any (E29). */
+export function stripAnchorFor(rows: readonly Row[], key: string): string | null {
+  return rows.find(row => row.kind === 'strip' && !!row.place?.covers.includes(key))?.key ?? null;
+}
 
 /** Which items the Map's filters keep. `active` is false when nothing scopes the rows. */
 export interface TreeFilter { readonly active: boolean; matches(item: Immutable<Item>): boolean }
@@ -283,6 +315,8 @@ export interface TreeInput {
   readonly health?: SupervisorHealth | null;
   /** Catalogue summaries, to name the session a continued topic came from. */
   readonly summaries: readonly Immutable<SessionSummary>[];
+  /** Strips in the place of items and topics the session no longer shows (E29). */
+  readonly places?: readonly PlaceStrip[];
   readonly now: number;
 }
 export interface TreeModel {
@@ -379,7 +413,15 @@ export function treeModel(input: TreeInput): TreeModel {
   const rootsOf = (topicId: string) => kids(null).filter(item => item.topic_id === topicId);
 
   const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides' | 'boxes' | 'branch'> | Omit<StripRow, 'guides' | 'boxes' | 'branch'>)[] = [];
+  const places = input.places ?? [];
+  const placeRow = (place: PlaceStrip, depth: number) => built.push({ kind: 'strip', key: stripKey(place.topicId, place.parent, place.reason, place.itemId ?? place.topicId),
+    reason: place.reason, topicId: place.topicId, parent: place.itemId ? place.parent : null, depth, count: place.count, waiting: 0, expanded: false, delivery: null, place });
+  // Strips for whole topics go in topic order among the topics shown; a focus shows only its own topic.
+  const topicPlaces = focusRootId ? [] : places.filter(place => !place.itemId).sort((a, b) => a.order - b.order);
+  let nextTopicPlace = 0;
+  const topicPlacesBefore = (order: number) => { while (nextTopicPlace < topicPlaces.length && topicPlaces[nextTopicPlace]!.order < order) placeRow(topicPlaces[nextTopicPlace++]!, 0); };
   for (const topic of topics) {
+    topicPlacesBefore(topic.order);
     const roots = rootsOf(topic.id);
     // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
     // A session with no items at all shows its empty state instead (frame 1g).
@@ -391,8 +433,12 @@ export function treeModel(input: TreeInput): TreeModel {
     built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item) && !input.ackHeld?.has(item.id)).length, sessionEnded(session)),
       earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(closed), delivery });
     if (!open) continue;
-    const walk = (list: readonly Immutable<Item>[], depth: number) => {
-      const parent = list[0]?.parent ?? null;
+    // Strips in the place of items under `parent`, by ordinal among their siblings.
+    const placesUnder = (parent: string | null) => places.filter(place => place.itemId && place.topicId === topic.id && place.parent === parent);
+    const walk = (list: readonly Immutable<Item>[], depth: number, parent: string | null) => {
+      const ghosts = placesUnder(parent).sort((a, b) => a.order - b.order);
+      let nextGhost = 0;
+      const ghostsBefore = (ordinal: number) => { while (nextGhost < ghosts.length && ghosts[nextGhost]!.order < ordinal) placeRow(ghosts[nextGhost++]!, depth); };
       const groupOpen = hiddenGroups.has(hiddenGroupKey(topic.id, parent));
       // Why an item is left out of the walk, focus first; null when the Map shows it.
       const omitted = (item: Immutable<Item>): StripReason | null =>
@@ -405,8 +451,8 @@ export function treeModel(input: TreeInput): TreeModel {
           count: run.length, waiting: below.filter(value => waitingOnOwner(session, value)).length, expanded, delivery: null });
       };
       const emit = (item: Immutable<Item>) => {
-        const children = kids(item.id);
-        const open = children.length > 0 && expanded.has(item.id);
+        const children = kids(item.id), placed = placesUnder(item.id).length > 0;
+        const open = (children.length > 0 || placed) && expanded.has(item.id);
         let collapsed: ItemRow['collapsed'] = null;
         if (children.length && !open) {
           const below: Immutable<Item>[] = [];
@@ -420,13 +466,13 @@ export function treeModel(input: TreeInput): TreeModel {
         const matches: MatchField[] = [];
         if (holdsTerms(item.question, terms)) matches.push('question');
         if (outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms)) matches.push('outcome');
-        built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
+        built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0 || placed, expanded: open,
           hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), outside: filtering && forced.has(item.id) && !matched.has(item.id), later: parked,
           segments: matches.includes('question') ? hitSegments(item.question, terms) : [{ text: item.question, hit: false }], matches,
           replacedBy,
           relatedCount: connectedItems(session, item.id).length,
           collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
-        if (open) walk(children, depth + 1);
+        if (open) walk(children, depth + 1, item.id);
       };
       // Each run of consecutive omitted siblings with the same reason is one strip, in place; hidden siblings follow the
       // others as one group. A focused root the filter excludes is its own "not matching" strip, not part of "outside the focus".
@@ -437,6 +483,7 @@ export function treeModel(input: TreeInput): TreeModel {
       };
       const hiddenSiblings: Immutable<Item>[] = [];
       for (const item of list) {
+        if (nextGhost < ghosts.length && ghosts[nextGhost]!.order < item.ordinal) { flush(); ghostsBefore(item.ordinal); }
         const reason = omitted(item);
         if (reason) {
           if (run.length && reason !== runReason) flush();
@@ -447,13 +494,15 @@ export function treeModel(input: TreeInput): TreeModel {
         else { flush(); emit(item); }
       }
       flush();
+      ghostsBefore(Number.POSITIVE_INFINITY);
       if (hiddenSiblings.length) {
         strip(hiddenSiblings, 'hidden', groupOpen);
         if (groupOpen) hiddenSiblings.forEach(emit);
       }
     };
-    walk(roots, 1);
+    walk(roots, 1, null);
   }
+  topicPlacesBefore(Number.POSITIVE_INFINITY);
 
   // One rail at each parent's bullet, ending at its last direct child's bullet.
   // A depth stack finds visible parents/last children in one pass (including hidden groups).

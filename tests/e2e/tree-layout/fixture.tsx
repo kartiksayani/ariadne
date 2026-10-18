@@ -121,6 +121,14 @@ class TreeLayoutTransport extends AppTransport {
       return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
         data: { kind: 'item_ack', item_id: item.id, item_revision: item.revision, status: item.status, message_id: crypto.randomUUID() } } } as T;
     }
+    // The owner archives a topic (E33): it is marked archived and leaves one strip in its place for this visit.
+    if ('command' in request && request.command.command === 'topic_archive') {
+      const session = this.sessions.get(request.session!.session_id)!, topic = session.topics[request.command.params.topic_id]!;
+      topic.archived_at = session.updated_at; ++topic.revision; ++session.revision;
+      this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+      return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
+        data: { kind: 'topic_lifecycle', topic_id: topic.id, topic_revision: topic.revision, archived_at: topic.archived_at } } } as T;
+    }
     return super.invoke<T>(name, args);
   }
   /** What the agent writes while the owner reads: the session's next revision, announced as the desktop does. */

@@ -186,14 +186,11 @@ const triggers: readonly Trigger[] = [
   ['the Next label changes while stepping', 'still', '11', nothing, page => press(bandButton(page, 'Next unseen')),
     page => expect(bandButton(page, /^Next unseen, 1 of 2/)).toBeVisible()],
   ['the "…" menu opens', 'still', null, nothing, page => press(moreActions(page)), page => expect(page.getByRole('menu')).toBeVisible()],
-  ['Open the bin is chosen in the "…" menu: the bin opens and scrolls into view', 'goes', null, nothing, async page => {
+  // E30: the bin is a dialog over the Map; opening it moves nothing.
+  ['Open the bin is chosen in the "…" menu: the bin dialog opens over the Map', 'still', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Open the bin/ }).click();
-  }, async page => {
-    const fold = page.getByRole('button', { name: /^Removed by agent/ });
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
-    await expect(fold).toBeInViewport();
-  }],
+  }, page => expect(page.getByRole('dialog', { name: /^The bin for “/ })).toBeVisible()],
   ['a topic reply opens in Details', 'held', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Reply to topic/ }).click();
@@ -587,7 +584,6 @@ const holds: readonly Hold[] = [
     page => expect(row(page, '0')).toHaveCount(1)),
   ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
   ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
-  ...everywhere('the agent removes the reading row', risesAtTop, nothing, (page, reading) => agent(page, `remove:${reading}`), goes),
   // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
   // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
   ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
@@ -986,3 +982,134 @@ test('Details keeps the change box and what is below it still when the head goes
   expect(after.pill!, 'the Seen pill fits the same slot').toBeLessThanOrEqual(after.slot!);
   expect({ ...after, pill: 0 }).toEqual({ ...unseen, pill: 0 });
 }));
+
+// E29: a removed row's place keeps a strip, and the hold hands the reading row's place to it, at the top, the middle and the
+// bottom; at commit the strip goes and the row the owner now reads keeps its place.
+const placeTop = async (page: Page, text: RegExp, skip: readonly string[] = []) => {
+  const strips = page.locator('.tree-place', { hasText: text });
+  for (const strip of await strips.all()) if (!skip.includes((await strip.getAttribute('data-row')) ?? '')) return (await strip.boundingBox())?.y ?? null;
+  return null;
+};
+/** The strips already in the Map (the fixture's own agent-removed item has one). */
+const stripKeys = async (page: Page) => page.locator('.tree-place').evaluateAll(strips => strips.map(strip => strip.getAttribute('data-row') ?? ''));
+/** The owner removes `id` from its hover bar; an item with others below it asks first. */
+const ownerRemoves = async (page: Page, id: string) => {
+  await point(page, id);
+  await press(row(page, id).getByRole('button', { name: /^Remove/ }));
+  const asking = page.getByRole('dialog', { name: /^Remove “/ });
+  if (await asking.count()) await asking.getByRole('button', { name: /^Remove (item|\d+ items)$/ }).click();
+};
+const stripCases: readonly (readonly [name: string, text: RegExp, change: (page: Page, reading: string) => Promise<void>])[] = [
+  ['the owner removes the reading row', /^Removed “/, ownerRemoves],
+  ['the agent removes the reading row', /removed “/, (page, reading) => agent(page, `remove:${reading}`)],
+];
+test.describe('strips hold the removed row\'s place', () => {
+  for (const where of ['top', 'middle', 'bottom'] as const) for (const [name, text, change] of stripCases) {
+    test(`${name} at the ${where}: its strip takes its window place`, ({ page }) => served(page, async () => {
+      await goTo(page, where);
+      await settle(page);
+      const read = await readingRow(page), was = (await windowTop(page, read.key))!, earlier = await stripKeys(page);
+      await change(page, read.key);
+      await expect(row(page, read.key)).toHaveCount(0);
+      await expect.poll(async () => (await stripKeys(page)).length, 'a new strip shows').toBe(earlier.length + 1);
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - was), 'the strip is where the row was').toBeLessThanOrEqual(3);
+    }));
+  }
+  for (const where of ['top', 'middle', 'bottom'] as const) {
+    test(`the owner's removal commits at the ${where}: the strip goes and the row read now keeps its place`, ({ page }) => served(page, async () => {
+      await goTo(page, where);
+      await settle(page);
+      const read = await readingRow(page);
+      await ownerRemoves(page, read.key);
+      const strip = page.locator('.tree-place', { hasText: /^Removed “/ });
+      await expect(strip).toBeVisible();
+      await settle(page);
+      const now = await readingRow(page), y = (await windowTop(page, now.key))!, height = (await strip.boundingBox())!.height;
+      await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+      await expect(strip).toHaveCount(0);
+      await settle(page);
+      // At the top the Map has no room above to scroll into, so the rows close the strip's gap and nothing more.
+      const room = where === 'top' ? height + 2 : 0;
+      await expect.poll(async () => Math.abs((await windowTop(page, now.key))! - y), `${now.key} keeps its window place`).toBeLessThanOrEqual(3 + room);
+    }));
+  }
+  test('Undo on the strip puts the row back where the strip was', ({ page }) => served(page, async () => {
+    const read = await readingRow(page), was = (await windowTop(page, read.key))!;
+    await ownerRemoves(page, read.key);
+    const strip = page.locator('.tree-place', { hasText: /^Removed “/ });
+    await expect(strip).toBeVisible();
+    await press(strip.getByRole('button'));
+    await expect(row(page, read.key)).toHaveCount(1);
+    await settle(page);
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - was), 'the row is back in its place').toBeLessThanOrEqual(3);
+    await expect(strip).toHaveCount(0);
+  }));
+});
+
+// E29, E33: a parent's strip and a topic's archive strip take the place of what they stand for, on a short Map (no room
+// to scroll) and when the reading row is taller than the window. Item 1 is the parent (1.1 below it, in the first topic);
+// the second topic ("Continued context", items 8 to 18) is archived.
+const parentStrip = /^Removed “.+” and the \d+ items? below it$/, archiveStrip = /^Archived “Continued context” · \d+ items? · Undo$/;
+const ownerArchives = async (page: Page) => {
+  await press(moreActions(page));
+  await page.getByRole('menuitem', { name: /^Archive topic/ }).click();
+  await page.getByRole('dialog', { name: /^Archive the “Continued context” topic\?$/ }).getByRole('button', { name: 'Archive topic' }).click();
+};
+/** Makes `id` the reading row, taller than the window: its whole result open, its top just under the sticky band. */
+const tallReading = async (page: Page, id: string) => {
+  await page.setViewportSize({ width: 1000, height: 460 });
+  await goTo(page, 'top');
+  await settle(page);
+  if (id === '8') for (let n = 0; n < 4; n++) await agent(page, 'write:8');
+  await expect(row(page, id).getByRole('button', { name: 'Show more' }).last()).toBeVisible();
+  await click(row(page, id).getByRole('button', { name: 'Show more' }).last());
+  await expect(row(page, id).getByRole('button', { name: 'Show less' }).first()).toBeAttached();
+  await row(page, id).evaluate(element => {
+    const box = element.closest('.tree-scroll')!, edge = box.getBoundingClientRect().top;
+    // Clear of the sticky band (62px) by a little.
+    box.scrollTop += element.getBoundingClientRect().top - edge - 72;
+  });
+  await settle(page);
+  const read = await readingRow(page);
+  expect(read.key, `${id} is the reading row`).toBe(id);
+  expect(await row(page, id).evaluate(element => element.getBoundingClientRect().bottom > element.closest('.tree-scroll')!.getBoundingClientRect().bottom),
+    `${id} runs past the window`).toBe(true);
+};
+const placeCases: readonly (readonly [name: string, text: RegExp, subject: string, change: (page: Page) => Promise<void>])[] = [
+  ['the owner removes a parent', parentStrip, '1', page => ownerRemoves(page, '1')],
+  ['the owner archives a topic', archiveStrip, '8', ownerArchives],
+];
+test.describe('a parent\'s strip and an archive strip hold the place', () => {
+  for (const [name, text, subject, change] of placeCases) {
+    test(`${name} on a short Map: its strip is where it was, and the reading row keeps its place`, ({ page }) => served(page, async () => {
+      await page.setViewportSize({ width: 1000, height: 4400 });
+      await goTo(page, 'top');
+      await settle(page);
+      const short = await scroller(page).evaluate(box => box.getBoundingClientRect().bottom - box.querySelector('.tree-rows')!.getBoundingClientRect().bottom);
+      expect(short, 'the rows end well above the window\'s bottom').toBeGreaterThan(300);
+      // The parent's own row, or the archived topic's band, is what the strip stands in for.
+      const place = subject === '1' ? (await windowTop(page, '1'))! : (await band(page).boundingBox())!.y;
+      const read = await readingRow(page), was = (await windowTop(page, read.key))!, earlier = await stripKeys(page);
+      await change(page);
+      // The archive strip stands for the whole topic, so it takes the place of the agent-removed strip inside it too.
+      await expect(page.locator('.tree-place', { hasText: text })).toBeVisible();
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - place), 'the strip is where it was').toBeLessThanOrEqual(3);
+      if (read.key !== subject) expect(Math.abs((await windowTop(page, read.key))! - was), `${read.key} keeps its place`).toBeLessThanOrEqual(3);
+      expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
+    }));
+    // Open (found by this row): archiving the last topic while its tall row is read near the Map's end leaves the strip
+    // 11-23px below the row's place; the scroller is at its end, so the hold's bottom spacer doesn't make the room.
+    test(`${name} while it holds a reading row taller than the window: its strip takes that row's window place`, ({ page }) => served(page, async () => {
+      test.fixme(subject === '8', 'the archive strip of the last topic is clamped at the Map\'s end');
+      await tallReading(page, subject);
+      const was = (await windowTop(page, subject))!, earlier = await stripKeys(page);
+      await change(page);
+      await expect(row(page, subject)).toHaveCount(0);
+      await expect(page.locator('.tree-place', { hasText: text })).toBeVisible();
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - was), 'the strip is where the row was').toBeLessThanOrEqual(3);
+    }));
+  }
+});

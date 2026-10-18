@@ -58,9 +58,14 @@ export function DialogText({ children }: { readonly children: ReactNode }) {
   return <p className="dg-text">{children}</p>;
 }
 
-/** An amber note: what else goes with the choice. */
-export function DialogWarn({ children }: { readonly children: ReactNode }) {
-  return <div className="dg-warn"><i className="ph ph-warning-circle" aria-hidden="true" /><span>{children}</span></div>;
+/** An amber note: what else goes with the choice; `danger` for what a removal deletes (SPEC 10.2, 10.14). */
+export function DialogWarn({ children, tone = 'warn' }: { readonly children: ReactNode; readonly tone?: 'warn' | 'danger' }) {
+  return <div className={tone === 'danger' ? 'dg-warn dg-warn-danger' : 'dg-warn'}><i className="ph ph-warning-circle" aria-hidden="true" /><span>{children}</span></div>;
+}
+
+/** A quiet line with an icon (SPEC 5.10 "note line"). */
+export function DialogNote({ icon = 'ph ph-info', children }: { readonly icon?: string; readonly children: ReactNode }) {
+  return <p className="dg-note"><i className={icon} aria-hidden="true" /><span>{children}</span></p>;
 }
 
 export function DialogError({ children }: { readonly children: ReactNode }) {
@@ -77,12 +82,14 @@ export function DialogActions({ children }: { readonly children: ReactNode }) {
  */
 export type DialogButtonKind = 'primary' | 'danger' | 'secondary' | 'focus' | 'ghost';
 
-export function DialogButton({ kind, icon, kbd, children, ...rest }: {
+export function DialogButton({ kind, icon, kbd, left = false, children, ...rest }: {
   readonly kind: DialogButtonKind; readonly icon?: string; readonly kbd?: string; readonly children: ReactNode;
   readonly onClick?: () => void; readonly disabled?: boolean; readonly autoFocus?: boolean; readonly type?: 'button' | 'submit';
   readonly title?: string;
+  /** Sits at the left of the button row ("Archive instead", "Empty the bin…"). */
+  readonly left?: boolean;
 }) {
-  return <button type="button" {...rest} className={`dg-btn dg-btn-${kind}`}>{icon && <i className={icon} aria-hidden="true" />}{children}{kbd && <Keycap>{kbd}</Keycap>}</button>;
+  return <button type="button" {...rest} className={`dg-btn dg-btn-${kind}${left ? ' dg-btn-left' : ''}`}>{icon && <i className={icon} aria-hidden="true" />}{children}{kbd && <Keycap>{kbd}</Keycap>}</button>;
 }
 
 /** Copy → Copied (or "Couldn't copy" when the write failed) for one exact text. */

@@ -21,6 +21,7 @@ import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 import { Notices, notices } from '../../../src/ui/pages/notices';
+import { toasts } from '../../../src/ui/shell/toast';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { shortLabel } from '../../../src/ui/shared/short';
@@ -44,6 +45,8 @@ async function disposeTrees() {
   removals.clear();
   stores.splice(0).forEach(store => store.stop());
   notices.clear();
+  const toast = toasts.current();
+  if (toast) toasts.dismiss(toast.id);
 }
 afterEach(async () => {
   await disposeTrees();
@@ -835,7 +838,9 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
       expect(entered).toBe(true);
       expect(removal.pending()).toEqual([]);
       expect(disposed).toBe(false);
-      expect(notices.getSnapshot()[0]?.text).toContain('Telling demo.local');
+      // The toast stays up while it is told; its Undo ended with the window.
+      expect(toasts.current()).toMatchObject({ expired: true });
+      expect(toasts.current()?.text).toMatch(/^Removed “.*”.* is told in 5 s\.$/);
       await act(async () => { release(); await sending; await disposal; });
       expect(disposed).toBe(true);
       expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toHaveLength(1);
@@ -1460,50 +1465,54 @@ describe('session tree lifecycle', () => {
     fireEvent.click(prompt); fireEvent.click(prompt);
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
     await act(async () => { releasePresence(); await pause; await store.refresh(); });
-    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text === `Archived “${topic.name}”.`)).toBe(true));
+    // E33: archiving always asks, even a closed topic; the two early clicks open one dialog.
+    const dialog = within(await screen.findByRole('dialog', { name: `Archive the “${topic.name}” topic?` }));
+    expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    await waitFor(() => expect(toasts.current()?.text).toBe(`Archived “${topic.name}”. It’s in Archive with all its history.`));
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(1);
     expect(topic.archived_at).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
-  it('archives a closed topic at once from its prompt, with Undo and View archive', async () => {
+  it('archives a closed topic from its prompt after asking, leaving a strip and a toast that both Undo', async () => {
     const transport = new HistoryTransport();
     const { calls } = await mount({ transport, configure: value => {
       const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
-    render(<Notices />);
     const band = topicRow('Continued context');
     expect(within(band.parentElement!).getByText('Everything here is closed.')).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' })); });
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(await screen.findByText('Archived “Continued context”.')).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Session tree' }).textContent).not.toContain('Archived “Continued context”.');
-    vi.useFakeTimers();
-    await act(async () => { await vi.advanceTimersByTimeAsync(6500); });
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
-    vi.useRealTimers();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
-    await waitFor(() => expect(screen.queryByText('Archived “Continued context”.')).toBeNull());
-    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
-    bandMenu(topicRow('Continued context'), /^Archive topic/);
-    await act(async () => {});
-    fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
-    expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
+    fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive the “Continued context” topic?' }));
+    expect(transport.mutations).toEqual([]);
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    await waitFor(() => expect(toasts.current()?.text).toBe('Archived “Continued context”. It’s in Archive with all its history.'));
+    // The topic's place holds one strip; clicking it is Undo.
+    const strip = await screen.findByRole('treeitem', { name: /^Archived “Continued context” · \d+ items? · Undo$/ });
     expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
+    await act(async () => { fireEvent.click(within(strip).getByRole('button', { hidden: true })); });
+    await waitFor(() => expect(screen.queryByRole('treeitem', { name: /^Archived “Continued context”/ })).toBeNull());
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
+    expect(calls.archive).toBe(0);
+    // The toast's Undo restores too.
+    bandMenu(topicRow('Continued context'), /^Archive topic/);
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive topic' })); });
+    await waitFor(() => expect(toasts.current()?.undo).toBeTruthy());
+    await act(async () => { toasts.runUndo(toasts.current()!.id); });
+    await waitFor(() => expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore', 'topic_archive', 'topic_restore']));
+    await waitFor(() => expect(screen.queryByRole('treeitem', { name: /^Archived “Continued context”/ })).toBeNull());
   });
-  it('dismisses an archive outcome without replaying it on an unrelated tree update', async () => {
+  it('keeps an archive strip on an unrelated tree update without archiving again', async () => {
     const transport = new HistoryTransport();
     const view = await mount({ transport, configure: value => {
       const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
-    render(<Notices />);
     bandMenu(topicRow('Continued context'), /^Archive topic/);
-    await act(async () => {});
-    await screen.findByText('Archived “Continued context”.');
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive topic' })); });
+    await screen.findByRole('treeitem', { name: /^Archived “Continued context”/ });
     view.rerender({ detailOpen: true });
-    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.getByRole('treeitem', { name: /^Archived “Continued context”/ })).toBeTruthy();
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
   });
   it('archives a topic with open work after one confirmation, leaving its items and cancelling its unsent messages', async () => {
@@ -1516,11 +1525,12 @@ describe('session tree lifecycle', () => {
     expect(unsent.length).toBeGreaterThan(1);
     // Archive is offered on a topic with open items; it asks first and never refuses.
     bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
-    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
-    expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' }));
+    expect(dialog.getByText(/^It leaves the Map, and its questions leave Waiting on me\. .* you can restore it any time from Archive\. Nothing is sent to /)).toBeTruthy();
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
-    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text.includes(`${unsent.length} unsent messages were cancelled.`))).toBe(true));
+    await waitFor(() => expect(toasts.current()?.text).toBe('Archived “Delivery decisions”. It’s in Archive with all its history.'));
+    // The cancelled messages keep their words on the inputs ("Put back in reply box" / Copy).
     expect(unsent.every(id => session.inputs[id]!.state === 'cancelled')).toBe(true);
     expect(Object.values(session.items).map(item => item!.status)).toEqual(statuses);
   });
@@ -1529,12 +1539,13 @@ describe('session tree lifecycle', () => {
     transport.replies.push({ api_version: 1, ok: false,
       error: { code: 'invalid_argument', message: 'Refused archive.', hint: '', retryable: false, field_errors: [] } });
     bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
-    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' }));
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Something in that isn’t valid. Check it and try again.');
-    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }).contains(alert)).toBe(true);
+    expect(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' }).contains(alert)).toBe(true);
     expect(notices.getSnapshot()).toEqual([]);
+    expect(toasts.current()).toBeNull();
   });
   it('asks before archiving a topic from its band, and the e key no longer does', async () => {
     const transport = new HistoryTransport();
@@ -1543,7 +1554,7 @@ describe('session tree lifecycle', () => {
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'e' });
     expect(screen.queryByRole('dialog')).toBeNull();
     bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
-    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' })).toBeTruthy();
   });
   it('offers Continue elsewhere on an earlier topic and asks which other session takes it', async () => {
     const { navigation, rerender } = await mount();

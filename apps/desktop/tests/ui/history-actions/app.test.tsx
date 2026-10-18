@@ -54,10 +54,10 @@ it('opens guarded history in ordinary App and sends an approved Continue into th
   const topic = Object.values(source.topics)[0]!, controls = within(screen.getByRole('treeitem', { name: topic.name }));
   fireEvent.click(controls.getByRole('button', { name: /^More actions for/ }));
   fireEvent.click(screen.getByRole('menuitem', { name: /^Archive topic/ }));
-  // A topic with open items asks first; Archive is offered, never refused.
-  const confirm = within(screen.getByRole('dialog', { name: `Archive “${topic.name}”?` }));
+  // Archive always asks (E33); it is offered, never refused.
+  const confirm = within(screen.getByRole('dialog', { name: `Archive the “${topic.name}” topic?` }));
   expect((confirm.getByRole('button', { name: 'Archive topic' }) as HTMLButtonElement).disabled).toBe(false);
-  fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(confirm.getByRole('button', { name: /^Cancel/ }));
   expect(transport.mutations.filter(value => value.command.command === 'topic_archive')).toHaveLength(0);
   fireEvent.click(controls.getByRole('button', { name: 'Continue elsewhere' }));
   const picker = within(screen.getByRole('dialog', { name: `Continue “${topic.name}” in another session` }));

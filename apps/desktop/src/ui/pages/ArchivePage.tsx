@@ -7,12 +7,12 @@ import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
-import { RemoveDialog } from '../dialogs/RemoveDialog';
+import { RemoveSessionDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
+import type { WholeTarget, WordsRead } from '../remove/words';
 import { agentOf, archivedTopics, continuationLinks, routeOf, sessionKey, sessionRemoval, type ArchivedTopic } from './model';
 import { notices } from './notices';
 import { useHidden } from '../remove/queue';
-import { removeSubject } from '../remove/model';
 import { isViewConflict } from '../shared/conflictNotice';
 import { ownerName, sessionPhrase, sessionWhen } from '../shell/model';
 import { ArchiveList } from './ArchiveList';
@@ -36,12 +36,16 @@ export interface ArchivePageProps {
   /** A row's name: open that session (archived, to read). */
   readonly onOpenSession: (route: SessionRef) => void;
   readonly onRemove: RemoveHandler;
+  /** An archived topic's Remove: the app's own flow (E34), which quotes its words and checks its continuation family. */
+  readonly onAskRemove: (target: Extract<RemoveTarget, { kind: 'topic' }>) => void;
+  /** The words a session removal deletes, read fresh (E27). */
+  readonly onReadWords: (target: WholeTarget) => Promise<WordsRead>;
 }
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function ArchivePage({ navigation, actions, projects, sessions, snapshots, now, disabled, navigationDisabled = disabled, back, onOpenSession, onRemove }: ArchivePageProps) {
-  const [removing, setRemoving] = useState<{ subject: RemoveSubject; target: RemoveTarget } | null>(null);
+export function ArchivePage({ navigation, actions, projects, sessions, snapshots, now, disabled, navigationDisabled = disabled, back, onOpenSession, onRemove, onAskRemove, onReadWords }: ArchivePageProps) {
+  const [removing, setRemoving] = useState<{ subject: Extract<RemoveSubject, { kind: 'session' }>; target: Extract<RemoveTarget, { kind: 'session' }>; words: WordsRead | null } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** Rows restored in this visit, as they were, so they stay in place with their new words. */
   const [restored, setRestored] = useState<ReadonlyMap<string, ArchiveRowData>>(new Map());
@@ -102,22 +106,23 @@ export function ArchivePage({ navigation, actions, projects, sessions, snapshots
     if (row.kind === 'topic') {
       const topic = topics.find(value => `${sessionKey(value.source)}:${value.topic.id}` === row.id);
       if (!topic) return;
-      const target = { kind: 'topic', session: topic.source, topic_id: topic.topic.id } as const;
-      const session = snapshots.get(sessionKey(topic.source)), subject = session && removeSubject(session, target);
-      if (subject) setRemoving({ target, subject });
+      onAskRemove({ kind: 'topic', session: topic.source, topic_id: topic.topic.id });
       return;
     }
     const summary = summaryOf(row.id);
     if (!summary) return;
     const counts = sessionRemoval(snapshots.get(row.id) ?? null, continuationLinks([...snapshots.values()]).shared);
-    setRemoving({ target: { kind: 'session', session: routeOf(summary) },
+    const target = { kind: 'session', session: routeOf(summary) } as const;
+    setRemoving({ target, words: null,
       subject: { kind: 'session', agent: agentOf(summary), when: sessionWhen(Date.parse(summary.created_at), now), name: ownerName(summary), ...counts } });
+    // Core deletes every input of the session: its words are read fresh and quoted before Remove can run (E27).
+    void onReadWords(target).then(words => { setRemoving(current => current?.target === target ? { ...current, words } : current); });
   };
   const shownSessions = withRestored(sessionRows, 'session'), shownTopics = withRestored(topicRows, 'topic');
   return <>
     <ArchiveList back={back} sub={`${plural(shownSessions.length, 'session')} · ${plural(shownTopics.length, 'topic')}`}
       sessions={shownSessions} topics={shownTopics} onRestore={restore} onOpen={open} onRemove={remove} />
     {archive.dialogs}
-    {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
+    {removing && <RemoveSessionDialog subject={removing.subject} words={removing.words} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
   </>;
 }

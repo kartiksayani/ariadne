@@ -1,4 +1,7 @@
-import { AgentBin, binView } from '../remove/AgentBin';
+import { binView } from '../remove/AgentBin';
+import { BinDialog } from '../remove/BinDialog';
+import { archiveRequests } from '../remove/requests';
+import { toasts } from '../shell/toast';
 import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../selectors/removed';
 // The session tree column (handoff "Session tree"): session bar, status menu,
 // banners, topic bands and item rows, with the tree keyboard
@@ -17,7 +20,7 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
+import { closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, stripAnchorFor, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
 import { Keycap } from '../parts/parts';
@@ -51,8 +54,8 @@ import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
-import { useHidden } from '../remove/queue';
-import { visibleSession } from '../remove/model';
+import { RemovalContext, useHidden } from '../remove/queue';
+import { hiddenKey, placeStrips, visibleSession } from '../remove/model';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
@@ -197,24 +200,19 @@ export function TreeView(props: TreeViewProps) {
   const runAck = (itemId: string) => { const item = session?.items[itemId]; if (item) hold.ack(item); };
   const noticeCallbacks = useRef({ lifecycle, onShowArchive });
   noticeCallbacks.current = { lifecycle, onShowArchive };
+  // E33: an archive leaves one strip in the topic's place with Undo, until Undo or a session switch, and a toast whose Undo
+  // lasts as long as the strip does.
   const archivedNotice = lifecycle.archived;
-  const archiveNoticeId = JSON.stringify(['tree-archived', route.project_id, route.session_id, archivedNotice?.topicId]);
-  useEffect(() => () => noticeStore.dismiss(archiveNoticeId), [archiveNoticeId]);
   useEffect(() => {
-    if (!archivedNotice) { noticeStore.dismiss(archiveNoticeId); return; }
-    noticeStore.push({ id: archiveNoticeId, icon: 'ph ph-archive', dismissible: true,
-      text: `Archived “${archivedNotice.name}”.`
-        + (archivedNotice.waiting ? ` Its ${archivedNotice.waiting} waiting question${archivedNotice.waiting > 1 ? 's' : ''} left your panel.` : '')
-        + (archivedNotice.cancelled ? ` ${archivedNotice.cancelled} unsent message${archivedNotice.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''),
-      onDismiss: () => noticeCallbacks.current.lifecycle.dismiss(),
-      actions: [{ label: 'Undo', disabled: lifecycle.busy, run: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } },
-        { label: 'View archive', dismissOnRun: true, run: () => { noticeCallbacks.current.lifecycle.dismiss(); noticeCallbacks.current.onShowArchive(); } }] });
-  }, [archiveNoticeId, archivedNotice]);
-  useEffect(() => {
-    const notice = noticeStore.getSnapshot().find(value => value.id === archiveNoticeId);
-    if (notice && notice.actions?.[0]?.disabled !== lifecycle.busy) noticeStore.push({ ...notice,
-      actions: notice.actions?.map(action => action.label === 'Undo' ? { ...action, disabled: lifecycle.busy } : action) });
-  }, [archiveNoticeId, lifecycle.busy]);
+    if (!archivedNotice) return undefined;
+    const toast = toasts.show({ text: `Archived “${archivedNotice.name}”. It’s in Archive with all its history.`,
+      undo: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } });
+    return () => { toasts.expire(toast); };
+  }, [archivedNotice]);
+  // "Archive instead" in the Remove-topic dialog opens this session's Archive dialog for that topic.
+  useEffect(() => archiveRequests.subscribe(request => {
+    if (request.route.project_id === route.project_id && request.route.session_id === route.session_id) noticeCallbacks.current.lifecycle.archive(request.topicId);
+  }), [route.project_id, route.session_id]);
   const actionState = useSessionActions(actions);
   const controllerFailure = !actionState.pending && isViewConflict(actionState.error) ? plainFailure(actionState.error) : null;
   const lifecycleNotice = lifecycle.reviewing || lifecycle.error === controllerFailure ? null : lifecycle.error;
@@ -245,10 +243,21 @@ export function TreeView(props: TreeViewProps) {
   const scope = useMemo<FilterScope | null>(() => session && view ? { session, view, later, local: localChips.chips } : null,
     [session, view, later, localChips.chips]);
   const filter = useMemo(() => scope ? filterOf(scope) : null, [scope]);
+  // E29: a strip stands where removed (in the Undo window), agent-removed (in the bin) and just-archived rows were.
+  const removals = useContext(RemovalContext);
+  const places = useMemo(() => raw ? placeStrips(raw, route, hidden, archivedMode ? null : lifecycle.archived, archivedMode) : [],
+    [raw, route, hidden, lifecycle.archived, archivedMode]);
+  const onPlace = (row: StripRow) => {
+    const place = row.place;
+    if (!place) return;
+    if (place.reason === 'removed') removals?.undoKey(place.itemId ? hiddenKey.item(route, place.itemId) : hiddenKey.topic(route, place.topicId));
+    else if (place.reason === 'archived') { if (!lifecycle.busy) lifecycle.undo(); }
+    else binView.reveal(route, place.itemId ? place.topicId : null);
+  };
   const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
-    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
+    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places }) : null,
+  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
@@ -259,10 +268,12 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => hold.showing(drawnItems ? drawnItems.split('\n') : []), [hold, drawnItems]);
   const names = useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
   const sections = useMemo(() => {
-    const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
+    const groups: ({ topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] } | { topic: null; place: StripRow })[] = [];
     for (const row of rows) {
       if (row.kind === 'topic') groups.push({ topic: row, items: [] });
-      else groups.at(-1)?.items.push(row);
+      // A whole topic's strip stands in the topic's place, between topics.
+      else if (row.kind === 'strip' && row.place && !row.place.itemId) groups.push({ topic: null, place: row });
+      else { const last = groups.at(-1); if (last?.topic) last.items.push(row); }
     }
     return groups;
   }, [rows]);
@@ -890,13 +901,23 @@ export function TreeView(props: TreeViewProps) {
     const element = elements.current.get(before.key);
     if (element) return { element, offset: before.offset };
     const { rows: now, session: current } = latest.current, item = current?.items[before.key];
+    // A removed or archived row hands the hold to the strip now in its place (E29); at commit, to the nearest survivor.
+    const anchor = current?.id === before.sessionId ? stripAnchorFor(now, before.key) : null, strip = anchor ? elements.current.get(anchor) : undefined;
+    if (strip) return { element: strip, offset: before.offset };
     if (!current || current.id !== before.sessionId) return null;
+    // A strip that went on Undo hands the hold back to the row whose place it kept.
+    const gone = before.rows.find(row => row.key === before.key);
+    if (gone?.kind === 'strip' && gone.place) for (const key of gone.place.covers) {
+      const back = elements.current.get(key);
+      if (back) return { element: back, offset: before.offset };
+    }
     const shown = new Map(now.map(row => [row.key, row]));
     for (let key = item ? item.parent ?? item.topic_id : null; key; key = current.items[key]?.parent ?? current.items[key]?.topic_id ?? null) {
       const row = shown.get(key);
       if (row?.kind === 'topic' ? !row.expanded : row?.kind === 'item' && row.hasKids && !row.expanded) return null;
     }
-    const keys = before.rows.flatMap(row => row.kind === 'item' ? [row.key] : []), at = keys.indexOf(before.key);
+    // A strip that went at commit keeps its order here, so the hold goes to the survivor next to it.
+    const keys = before.rows.flatMap(row => row.kind === 'item' || row.key === before.key ? [row.key] : []), at = keys.indexOf(before.key);
     for (const key of [...keys.slice(at + 1), ...keys.slice(0, Math.max(at, 0)).reverse()]) {
       const survivor = elements.current.get(key);
       if (survivor) return { element: survivor, offset: before.offsets.get(key) ?? before.offset };
@@ -935,7 +956,8 @@ export function TreeView(props: TreeViewProps) {
     if (revealedAnchor.current) revealedAnchor.current = { ...revealedAnchor.current, scrollTop: box.scrollTop };
     // An owner scroll back up (or rows growing into it) gives the spacer's room back; what is on screen stays.
     trimSpacer(box);
-    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
+    // A strip in a removed or archived row's place (E29) can be the reading row too: Undo puts the row back where it is.
+    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item' || row.kind === 'strip' && !!row.place);
     const panelKey = latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
     panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < visibleBottom(box)
@@ -1141,7 +1163,7 @@ export function TreeView(props: TreeViewProps) {
   }, [route.project_id, route.session_id]);
   const edgeCallbacks = useRef({ updateEdge, holding });
   edgeCallbacks.current = { updateEdge, holding };
-  const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
+  const topicKeys = JSON.stringify(sections.map(section => section.topic ? section.topic.key : section.place.key));
   useEffect(() => {
     const box = scroller.current;
     if (!box || graph || typeof ResizeObserver === 'undefined') return;
@@ -1226,7 +1248,11 @@ export function TreeView(props: TreeViewProps) {
     const item = session?.items[id];
     return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
   }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
-    {sections.map(({ topic: row, items }) => {
+    {sections.map(section => {
+      if (!section.topic) return <div key={section.place.key} className="tree-topic-group tree-topic-place" role="presentation">
+        <Strip variant="row" row={section.place} focused={focusKey === section.place.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
+      </div>;
+      const { topic: row, items } = section;
       const eligible = !archivedMode && session ? ackAllItems(session, row.topic.id) : [];
       return <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)} slots={bandSlots(row)}
@@ -1235,7 +1261,7 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         />
       {items.map(row => row.kind === 'strip'
-        ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} />
+        ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
@@ -1247,7 +1273,6 @@ export function TreeView(props: TreeViewProps) {
         }}
         onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} />)}
-      {session && <AgentBin session={session} actions={actions} topicId={row.topic.id} onRemove={onRemove} />}
     </div>; })}
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 
@@ -1343,7 +1368,7 @@ export function TreeView(props: TreeViewProps) {
       }}>{body}</div>
       {backPill}
     </div>}
-    {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
+    {session && <BinDialog session={session} route={route} actions={actions} queue={removals} drafts={drafts} />}
     {lifecycle.dialog}
   </section></MapSearchContext.Provider>;
 }

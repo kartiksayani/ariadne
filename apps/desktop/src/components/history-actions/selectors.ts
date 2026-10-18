@@ -3,34 +3,7 @@ import type { SessionRef } from '../../generated/core';
 import type { Input, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
 
-const terminal = new Set(['decided', 'done', 'dropped', 'replaced']);
 const pending = new Set(['queued', 'in_flight', 'needs_attention']);
-
-/**
- * What archiving a topic touches (ADR-0090): its open items stay as they are; the owner's
- * messages on it that haven't reached the agent (queued or failed) and those being
- * delivered (in flight) are cancelled.
- */
-export interface ArchiveImpact { readonly open: number; readonly unsent: number; readonly delivering: number }
-export function archiveImpact(session: Immutable<Session>, topicId: string): ArchiveImpact {
-  const inputs = Object.values(session.inputs).filter(input => input?.target.topic_id === topicId && pending.has(input.state));
-  return { open: Object.values(session.items).filter(item => item?.topic_id === topicId && !itemRemoved(session, item.id) && !terminal.has(item.status)).length,
-    unsent: inputs.filter(input => input?.state !== 'in_flight').length,
-    delivering: inputs.filter(input => input?.state === 'in_flight').length };
-}
-/**
- * "3 open items stay as they are. 2 of your messages haven’t reached codex yet; archiving cancels them.
- * You can restore it any time." Sentences that don't apply are dropped; null when nothing applies.
- */
-export function archiveWarning({ open, unsent, delivering }: ArchiveImpact, agent: string): string | null {
-  const items = open ? `${open} open item${open === 1 ? ' stays as it is' : 's stay as they are'}.` : '';
-  const sent = unsent ? `${unsent} of your messages ${unsent === 1 ? 'hasn’t' : 'haven’t'} reached ${agent} yet` : '';
-  const being = !delivering ? '' : `${delivering}${sent ? '' : ' of your messages'} ${delivering === 1 ? 'is' : 'are'} being delivered${sent ? '' : ` to ${agent}`}`;
-  const messages = [sent, being].filter(Boolean).join(' and ');
-  if (!items && !messages) return null;
-  const them = unsent + delivering === 1 ? 'it' : 'them';
-  return [items, messages && `${messages}; archiving cancels ${them}.`, 'You can restore it any time.'].filter(Boolean).join(' ');
-}
 
 /** A saved domain result is handled by Close, rather than cancelled. */
 export function cancellableInput(input: Immutable<Input>): boolean {

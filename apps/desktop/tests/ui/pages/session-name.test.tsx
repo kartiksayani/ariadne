@@ -9,7 +9,7 @@ import { OpenSessions, type Immutable } from '../../../src/data/session-store';
 import type { MutationEnvelope } from '../../../src/generated/core';
 import type { Session, SessionSummary } from '../../../src/generated/domain/models';
 import { continueTargets } from '../../../src/ui/dialogs/ContinueTopicDialog';
-import { removeCopy } from '../../../src/ui/dialogs/remove';
+import { removeSessionCopy } from '../../../src/ui/dialogs/remove';
 import { removeLabel } from '../../../src/ui/remove/model';
 import { archivedTopics } from '../../../src/ui/pages/model';
 import { notices } from '../../../src/ui/pages/notices';
@@ -85,9 +85,9 @@ describe('every place that names a session shows the name', () => {
   });
   it('the Remove dialog names the session by its name', () => {
     const subject = { kind: 'session', agent: 'codex', when: 'Yesterday', name: 'Sync fixes', topics: 1, items: 2, shared: 0, waiting: 0 } as const;
-    expect(removeCopy(subject).title).toBe('Remove the “Sync fixes” session?');
+    expect(removeSessionCopy(subject, { pending: 0, any: false }).title).toBe('Remove the “Sync fixes” session?');
     expect(removeLabel(subject)).toBe('the “Sync fixes” session');
-    expect(removeCopy({ ...subject, name: null }).title).toBe('Remove the codex session from yesterday?');
+    expect(removeSessionCopy({ ...subject, name: null }, { pending: 0, any: false }).title).toBe('Remove the codex session from yesterday?');
   });
   it('the Archive page says which session a topic came from', () => {
     const session = structuredClone(demoSession(named));

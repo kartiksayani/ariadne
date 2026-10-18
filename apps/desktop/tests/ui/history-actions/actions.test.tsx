@@ -12,7 +12,8 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import type { SessionSummary } from '../../../src/generated/domain/models';
 import { CopiedProvenance } from '../../../src/components/history-actions/CopiedProvenance';
 import { shortLabel } from '../../../src/ui/shared/short';
-import { archiveImpact, archiveWarning, closeWarning } from '../../../src/components/history-actions/selectors';
+import { closeWarning } from '../../../src/components/history-actions/selectors';
+import type { SessionLifecycle } from '../../../src/ui/shared/useSessionLifecycle';
 import { notices } from '../../../src/ui/pages/notices';
 import { route, secondId } from '../app/transport';
 import { HistoryTransport } from './fixture';
@@ -38,6 +39,16 @@ async function setup(terminal = false) {
   return { transport, service, sessions, store, actions, targetActions, topic, props };
 }
 const dialog = () => within(screen.getByRole('dialog'));
+// E33: Archive always asks. These run the hook's confirmation the way its dialog does.
+async function confirmArchive(result: { readonly current: SessionLifecycle }) {
+  await waitFor(() => expect(result.current.reviewing).toBe(true));
+  act(() => { result.current.confirmArchive(); });
+}
+async function archiveNow(result: { readonly current: SessionLifecycle }, topicId: string) {
+  act(() => { result.current.archive(topicId); });
+  await confirmArchive(result);
+  await waitFor(() => expect(result.current.archived).not.toBeNull());
+}
 // The tree's session bar, topic actions and banners reduced to plain buttons over the same useLifecycle.
 function HistoryActions({ actions }: { actions: SessionActions }) {
   const lifecycle = useLifecycle(actions), session = useSession(actions.session).snapshot?.session;
@@ -100,10 +111,7 @@ describe('guarded history controls', () => {
   });
   it.each(['archive', 'restore', 'undo', 'rename', 'session_restore'] as const)('waits for a confirmed Pause refresh before %s and saves exactly once', async kind => {
     const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
-    if (kind === 'restore' || kind === 'undo') {
-      act(() => { result.current.archive(value.topic.id); });
-      await waitFor(() => expect(result.current.archived).not.toBeNull());
-    }
+    if (kind === 'restore' || kind === 'undo') await archiveNow(result, value.topic.id);
     if (kind === 'session_restore') {
       value.transport.source.archived_at = value.transport.source.updated_at;
       value.transport.source.state = 'closed';
@@ -135,6 +143,7 @@ describe('guarded history controls', () => {
     act(() => { void click(); void click(); });
     expect(value.transport.mutations).toHaveLength(before + 1);
     await act(async () => { release(); await pause; });
+    if (kind === 'archive') await confirmArchive(result);
     await waitFor(() => expect(value.transport.mutations).toHaveLength(before + 2));
     expect(value.transport.mutations.at(-1)!.command.command).toBe(kind === 'archive' ? 'topic_archive' : kind === 'rename' ? 'session_label_set' : kind === 'session_restore' ? 'session_restore' : 'topic_restore');
     await waitFor(() => expect(result.current.busy).toBe(false));
@@ -181,6 +190,7 @@ describe('guarded history controls', () => {
     });
     expect(result.current.error).toBe('Another change is being saved. Wait for it, then try again.');
     await act(async () => { release(); await value.store.refresh(); });
+    await confirmArchive(result);
     await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
     expect(value.transport.mutations[0]!.command.command).toBe('topic_archive');
   });
@@ -213,6 +223,8 @@ describe('guarded history controls', () => {
     expect(result.current.busy).toBe(true);
     expect(result.current.error).toBeNull();
     await act(async () => { release(); await value.store.refresh(); });
+    expect(result.current.reviewing).toBe(true);
+    await act(async () => { result.current.confirmArchive(); await vi.advanceTimersByTimeAsync(0); });
     expect(value.transport.mutations).toHaveLength(1);
     expect(value.transport.mutations[0]!.command.command).toBe('topic_archive');
     expect(result.current.error).toBeNull();
@@ -220,10 +232,7 @@ describe('guarded history controls', () => {
   });
   it.each(['archive', 'restore'] as const)('reports a disappeared topic after refreshing before %s', async kind => {
     const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
-    if (kind === 'restore') {
-      act(() => { result.current.archive(value.topic.id); });
-      await waitFor(() => expect(result.current.archived).not.toBeNull());
-    }
+    if (kind === 'restore') await archiveNow(result, value.topic.id);
     const before = value.transport.mutations.length;
     const { release } = await staleRefresh(value);
     act(() => { result.current[kind](value.topic.id); });
@@ -240,6 +249,7 @@ describe('guarded history controls', () => {
     expect(value.transport.mutations).toHaveLength(0);
     const revision = value.topic.revision;
     await act(async () => { release(); await value.store.refresh(); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Archive topic' })); });
     await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
     expect(value.transport.mutations[0]!.command).toMatchObject({ command: 'topic_archive', params: { expected_revision: revision } });
     expect(value.topic.archived_at).not.toBeNull();
@@ -284,13 +294,14 @@ describe('guarded history controls', () => {
   it('archives on the first confirmed click after a stale wait when the impact is unchanged', async () => {
     const value = await setup(); render(<HistoryActions {...value.props} />);
     fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` }));
-    const warning = dialog().getByText(/You can restore it any time/).textContent;
+    await waitFor(() => expect(screen.getByRole('dialog', { name: `Archive the “${value.topic.name}” topic?` })).toBeTruthy());
+    const warning = dialog().getByText(/waiting on you/).textContent;
     const { release } = await staleRefresh(value);
     const revision = value.topic.revision;
     fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
     fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
     expect(value.transport.mutations).toHaveLength(0);
-    expect(dialog().getByText(/You can restore it any time/).textContent).toBe(warning);
+    expect(dialog().getByText(/waiting on you/).textContent).toBe(warning);
     await act(async () => { release(); await value.store.refresh(); });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(value.transport.mutations).toHaveLength(1);
@@ -307,23 +318,23 @@ describe('guarded history controls', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe("Ariadne is still loading this session's latest changes. Try again."));
     expect(value.transport.mutations).toHaveLength(0);
   });
-  it('rechecks archive impact after refreshing and asks before archiving newly open items', async () => {
+  it('asks every time, even for a topic with nothing open, and names nothing waiting', async () => {
     const value = await setup(true); render(<HistoryActions {...value.props} />);
     const { release } = await staleRefresh(value);
     fireEvent.click(screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` }));
-    Object.values(value.transport.source.items).find(item => item?.topic_id === value.topic.id)!.status = 'open';
     await act(async () => { release(); await value.store.refresh(); });
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('dialog', { name: `Archive the “${value.topic.name}” topic?` })).toBeTruthy());
     expect(value.transport.mutations).toHaveLength(0);
-    expect(dialog().getByText(/1 open item stays as it is/)).toBeTruthy();
+    expect(dialog().queryByText(/waiting on you/)).toBeNull();
+    expect(dialog().getByText(/you can restore it any time from Archive\. Nothing is sent to /)).toBeTruthy();
   });
   it.each(['Archive topic', 'Close session'] as const)('lets Cancel abandon a stale %s confirmation without a late write', async kind => {
     const value = await setup(); render(<HistoryActions {...value.props} />);
     fireEvent.click(screen.getByRole('button', { name: kind === 'Archive topic' ? `Archive ${value.topic.name}` : kind }));
     const { release } = await staleRefresh(value);
     fireEvent.click(dialog().getByRole('button', { name: kind }));
-    expect((dialog().getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    expect((dialog().getByRole('button', { name: /^Cancel/ }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(dialog().getByRole('button', { name: /^Cancel/ }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(value.transport.mutations).toHaveLength(0);
     await act(async () => {});
@@ -352,20 +363,18 @@ describe('guarded history controls', () => {
     expect(value.transport.mutations).toHaveLength(0);
     vi.useRealTimers();
   });
-  it.each(['open items', 'unsent messages'] as const)('requires confirmation of updated %s warning after refreshing', async changed => {
+  it('requires confirmation of an updated waiting count after refreshing', async () => {
     const value = await setup(); render(<HistoryActions {...value.props} />);
     fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` }));
-    const warning = dialog().getByText(/You can restore it any time/).textContent;
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    const warning = dialog().queryByText(/waiting on you/)?.textContent ?? null;
+    expect(warning).not.toBeNull();
     const { release } = await staleRefresh(value);
     fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
-    if (changed === 'open items') {
-      Object.values(value.transport.source.items).find(item => item?.topic_id === value.topic.id && !['done', 'decided', 'dropped', 'replaced'].includes(item.status))!.status = 'done';
-    } else {
-      Object.values(value.transport.source.inputs).filter(input => input?.target.topic_id === value.topic.id).forEach(input => { input!.state = 'cancelled'; });
-    }
+    Object.values(value.transport.source.items).filter(item => item?.topic_id === value.topic.id && item.status === 'waiting_on_me').forEach(item => { item!.status = 'open'; });
     await act(async () => { release(); await value.store.refresh(); });
     expect(value.transport.mutations).toHaveLength(0);
-    expect(dialog().getByText(/You can restore it any time/).textContent).not.toBe(warning);
+    expect(dialog().queryByText(/waiting on you/)).toBeNull();
     expect(dialog().queryByRole('alert')).toBeNull();
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' })); });
     expect(value.transport.mutations).toHaveLength(1);
@@ -394,7 +403,7 @@ describe('guarded history controls', () => {
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: kind })); });
     expect(dialog().getByRole('alert').textContent).toContain('The change was not saved. Reload the session and try again.');
     expect(screen.getAllByRole('alert')).toHaveLength(1);
-    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(dialog().getByRole('button', { name: /^Cancel/ }));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(value.transport.mutations).toHaveLength(0);
   });
@@ -425,6 +434,7 @@ describe('guarded history controls', () => {
     const value = await setup(true); render(<HistoryActions {...value.props} />);
     if (kind === 'Restore' || kind === 'Undo') {
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` })); });
+      await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Archive topic' })); });
     } else if (kind === 'Reopen session') {
       fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
       await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Close session' })); });
@@ -450,11 +460,10 @@ describe('guarded history controls', () => {
     expect(open).toBeGreaterThan(0); expect(unsettled.length).toBeGreaterThan(0);
     const statuses = Object.fromEntries(Object.values(transport.source.items).map(item => [item!.id, item!.status]));
     fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
-    const confirm = screen.getByRole('dialog', { name: `Archive “${topic.name}”?` });
-    // The words say what stays and what is cancelled, never an internal id, and the confirm button is live.
-    const words = archiveWarning(archiveImpact(transport.source, topic.id), 'demo.local')!;
-    expect(words).toMatch(new RegExp(`^${open} open items? stays? as (it is|they are)\\. .+; archiving cancels (it|them)\\. You can restore it any time\\.$`));
-    expect(within(confirm).getByText(words)).toBeDefined();
+    const confirm = await screen.findByRole('dialog', { name: `Archive the “${topic.name}” topic?` });
+    // The words name the questions that go with it, never an internal id, and the confirm button is live.
+    const waiting = Object.values(transport.source.items).filter(item => item?.topic_id === topic.id && item.status === 'waiting_on_me').length;
+    expect(within(confirm).getByText(new RegExp(`^${waiting} questions? waiting on you go(es)? with it, unanswered`))).toBeDefined();
     expect(/[0-9a-f]{8}-[0-9a-f]{4}-/.test(confirm.textContent ?? '')).toBe(false);
     expect(transport.mutations).toHaveLength(0);
     await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Archive topic' })); });
@@ -471,20 +480,9 @@ describe('guarded history controls', () => {
   it('leaves the topic as it is when the archive confirmation is cancelled', async () => {
     const { props, topic, transport } = await setup(); render(<HistoryActions {...props} />);
     fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` }));
-    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(dialog().getByRole('button', { name: /^Cancel/ }));
     expect(screen.queryByRole('dialog')).toBeNull(); expect(transport.mutations).toHaveLength(0);
     expect(transport.source.topics[topic.id]!.archived_at).toBeNull();
-  });
-  it('words what archiving leaves as it is and what it cancels', () => {
-    expect(archiveWarning({ open: 3, unsent: 2, delivering: 0 }, 'codex'))
-      .toBe('3 open items stay as they are. 2 of your messages haven’t reached codex yet; archiving cancels them. You can restore it any time.');
-    expect(archiveWarning({ open: 1, unsent: 0, delivering: 0 }, 'codex')).toBe('1 open item stays as it is. You can restore it any time.');
-    expect(archiveWarning({ open: 0, unsent: 1, delivering: 0 }, 'codex')).toBe('1 of your messages hasn’t reached codex yet; archiving cancels it. You can restore it any time.');
-    expect(archiveWarning({ open: 0, unsent: 0, delivering: 1 }, 'codex')).toBe('1 of your messages is being delivered to codex; archiving cancels it. You can restore it any time.');
-    expect(archiveWarning({ open: 2, unsent: 1, delivering: 2 }, 'codex'))
-      .toBe('2 open items stay as they are. 1 of your messages hasn’t reached codex yet and 2 are being delivered; archiving cancels them. You can restore it any time.');
-    // Nothing stays open and nothing is cancelled: no confirmation at all.
-    expect(archiveWarning({ open: 0, unsent: 0, delivering: 0 }, 'codex')).toBeNull();
   });
   it('closes a sending session with open questions and unsent messages in one confirmation', async () => {
     const { props, transport } = await setup();
@@ -523,12 +521,16 @@ describe('guarded history controls', () => {
     const { props, topic, transport } = await setup(true), items = structuredClone(transport.source.items), messages = structuredClone(transport.source.messages);
     const binding = transport.source.bindings[transport.source.active_binding_id!]!; binding.dispatch_state = 'paused'; binding.owner_paused = true;
     await props.actions.session.refresh(); render(<HistoryActions {...props} />);
-    // Nothing blocks a terminal topic, so Archive runs at once and Undo restores it.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+    // Archive asks even for a terminal topic (E33); Undo restores it.
+    const archive = async () => {
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+      await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Archive topic' })); });
+    };
+    await archive();
     expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('status').textContent).toContain(`Archived ${topic.name}`);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
     expect(screen.queryByRole('status')).toBeNull(); expect(topic.archived_at).toBeNull();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+    await archive();
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Restore ${topic.name}` })); });
     for (const [button, confirm] of [['Close session', 'Close session'], ['Reopen session', 'Reopen session']]) {
@@ -558,10 +560,11 @@ describe('guarded history controls', () => {
     expect(transport.mutations).toEqual([request, request]);
     expect(screen.queryByRole('button', { name: 'Reconcile saved action' })).toBeNull();
   });
-  it('keeps an uncertain direct archive for an exact reconcile and reports a failed one', async () => {
+  it('keeps an uncertain archive for an exact reconcile and reports a failed one', async () => {
     const { props, topic, transport } = await setup(true); render(<HistoryActions {...props} />);
     transport.replies.push(new Error('Lost acknowledgement'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${topic.name}` })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Archive topic' })); });
     expect(screen.getByRole('alert').textContent).not.toBe(''); expect(screen.queryByRole('dialog')).toBeNull();
     const request = structuredClone(transport.mutations[0]); transport.replies.push(new Error('Still lost'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconcile saved action' })); });
