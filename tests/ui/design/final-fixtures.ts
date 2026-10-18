@@ -244,11 +244,16 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   const spec = finalSpec(state, variant), fixture = buildFixture(spec, worldData(state.app));
   // The board draws at the default text size (SPEC §1: --text-scale 0.8); the handoff harness pins 100%.
   fixture.transport.preferences.global.text_scale = 80;
+  // 12.7: the open session's file can't be read from the start, so there is no read at all; 12.8 loses it after a good read (`drive`).
+  fixture.transport.unreadable = fixture.route;
+  if (state.app.sessions?.connection === 'unreadable') fixture.transport.failReads = true;
   // First run has no projects, so nothing of the pages' world applies.
   if (state.app.chrome?.page && state.app.chrome.page !== 'first') pageWorld(fixture, state.app);
   const drafts = state.app.drafts ?? [];
   if (!fixture.route) return fixture;
   const route = fixture.route, session = fixture.transport.sessions.get(route.session_id)!;
+  // 12.2: no agent is connected to this session at all (the binding is gone), not merely stopped.
+  if (state.app.sessions?.connection === 'none') session.active_binding_id = null;
   // The board's agent is running and waiting for me: idle, so an answer sent now reads "Sent at", not queued behind a turn.
   fixture.transport.idle(route.session_id);
   mapWorld(fixture, state.app);
