@@ -990,7 +990,11 @@ export function TreeView(props: TreeViewProps) {
     // (A scroller with no layout yet, zero high, has no end to clamp to.)
     const clamped = !!box && !!before && box.clientHeight > 0 && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
     const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
-    remembering(box && before && back ? restoreHeld(box, before, back.offset, back.element) : undefined);
+    const restored = box && before && back ? restoreHeld(box, before, back.offset, back.element) : undefined;
+    // A clamp that left the held row in place needed no correction, yet the scroller moved: that move is the browser's, not
+    // the owner's, so a pinned reveal must not end on it (`remembering` ends the pin on any move the hold did not make).
+    if (box && clamped && back) ownScroll.current = box.scrollTop;
+    remembering(restored);
   };
   useLayoutEffect(holding);
   const hasRows = rows.length > 0 && !graph;

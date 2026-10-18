@@ -810,3 +810,64 @@ test('Show less at the end of a long result brings the row\'s top into view, and
   expect(await row(page, '1').evaluate(element => element.getBoundingClientRect().top), 'the row\'s top is in view').toBeGreaterThanOrEqual(await bandBottom(page) - 0.5);
   await readsHold(page, at, 'after Show less');
 }));
+
+// ---- A hold correction keeps a pinned row pinned. Every pin above is on the selected or the reading row, where losing the pin
+// goes unseen: the hold would pick the same row anyway. Here the pinned row is neither: item 10's Show more is pressed while the
+// band covers most of its first line, so the reading row is item 11, and 10 must keep its window place all the same. Each case then
+// makes the hold correct the Map by its own scroll (a row above changes height), steps the text size, and reads: the pin stays only
+// if the hold's own scroll was not taken for the owner's.
+const textScale = (page: Page, scale: number) => page.evaluate(value => document.documentElement.style.setProperty('--text-scale', String(value)), scale);
+/** A row's offset below the sticky band: a text-size step changes the band's height, and the pin is measured from its bottom. */
+const topOf = async (page: Page, id: string) => await row(page, id).evaluate(element => element.getBoundingClientRect().top) - await bandBottom(page);
+/** The pinned row keeps its offset below the band through the text-size steps, and four reads leave the Map where it is. */
+const pinHolds = async (page: Page, id: string, place: number, label: string, scales: readonly number[] = [1.2, 1]) => {
+  for (const scale of scales) {
+    await textScale(page, scale);
+    await settle(page);
+    await expect.poll(async () => Math.abs(await topOf(page, id) - place), `${label}: item ${id} keeps its place at text size ${scale}`).toBeLessThanOrEqual(3);
+  }
+  await settle(page);
+  await readsHold(page, await scrollTopOf(page), label);
+};
+
+test('a row above that grows is corrected by the hold, and the non-selected pinned row it holds stays pinned', async ({ page }) => {
+  await serve(async origin => {
+    await open(page, origin, 40);
+    await settle(page);
+    const less = row(page, '10').getByRole('button', { name: 'Show less' });
+    await press(row(page, '10').getByRole('button', { name: 'Show more' }));
+    await expect(less).toHaveCount(1);
+    await settle(page);
+    const place = await topOf(page, '10'), before = await scrollTopOf(page);
+    expect(await readingRow(page).then(value => value.key), 'item 11 is the reading row, not the pinned 10').toBe('11');
+    await agent(page, 'grow-above');
+    await expect(row(page, '9').locator('.tree-question')).toContainText('renamed');
+    await settle(page);
+    expect(await scrollTopOf(page), 'the hold corrected the Map with its own scroll').toBeGreaterThan(before);
+    expect(Math.abs(await topOf(page, '10') - place), 'item 10 keeps its place').toBeLessThanOrEqual(0.5);
+    await pinHolds(page, '10', place, 'after a row above grew');
+  });
+});
+
+test('a row above that shrinks at the bottom is clamped by the browser, and the non-selected pinned row stays pinned', ({ page }) => served(page, async () => {
+  await agent(page, 'grow:9');
+  await expect(row(page, '9')).toContainText('A longer title');
+  // Item 17 is open; the Map is at its end; Show less folds it and pins it there (it is neither selected nor the reading row).
+  await goTo(page, 'bottom');
+  await settle(page);
+  await press(row(page, '17').getByRole('button', { name: 'Show more' }));
+  await goTo(page, 'bottom');
+  await settle(page);
+  await press(row(page, '17').getByRole('button', { name: 'Show less' }));
+  await expect(row(page, '17').getByRole('button', { name: 'Show more' })).toHaveCount(1);
+  await settle(page);
+  const place = await topOf(page, '17'), before = await scrollTopOf(page);
+  expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'the Map is at its end').toBeLessThan(1);
+  await agent(page, 'shrink:9');
+  await expect(row(page, '9')).toContainText('Another item 9');
+  await settle(page);
+  expect(await scrollTopOf(page), 'the browser clamped the Map down').toBeLessThan(before);
+  expect(Math.abs(await topOf(page, '17') - place), 'item 17 keeps its place').toBeLessThanOrEqual(1);
+  // One step up only: back down at the Map's end the rows no longer reach the row's old place (pinned or not), a separate matter.
+  await pinHolds(page, '17', place, 'after a row above shrank at the bottom', [1.2]);
+}));

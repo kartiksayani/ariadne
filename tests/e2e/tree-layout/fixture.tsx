@@ -122,6 +122,8 @@ class TreeLayoutTransport extends AppTransport {
     const [verb, id] = change.split(':');
     if (verb === 'leave' && id) { items[id]!.status = 'in_progress'; ++items[id]!.revision; }
     if (verb === 'grow' && id) { items[id]!.question = 'A longer title the agent rewrote, wrapping over a few lines of the Map. '.repeat(4); ++items[id]!.revision; }
+    // The row's title is back to its one line: a row above the reading row shrinks.
+    if (verb === 'shrink' && id) { items[id]!.question = `Another item ${id}`; ++items[id]!.revision; }
     if (verb === 'remove' && id) { items[id]!.removed_at = session.updated_at; ++items[id]!.revision; }
     // The agent writes more on a row: its result runs six lines longer.
     if (verb === 'write' && id) { items[id]!.outcome += '\n' + Array.from({ length: 6 }, (_, index) => `More line ${index + 1}`).join('\n'); ++items[id]!.revision; }
