@@ -9,14 +9,16 @@ export interface NoticeAction {
   /** Opt in for actions that complete synchronously. Async producers dismiss on success themselves. */
   readonly dismissOnRun?: boolean;
 }
+export type NoticeTone = 'problem' | 'warn' | 'neutral';
 export interface Notice {
   readonly id: string;
   readonly icon: string;
   readonly iconColor?: string;
-  readonly tone?: 'info' | 'problem';
+  /** problem (danger ring), warn (warn ring) or neutral. Without it, a warning icon or a warn/danger colour reads as problem. */
+  readonly tone?: NoticeTone;
   readonly text: string;
   readonly actions?: readonly NoticeAction[];
-  /** The × button and Escape are available unless explicitly disabled. */
+  /** Accepted for existing producers; E20 gives every notice × and Escape, and W1 removes the field after the last merge. */
   readonly dismissible?: boolean;
   /** Runs on owner dismissal, before the notice goes. */
   readonly onDismiss?: () => void;
@@ -34,7 +36,7 @@ interface Entry {
   startedAt?: number;
   readonly pauses: Set<PauseSource>;
 }
-const toneOf = (notice: NoticeInput): 'info' | 'problem' => notice.tone ?? (/warn|danger/.test(notice.iconColor ?? '') || /warning/.test(notice.icon) ? 'problem' : 'info');
+const toneOf = (notice: NoticeInput): NoticeTone => notice.tone ?? (/warn|danger/.test(notice.iconColor ?? '') || /warning/.test(notice.icon) ? 'problem' : 'neutral');
 const sameContent = (left: Notice, right: NoticeInput) => left.text === right.text && left.icon === right.icon
   && left.iconColor === right.iconColor && toneOf(left) === toneOf(right)
   && (left.dismissible !== false) === (right.dismissible !== false)
@@ -65,7 +67,7 @@ export class NoticeStore {
     const entry = this.entries.get(id) ?? { notice: { ...input, id }, contentDedupe: input.id === undefined, visible: false, pauses: new Set<PauseSource>() };
     this.clearLifetime(entry);
     entry.notice = { ...input, id };
-    entry.remaining = toneOf(input) === 'info' && !input.actions?.length ? Math.max(0, timeoutMs ?? 6000) : undefined;
+    entry.remaining = toneOf(input) === 'neutral' && !input.actions?.length ? Math.max(0, timeoutMs ?? 6000) : undefined;
     this.entries.set(id, entry);
     if (entry.visible) this.startLifetime(entry);
     else if (entry.displayTimer === undefined) entry.displayTimer = setTimeout(() => {
@@ -150,8 +152,8 @@ function NoticeCard({ notice, store }: { readonly notice: Notice; readonly store
 /** One persistent app region. F6 enters it without stealing focus on arrival. */
 export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
   const list = useSyncExternalStore(store.subscribe, store.getVisibleSnapshot, store.getVisibleSnapshot);
-  const information = list.filter(notice => toneOf(notice) === 'info');
-  const problems = list.filter(notice => toneOf(notice) === 'problem');
+  const information = list.filter(notice => toneOf(notice) === 'neutral');
+  const problems = list.filter(notice => toneOf(notice) !== 'neutral');
   const region = useRef<HTMLDivElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
   const focusedNotice = useRef<string | null>(null);
