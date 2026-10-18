@@ -48,6 +48,20 @@ describe('item change box and history', () => {
     expect(within(box).queryByRole('button', { name: 'Mark seen' })).toBeNull();
     expect(box.querySelector('.change-rows')!.textContent).toBe(before);
   });
+  it('shows the latest change as "Changed at" for an item already seen when Details opens, without Mark seen', async () => {
+    const value = changesFixture(), item = value.session.items['updated-0']!;
+    item.revision = 3; item.changes!.unshift(value.record({ revision: 2, at: '2026-10-09T10:00:00.000Z', reason: 'The earlier change.', before: { note: 'Oldest note.' } }));
+    item.changes![1] = value.record({ revision: 3 });
+    const seen = { ...value.seen, items: [{ item_id: item.id, revision: 3 }] };
+    const { service, store } = await setup(value);
+    render(<ItemChanges service={service} store={store} session={value.session} item={item} seen={seen} onOpenAnswer={vi.fn()} onMarkSeen={vi.fn()} />);
+    const box = screen.getByRole('region', { name: 'What changed' });
+    expect(box.getAttribute('data-state')).toBe('seen');
+    expect(within(box).getByText(`Changed at ${timeText(value.record().at)}`)).toBeTruthy();
+    expect(within(box).queryByRole('button', { name: 'Mark seen' })).toBeNull();
+    expect(within(box).getByText('The owner chose a smaller change.')).toBeTruthy();
+    expect(within(box).getByRole('button', { name: 'Older history (1)' })).toBeTruthy();
+  });
   it('offers no Mark seen without a handler', async () => {
     const value = changesFixture(), item = value.session.items['updated-0']!;
     const { service, store } = await setup(value);

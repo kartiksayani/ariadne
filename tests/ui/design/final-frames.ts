@@ -25,6 +25,8 @@ export type Step =
   | { readonly click: string }
   | { readonly hover: string }
   | { readonly type: string }
+  /** Time passing in the app: milliseconds waited, for what a dwell does (the 1 s that clears a marker, 9.10). */
+  | { readonly wait: number }
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
   | { readonly scroll: 'top' };
@@ -287,6 +289,16 @@ const mapStateList: readonly FinalState[] = [
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
   { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: false, title: 'On Graph cards: the diamond alone, same shapes',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
+  // alpha.21 W3 (Details body): the markers in the dock and in Details. Pending until W2's head is merged: the body starts where the head ends, so
+  // the regions (the badge row, the change box, the actions row) are set on the integrated frame, not on this branch's.
+  { id: '9.7', part: 'Markers', sid: 'm-dock', owner: 'changes', pending: true, title: 'In the answer dock: a question that changed since I last saw it',
+    app: { view: { selected: null, dock: 'open', dockQuestion: 0 }, map: marked('base') } },
+  { id: '9.8', part: 'Markers', sid: 'm-details', owner: 'changes', pending: true, title: 'In Details: the marker beside the status, and what changed',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
+  { id: '9.10', part: 'Markers', sid: 'm-seen', owner: 'changes', pending: true, title: 'Clearing: a second in Details clears it and shows Seen',
+    app: { view: { selected: 'a6', details: 'open', dock: 'line' }, map: marked('base'), act: [{ wait: 1500 }] } },
+  { id: '9.11', part: 'Markers', sid: 'm-reword', owner: 'changes', pending: true, title: 'A rewording alone: no marker anywhere, noted in the item’s history',
+    app: { view: { selected: 'a8', details: 'open', dock: 'line' }, map: marked('base') } },
   { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: false, title: 'The topic’s … menu',
     // The board's R4 file draws this menu over the same marked Map as 5.1.
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'More actions for' }] } }
@@ -422,6 +434,7 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), // The pill's inside only: its rounded corners show the Map's rows behind it, which differ by D1 (row padding) and the scroll that follows.
     ...box('Back to selected pill', [336, 718, 208, 26], [176, 568, 208, 26], MAP),
     wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '9.7': [], '9.8': [], '9.10': [], '9.11': [],
   '9.2': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
   // The "…" menu, from its first row ("Reply to topic"); the band is compared left of the menu.
   '10.12': [...box('topic band', [0, 40, 1280, 38], [0, 40, 586, 62], MAP), ...box('menu: Reply to topic', [970, 78, 300, 58], [590, 78, 300, 58], TEXT),

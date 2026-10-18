@@ -545,6 +545,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
     : model.chat.some(entry => entry.pending) ? model.delivery?.text : null;
   const relatedLabels = peekNames(session);
+  // The change box sits under the "why"; with no box, the bare history closes the body, after the conversation (SPEC 5.3, 9.11).
+  const changes = (part: 'box' | 'history') => <ItemChanges service={drafts.service} store={store} session={session} item={item} seen={seen}
+    onOpenAnswer={onOpenAnswer ?? ((id) => onOpenItem(id))} onMarkSeen={onMarkSeen} part={part} />;
   return <ItemRefSession.Provider value={{ project_id: session.project_id, session_id: session.id }}><ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
@@ -579,7 +582,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     </section>}
 
     {model.outcome && <section className="detail-section detail-outcome" aria-label="Current outcome">
-      <div className="detail-label" style={{ color: model.outcome.color }}>{model.outcome.label}</div>
+      {/* The label is for a screen reader; the board draws the outcome with an elbow icon in the status colour (SPEC 5.3 item 3). */}
+      <div className="detail-label detail-outcome-label" style={{ color: model.outcome.color }}>{model.outcome.label}</div>
+      <i className="ph ph-arrow-elbow-down-right detail-outcome-icon" aria-hidden="true" style={{ color: model.outcome.color }} />
       <Markdown className="detail-outcome-text" text={model.outcome.text} />
     </section>}
 
@@ -587,8 +592,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
 
     {model.why && <section className="detail-section detail-why">{sectionLabel('Why')}<Markdown className="detail-why-text" text={model.why} /></section>}
 
-    <ItemChanges service={drafts.service} store={store} session={session} item={item} seen={seen}
-      onOpenAnswer={onOpenAnswer ?? ((id) => onOpenItem(id))} onMarkSeen={onMarkSeen} />
+    {changes('box')}
 
     {/* The actions (SPEC 5.3 item 5): the primary one, then the hover bar's icons. The pinned region below holds only the composer. */}
     <ActionsRow actions={actionList} statusLabel={later ? 'Later' : STATUS[model.status].label} closed={closedStatus.has(model.status)} hint={dockHint ?? model.open?.hint} pressed={mode === 'drop' ? 'drop' : mode ? 'followUp' : null}
@@ -645,6 +649,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
         {onOpenConversation && <button type="button" className="btn btn-ghost btn-icon" aria-label="Open the conversation in a bigger view"
           title="Open the conversation in a bigger view" onClick={onOpenConversation}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M14 3h7v7M21 3l-8 8M10 21H3v-7M3 21l8-8" /></svg></button>}
       </div>} />}
+
+    {changes('history')}
     </div>
 
     {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>

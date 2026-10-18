@@ -90,27 +90,37 @@ function ChangeEventExtras({ session, item, record, onOpenAnswer }: { readonly s
 }
 
 /**
- * The change box (SPEC 6.7) and the history. The box shows while the item has a change since the owner last looked, as it was
- * when Details opened: the 1 s dwell or Mark seen changes only its head ("Changed since you looked · 20:51" becomes "Changed
- * at 20:51"), so the explanation stays for this visit. With no box but a history, "HISTORY N events" lists it.
+ * The change box (SPEC 6.7) and the history. The box shows for an item with a recorded change: the changes unseen when Details
+ * opened, or the latest one for an item already seen. The 1 s dwell or Mark seen changes only its head ("Changed since you looked
+ * · 20:51" becomes "Changed at 20:51"), so the explanation stays for this visit. With no box but a history, "HISTORY N events" lists it.
+ * `part` splits the two for the body's layout (SPEC 5.3, 9.11): the box sits under the "why", the bare history after the conversation.
  */
-export function ItemChanges({ service, store, session, item, seen, onOpenAnswer, onMarkSeen }: { readonly service: RendererService; readonly store: SessionStore;
+export function ItemChanges({ service, store, session, item, seen, onOpenAnswer, onMarkSeen, part = 'both' }: { readonly service: RendererService; readonly store: SessionStore;
   readonly session: Immutable<Session>; readonly item: Immutable<Item>; readonly seen: SeenState; readonly onOpenAnswer: (itemId: string, messageId: string) => void;
   /** Saves "seen" for this item at its current revision. Without it the box has no button. */
-  readonly onMarkSeen?: (itemId: string, revision: number) => void }) {
+  readonly onMarkSeen?: (itemId: string, revision: number) => void;
+  /** Which of the two to draw: `box` is nothing when there is no box, `history` is nothing when there is one. */
+  readonly part?: 'both' | 'box' | 'history' }) {
   const [openingSeen] = useState(seen), [asked, setAsked] = useState<boolean | null>(null);
   const readRevision = openingSeen?.items.find(value => value.item_id === item.id)?.revision ?? 0;
-  const currentRecords = useMemo(() => (item.changes ?? []).filter(record => !record.wording_only && record.revision > readRevision
-    && Date.parse(record.at) > Date.parse(openingSeen?.since ?? '')), [item, openingSeen, readRevision]);
-  const showBox = isChangedSinceRead(item, openingSeen) && currentRecords.length > 0;
+  const meaningful = useMemo(() => (item.changes ?? []).filter(record => !record.wording_only), [item]);
+  // What the box explains: the changes the owner had not seen when Details opened; for an item already seen, its latest change
+  // ("Changed at 20:51", SPEC 6.7). A rewording alone is never headlined.
+  const currentRecords = useMemo(() => {
+    const unseenAtOpen = meaningful.filter(record => record.revision > readRevision && Date.parse(record.at) > Date.parse(openingSeen?.since ?? ''));
+    return unseenAtOpen.length && isChangedSinceRead(item, openingSeen) ? unseenAtOpen : meaningful.slice(-1);
+  }, [item, meaningful, openingSeen, readRevision]);
+  const showBox = currentRecords.length > 0;
   // The box's "Older history" starts closed; with no box the HISTORY list is the content, so it starts open (SPEC 5.3 item 9, 9.11).
   const historyOpen = asked ?? !showBox;
-  const history = useHistory(service, store, historyOpen ? item.id : '', loadItemChanges);
+  const drawn = part === 'both' || (part === 'box') === showBox;
+  const history = useHistory(service, store, historyOpen && drawn ? item.id : '', loadItemChanges);
   const unseen = isChangedSinceRead(item, seen);
   const known = history.data?.items ?? item.changes ?? [];
   const older = (showBox ? known.filter(record => !currentRecords.some(current => current.revision === record.revision)) : known).slice().reverse();
   const toggle = () => setAsked(!historyOpen);
   const timeline = historyOpen && <Timeline session={session} item={item} records={older} loading={history.loading} error={history.error} retry={history.retry} onOpenAnswer={onOpenAnswer} />;
+  if (!drawn) return null;
   const at = clockTime(currentRecords.at(-1)?.at ?? item.updated_at ?? Date.now());
   if (showBox) return <section className="change-box" data-state={unseen ? 'unseen' : 'seen'} data-testid="change-box" aria-label="What changed">
     <div className="change-box-head">

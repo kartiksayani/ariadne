@@ -604,7 +604,7 @@ function Workspace({ application }: { application: Application }) {
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
       dockContent={store && route ? <AnswerDock store={store} waiting={application.waiting} drafts={application.drafts} answering={answering}
-        onAgentNotRunning={onAgentNotRunning} onOpenItem={openFromDock}
+        onAgentNotRunning={onAgentNotRunning} onOpenItem={openFromDock} seen={readingSeen}
         onSeen={(itemId, revision) => navigation.markItemSeen(route, itemId, revision)} /> : undefined}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
       detailAsked={detailAsked} onDetailsFolded={setDetailsFolded}

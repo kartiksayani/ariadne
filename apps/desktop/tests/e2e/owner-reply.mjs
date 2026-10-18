@@ -26,7 +26,7 @@ export const folded = value => value.replace(/\s+/g, ' ').trim();
 export async function openOwnerReply(afterSaved = false) {
   const docked = await browser.$(dockedEditor);
   // A waiting reply closes when saved; its Add a reply action opens the next queued input.
-  if (await browser.$('.item-detail[data-status="waiting"] [aria-label="Reply"] [aria-label="Item actions"] button').isExisting()) {
+  if (await browser.$('.item-detail[data-status="waiting"] [aria-label="Item actions"] button[aria-label="Add a reply"]').isExisting()) {
     await openFollowUp(afterSaved);
     return;
   }
@@ -52,8 +52,8 @@ export async function openOwnerReply(afterSaved = false) {
     }
   }
   if (!(await browser.$(dockedEditor).isExisting())) {
-    // Titles omit the visible key hint and cover finished items' Follow up as well as replies/notes.
-    const reply = await browser.$('.item-detail [aria-label="Item actions"] button[title="Reply in your own words"], .item-detail [aria-label="Item actions"] button[title="Add something while the agent works"], .item-detail [aria-label="Item actions"] button[title="Comment, or ask for more"]');
+    // The actions row's icon buttons are named by their label: Reply, Add a note, and Follow up on a finished item.
+    const reply = await browser.$('.item-detail [aria-label="Item actions"] button[aria-label="Reply"], .item-detail [aria-label="Item actions"] button[aria-label="Add a note"], .item-detail [aria-label="Item actions"] button[aria-label="Follow up"]');
     if (!(await reply.isExisting())) throw new Error('The item shows no Reply box and offers no Reply button (closed, archived or waiting on another input?)');
     await click(reply);
   }
@@ -84,10 +84,9 @@ export async function openFollowUp(afterSaved = false) {
     } else await wait(async () => !(await browser.$('.item-detail [data-owner-input] .detail-box').isExisting()), 'The sent reply box did not close');
   }
   if (!(await browser.$(dockedEditor).isExisting())) {
-    // This section holds the one action; its key hint ("r") follows the label.
-    const addReply = await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button');
+    // The actions row offers "Add a reply" on a waiting item that already has a reply in flight or a sealed answer.
+    const addReply = await browser.$('.item-detail [aria-label="Item actions"] button[aria-label="Add a reply"]');
     await addReply.waitForDisplayed();
-    if (!(await addReply.getText()).includes('Add a reply')) throw new Error('The reply section did not offer "Add a reply"');
     await click(addReply);
   }
 }

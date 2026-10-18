@@ -405,10 +405,35 @@
 }
 
 /* — outcome, note, why — */
+.detail-outcome {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0 6px;
+}
+
+/* The outcome's label is read, not drawn: the elbow icon in the status colour stands in for it. */
+.detail-outcome-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.detail-outcome-icon {
+  grid-column: 1;
+  padding-top: 3px;
+  font-size: calc(14px * var(--text-scale));
+}
+
 .detail-outcome-text {
+  grid-column: 2;
   margin: 0;
-  font-size: calc(15px * var(--text-scale));
-  line-height: 1.6;
+  font-size: calc(14px * var(--text-scale));
+  line-height: 1.5;
   text-wrap: pretty;
 }
 
@@ -426,10 +451,37 @@
 
 .detail-why-text {
   margin: 0;
-  font-size: calc(14px * var(--text-scale));
-  line-height: 1.6;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.5;
   text-wrap: pretty;
-  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+/* "Why" runs into its text: the word in the label colour, then the reason at 66%, wrapping under the word (SPEC 5.3 item 3). */
+.detail-why {
+  display: block;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.5;
+}
+
+/* The board sets the reason 7px closer to the outcome than the body's 14px rhythm. */
+.detail-outcome + .detail-why {
+  margin-top: -7px;
+}
+
+.detail-why > .detail-label {
+  display: inline;
+  margin-right: 6px;
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--a-label);
+}
+
+.detail-why > .detail-why-text,
+.detail-why > .detail-why-text > :where(p) {
+  display: inline;
 }
 
 .detail-prev {
@@ -841,6 +893,16 @@
   font-weight: 500;
 }
 
+/* Ack and Bring it up are filled (SPEC 5.3 item 5), as Ack all is on the band. */
+.detail-primary.btn-primary {
+  color: var(--a-bg);
+  background: var(--a-acc-text);
+}
+
+.detail-primary.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--a-acc-text) 88%, var(--a-bg));
+}
+
 .detail-icon-action {
   display: inline-grid;
   place-items: center;
@@ -896,4 +958,17 @@
   font-weight: 500;
   text-decoration: underline dotted var(--a-edge);
   text-underline-offset: 3px;
+}
+
+/* A related row is a flat line in the board, not the peek chip's box: the chip class loads later, so these name it too. */
+.detail-related-item.name-chip {
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.detail-related-item.name-chip:hover {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
 }
