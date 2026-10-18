@@ -52,6 +52,8 @@ import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
 import { RemoveDialog } from './ui/dialogs/RemoveDialog';
 import { notices } from './ui/pages/notices';
+import { toasts } from './ui/shell/toast';
+import { shortLabel } from './ui/shared/short';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { themeToggle } from './ui/shell/model';
@@ -505,16 +507,23 @@ function Workspace({ application }: { application: Application }) {
     if (!preferences) return false;
     void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
   };
-  const toggleHidden = (target: ItemRoute) => {
+  // `want` sets the state instead of flipping it: Hide's Undo must not hide the item again after the owner unhid it some other way.
+  const toggleHidden = (target: ItemRoute, want?: boolean) => {
     const current = navigation.getSnapshot();
     if (!current.preferences || current.writing || current.pendingOperationId !== null) return false;
     const session = navigation.opened.open(target).getSnapshot().snapshot?.session ?? application.waiting.sessionState(target)?.snapshot?.session;
     const saved = current.preferences.sessions.find(value => routeKey(value.session) === routeKey(target));
     const isHidden = !!session && hiddenItems(session, new Set(saved?.hidden_item_ids ?? [])).has(target.item_id);
+    if (want !== undefined && want === isHidden) return true;
     setDismissedReveal(currentReveal);
+    const label = session && session.items[target.item_id] ? shortLabel(session.items[target.item_id]!) : 'the item';
     void navigation.setHidden(target, !isHidden, current.preferences.revision).then(saved => {
       if (!saved) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
         text: 'The hidden items preference could not be saved. Try again.' });
+      else if (!isHidden) toasts.show({ text: `Hid “${label}”.`, undo: () => {
+        if (!toggleHidden(target, false)) notices.push({ id: 'hide-undo-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)',
+          text: `“${label}” could not be unhidden just now. Try Unhide again in a moment.` });
+      } });
     });
     return true;
   };
