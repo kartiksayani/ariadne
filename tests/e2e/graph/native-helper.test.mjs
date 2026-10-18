@@ -14,10 +14,11 @@ test('visible ids follow the saved expansion', () => {
   assert.deepEqual(visibleIds(session, []).sort(), ['10', '11']);
 });
 
-test('native graph assertions reject lost selection, duplicates, wrong membership, truncated titles and broken ancestry', () => {
-  const node = (id, top) => ({ id, top, left: 0, width: 190, height: 66, title: session.items[id].question, selected: id === '10.80', below: null });
-  const sample = { width: 800, height: 420, focused: '10.80', counts: ['2 open'], nodes: [node('10', 0), node('10.80', 177), node('11', 300)],
-    edges: [{ id: 'topic:10', path: 'M2 33 C24 33 24 33 46 33' }, { id: 'parent:10:10.80', path: 'M236 33 C249 33 249 210 262 210' }] };
+test('native graph assertions reject lost selection, duplicates, wrong membership, truncated titles, broken ancestry and the old geometry', () => {
+  const node = (id, top) => ({ id, top, left: 0, width: 150, height: 40, title: session.items[id].question, selected: id === '10.80', below: null, match: false });
+  const sample = { width: 800, height: 420, focused: '10.80', titles: ['Native topic'], nodes: [node('10', 0), node('10.80', 190), node('11', 300)],
+    // A first child's whole elbow, and a later sibling's stretch of the shared vertical.
+    edges: [{ id: 'topic:10', path: 'M16 70 H36' }, { id: 'parent:10:10.80', path: 'M186 70 H199 V210 H212' }, { id: 'parent:11:11.1', path: 'M199 320 V360 H212' }] };
   const expected = ['10', '10.80', '11'];
   assertGraph(sample, session, '10.80', expected);
   assertCentered(sample, '10.80');
@@ -29,4 +30,8 @@ test('native graph assertions reject lost selection, duplicates, wrong membershi
   assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.map(value => ({ ...value, title: 'Truncated…' })) }, session, '10.80', expected), /complete stored sentence/);
   assert.throws(() => assertGraph({ ...sample, edges: [{ id: 'parent:11:10.80', path: sample.edges[1].path }] }, session, '10.80', expected), /canonical ancestry/);
   assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.map(value => ({ ...value, selected: true })) }, session, '10.80', expected), /marked selected/);
+  // The pre-alpha.20 Bezier edges and 190x66 cards, and a node off the fitted column, are rejected.
+  assert.throws(() => assertGraph({ ...sample, edges: [{ id: 'parent:10:10.80', path: 'M236 33 C249 33 249 210 262 210' }] }, session, '10.80', expected), /orthogonal/);
+  assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.map(value => ({ ...value, width: 190, height: 66 })) }, session, '10.80', expected), /fitted column|Node height/);
+  assert.throws(() => assertGraph({ ...sample, nodes: sample.nodes.map((value, index) => ({ ...value, width: index ? 150 : 160 })) }, session, '10.80', expected), /shares the fitted width/);
 });

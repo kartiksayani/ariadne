@@ -58,8 +58,8 @@ function setup(strict = false) {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 // These composed journeys include independent seen saves under default file parallelism.
-describe('ordinary desktop composition', { timeout: 10_000 }, () => {
-  it('clears the New tag and Since card only after a full peek dwell, leaving an early close unread', async () => {
+describe('ordinary desktop composition', () => {
+  it('keeps the New tag and Since card through a long peek: peeking never marks an item seen', async () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, target = session.items['1.1']!;
     const baseline = new Date(Date.now() - 60_000).toISOString();
     target.created_at = new Date(Date.now() - 30_000).toISOString(); target.changes = []; target.short = 'New receipt branch';
@@ -69,25 +69,23 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     const detail = await screen.findByRole('article', { name: `Detail of ${session.items['1']!.question}` });
     const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1.1"]')!;
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
-    const since = screen.getAllByRole('region', { name: 'Since you were here' }).find(region => within(region).queryByRole('button', { name: /^Since you were here/ }))!;
-    fireEvent.click(within(since).getByRole('button', { name: /^Since you were here/ }));
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    const since = screen.getByRole('dialog', { name: 'What changed' });
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     const chip = within(detail).getByRole('button', { name: `${target.question} · Open` });
-    vi.useFakeTimers(); fireEvent.click(chip); act(() => vi.advanceTimersByTime(999));
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
-    fireEvent.keyDown(document, { key: 'Escape' }); act(() => vi.advanceTimersByTime(10));
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    // Past the 1 s that Details and the dock wait before marking seen.
+    vi.useFakeTimers(); fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).toBeTruthy();
+    // The card says it is New, and the Map, the Since card and the saved reads all still do.
+    expect(within(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).getByTestId('change-marker').getAttribute('aria-label')).toBe('New');
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
-    fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(within(row()).queryByRole('img', { name: 'New to you' })).toBeNull();
-    // With nothing left to read the Since box is gone (it is not just empty): a check in the brief says so.
-    expect(since.isConnected).toBe(false);
-    expect(screen.queryByRole('button', { name: 'New receipt branch' })).toBeNull();
-    expect(screen.getAllByRole('img', { name: 'All caught up' }).length).toBeGreaterThan(0);
+    fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
+    expect(since.isConnected).toBe(true);
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(transport.preferences.seen![0].items).toContainEqual({ item_id: target.id, revision: target.revision });
+    expect(transport.preferences.seen![0].items.some(item => item.item_id === target.id)).toBe(false);
   });
 
   it('keeps owner reply item-reference words plain inside the composed detail peek scope', async () => {
@@ -232,7 +230,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
       expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
     });
-    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
+    await waitFor(() => expect(entered).toBe(true));
     fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ }));
     const goTo = await screen.findByRole('button', { name: 'Go to' });
     await waitFor(() => expect(goTo.hasAttribute('disabled')).toBe(false));
@@ -244,7 +242,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => {
       expect(transport.preferences.seen?.some(seen => seen.session.session_id === route.session_id
         && seen.items.some(item => item.item_id === '1'))).toBe(true);
-    }, { timeout: 3000 });
+    });
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
     expect((await searchBox()).hasAttribute('disabled')).toBe(false);
     expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeTruthy();
@@ -521,7 +519,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('missing needle'));
     expect(transport.preferences.sessions[0].filters.owners).toEqual([{ kind: 'me' }]);
     expect(mutations(transport, 'preferences_patch')).toHaveLength(count + 1);
-    expect(await screen.findByText(/^Nothing matches “missing/)).toBeTruthy();
+    // The search finds in place: the top bar counts it and the Map keeps every row (SPEC §4).
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches'));
+    expect(screen.getByRole('tree', { name: 'Session items' })).toBeTruthy();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
   it('clears filters with Esc only when no detail is open, keeping the archive view', async () => {
@@ -579,7 +579,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     // Asserted last (see below), so a box that stays editable does not hide the checks on what is saved.
     const lockedWhileSaving = search.disabled;
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
-    expect(screen.getByText(/^Nothing matches “missing/)).toBeTruthy();
+    // The unsaved search already finds in place: the top bar counts it before the write.
+    expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches');
     expect(transport.preferences.sessions[0].filters.search).toBe(before.filters.search);
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
     if (completion === 'reconciled') transport.failNext = 'preferences_patch';
@@ -1101,7 +1102,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { await Promise.resolve(); });
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
     expect(screen.getByRole('region', { name: 'Answer dock' }).getAttribute('data-open')).toBe(open);
-    expect(screen.queryByRole('button', { name: /Waiting on me/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Waiting on me/ })).toBeNull();
   });
 
   it('leaves removed chrome shortcuts unbound, including while typing', async () => {

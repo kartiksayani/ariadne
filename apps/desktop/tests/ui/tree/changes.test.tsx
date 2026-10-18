@@ -73,17 +73,17 @@ describe('Map change markers and next unseen navigation', () => {
 
   it('renders accessible attention markers and reacts immediately to shared reads and catch-up Undo', async () => {
     const view = await mount();
-    expect(within(row('1.1')).getByRole('img', { name: 'New to you' }).textContent).toBe('New');
-    expect(within(row('2')).getByRole('img', { name: 'Changed since you read it' }).textContent).toBe('');
-    expect(row('3').querySelector('.tree-change-marker')).toBeNull();
+    expect(within(row('1.1')).getByRole('img', { name: 'New' }).textContent).toBe('New');
+    expect(within(row('2')).getByRole('img', { name: 'Changed' }).textContent).toBe('Changed');
+    expect(row('3').querySelector('[data-testid="change-marker"]')).toBeNull();
     act(() => view.navigation.markItemSeen(route, '1.1'));
-    expect(row('1.1').querySelector('.tree-change-marker')).toBeNull();
+    expect(row('1.1').querySelector('[data-testid="change-marker"]')).toBeNull();
     let token = '';
     act(() => { token = view.navigation.reading.catchUp({ kind: 'mark_seen', session: route, at: later,
       items: [{ item_id: '2', revision: 2 }], topics: [] }); });
-    expect(row('2').querySelector('.tree-change-marker')).toBeNull();
+    expect(row('2').querySelector('[data-testid="change-marker"]')).toBeNull();
     act(() => view.navigation.reading.undo(token));
-    expect(within(row('2')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
+    expect(within(row('2')).getByRole('img', { name: 'Changed' })).toBeTruthy();
   });
 
   it('walks Map preorder and wraps without opening, selecting or marking seen', async () => {
@@ -94,7 +94,7 @@ describe('Map change markers and next unseen navigation', () => {
     // Finish the pulse while keeping its distinct outline and its New tag.
     await waitFor(() => expect(row('1.1').hasAttribute('data-next-unseen-pulse')).toBe(false), { timeout: 1500 });
     expect(target()).toBe(row('1.1'));
-    expect(within(row('1.1')).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(row('1.1')).getByRole('img', { name: 'New' })).toBeTruthy();
     next(); expect(target()).toBe(row('2')); expect(row('1.1').hasAttribute('data-next-unseen')).toBe(false);
     next(); expect(target()).toBe(row('1.1'));
     expect(view.selected).not.toHaveBeenCalled();
@@ -104,7 +104,7 @@ describe('Map change markers and next unseen navigation', () => {
     fireEvent.keyDown(row('1.1'), { key: 'Enter' });
     await waitFor(() => expect(view.selected).toHaveBeenCalledTimes(1));
     act(() => view.navigation.markItemSeen(route, '1.1'));
-    expect(row('1.1').querySelector('.tree-change-marker')).toBeNull();
+    expect(row('1.1').querySelector('[data-testid="change-marker"]')).toBeNull();
     next(); expect(target()).toBe(row('2'));
     fireEvent.click(row('2')); await waitFor(() => expect(view.selected).toHaveBeenCalledTimes(2));
   });
@@ -115,7 +115,9 @@ describe('Map change markers and next unseen navigation', () => {
       saved.expanded_item_ids = [];
       saved.collapsed_topic_ids = [transport.sessions.get(route.session_id)!.items['1.1']!.topic_id];
       saved.hidden_item_ids = ['1'];
-    }, { query: 'matches nothing' });
+      // A status filter that leaves out both targets (a search no longer filters the Map).
+      saved.filters.statuses = ['decided'];
+    });
     const saved = structuredClone(view.transport.preferences.sessions[0]);
     expect(row('1.1')).toBeNull(); next();
     expect(target()).toBe(row('1.1')); expect(row('1')).not.toBeNull();
@@ -191,20 +193,24 @@ describe('Map change markers and next unseen navigation', () => {
     expect(view.selected).not.toHaveBeenCalled();
   });
 
-  it.each([60, 400])('scrolls a %s px N target clear of a sticky topic with Selected in the filter bar', async height => {
+  it.each([60, 400])('scrolls a %s px N target clear of a sticky topic and of the Back-to pill over the top edge', async height => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
       if (this === box) return new DOMRect(0, 0, 300, 300);
       if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
-      if (this.matches('.tree-selected-edge')) return new DOMRect(0, 8, 300, 32);
+      // The pill floats 12px under the band and is 30px high.
+      if (this.matches('.tree-back')) return new DOMRect(0, 72, 300, 30);
       const rows = [...document.querySelectorAll('.tree-item')], index = rows.indexOf(this);
       return index >= 0 ? new DOMRect(0, index * 80 - (box?.scrollTop ?? 0), 300, height) : new DOMRect();
     });
     const view = await mount(undefined, { selectedId: '1' });
     const box = document.querySelector<HTMLElement>('.tree-scroll')!;
     box.scrollTop = 200; fireEvent.scroll(box);
+    await screen.findByRole('button', { name: /^Back to “/ });
+    expect(document.querySelector('.tree-back')?.getAttribute('data-edge')).toBe('above');
     next(); expect(target()).toBe(row('1.1'));
-    expect(row('1.1').getBoundingClientRect().top).toBe(68);
+    // The row ends 8px under the pill (72 + 30 + 8), not just under the band (60 + 8).
+    expect(row('1.1').getBoundingClientRect().top).toBe(110);
     expect(view.selected).not.toHaveBeenCalled();
   });
 
@@ -246,17 +252,19 @@ describe('Map change markers and next unseen navigation', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('renders topic content only under expanded topic headers', async () => {
-    const view = await mount(undefined, { topicContent: id => <div data-topic-content={id}>Topic changes</div> });
-    const header = document.querySelector<HTMLElement>('.tree-topic')!;
-    // The cards sit in a wrapper that carries the topic's rail on through them (see the Map layout tests).
-    const cards = header.nextElementSibling!;
-    expect(cards.classList.contains('tree-topic-cards')).toBe(true);
-    expect(cards.querySelector('[data-topic-content]')?.getAttribute('data-topic-content')).toBe(header.dataset.row);
-    fireEvent.click(within(header).getByRole('button', { name: 'Expand or collapse topic' }));
-    await waitFor(() => expect(header.getAttribute('aria-expanded')).toBe('false'));
-    expect(header.nextElementSibling?.classList.contains('tree-topic-cards')).not.toBe(true);
-    expect(header.closest('.tree-topic-group')!.querySelector('[data-topic-content]')).toBeNull();
-    expect(view.transport.mutations).toHaveLength(1);
+  it('offers What changed for a topic while something in it is unseen, as a popover that takes no room in the Map', async () => {
+    const view = await mount();
+    // The fixture's baseline is twelve days back, so the band speaks of changes rather than counting new and changed.
+    const opener = screen.getByRole('button', { name: /2 changes since/ });
+    expect(document.querySelector('.tree-topic-cards')).toBeNull();
+    const before = row('2').getBoundingClientRect().top;
+    fireEvent.click(opener);
+    expect(screen.getByRole('dialog', { name: 'What changed' })).toBeTruthy();
+    expect(row('2').getBoundingClientRect().top).toBe(before);
+    expect(view.transport.preferences.seen![0]!.items).toEqual([]);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
+    act(() => { view.navigation.markItemSeen(route, '1.1'); view.navigation.markItemSeen(route, '2'); });
+    expect(screen.queryByRole('button', { name: /changes since|new|changed/i })).toBeNull();
   });
 });

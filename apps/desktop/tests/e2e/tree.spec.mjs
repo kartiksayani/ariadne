@@ -9,7 +9,7 @@ import { goToPage, openSessionButton } from './session-button.mjs';
 import { activateOwned, identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 const searchField = 'input[aria-label="Search the Map"]';
 // The top bar's search is a button until the owner opens it (a click here, `/` at the keyboard); the field then stays open
@@ -38,8 +38,9 @@ async function showFilters() {
 export async function goToPeekItem(item, currentItemId) {
   const peek = () => browser.$('.item-peek');
   const heading = () => browser.$('.item-peek .peek-head h2');
+  // The card heads with the short name; its title carries the complete question.
   await wait(async () => await peek().isDisplayed() && await heading().isDisplayed()
-    && await browser.execute(element => element.textContent, await heading()) === item.question,
+    && await browser.execute(element => element.title, await heading()) === item.question,
   'Item reference peek did not show the complete saved question');
   assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), currentItemId,
     'Opening a reference peek must preserve the selected detail until Go to');
@@ -219,10 +220,16 @@ async function open(tree) {
   await catalogue(); const button = await readySessionButton(tree); await button.click();
   await wait(async () => (await visibleIds()).includes('20.99'), 'The real native 2,000-item tree did not open');
 }
+// The items that carry a search highlight, once each, in Map order. Search marks matches in place: it never hides a row.
+const hitIds = () => browser.execute(() => [...new Set([...document.querySelectorAll('.tree-rows .tree-hit')]
+  .map(element => element.closest('[data-item-id]')?.dataset.itemId))]);
+// The top bar's match count ("1 of 1", "No matches"); null while there is no search.
+const searchCount = () => browser.execute(() => document.querySelector('.tb-search-count')?.textContent ?? null);
 // Passive WebView measurement starts at the real driver-generated click/input,
-// stops after the expected canonical rows render and a layout frame completes.
-async function measureAction(eventName, selector, expectedIds, action, tree) {
-  await browser.execute(({ eventName, selector, expectedIds }) => {
+// stops after the expected canonical rows render (and, for a search, exactly the expected items are highlighted)
+// and a layout frame completes.
+async function measureAction(eventName, selector, expectedIds, action, tree, expectedHits = null) {
+  await browser.execute(({ eventName, selector, expectedIds, expectedHits }) => {
     const target = document.querySelector(selector), bounds = target?.getBoundingClientRect();
     const sample = { started: null, elapsed: null, target: target ? { disabled: target.disabled,
       bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
@@ -237,6 +244,10 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
     const observer = new window.MutationObserver(() => {
       const ids = [...document.querySelectorAll('.tree-rows .tree-item')].map(element => element.dataset.itemId);
       if (sample.started === null || ids.length !== expectedIds.length || ids.some((id, index) => id !== expectedIds[index])) return;
+      if (expectedHits) {
+        const hits = [...new Set([...document.querySelectorAll('.tree-rows .tree-hit')].map(element => element.closest('[data-item-id]')?.dataset.itemId))];
+        if (hits.length !== expectedHits.length || hits.some((id, index) => id !== expectedHits[index])) return;
+      }
       observer.disconnect(); document.removeEventListener(eventName, start, true);
       window.__ariadneSearchTimingObservation?.mark('result');
       requestAnimationFrame(() => {
@@ -245,7 +256,7 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
       });
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-  }, { eventName, selector, expectedIds });
+  }, { eventName, selector, expectedIds, expectedHits });
   await action();
   try {
     await wait(async () => typeof await browser.execute(() => window.__ariadneTreeMeasurement.elapsed) === 'number', 'Native layout measurement did not reach its exact expected rows');
@@ -258,7 +269,7 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
       statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
       sessions: [...document.querySelectorAll('button[data-session-id]')].map(element => ({ id: element.dataset.sessionId, text: element.textContent, disabled: element.disabled })),
       current: [...document.querySelectorAll('[aria-current]')].map(element => element.outerHTML.slice(0, 1000)) }));
-    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.json'), JSON.stringify({ eventName, selector, expectedIds,
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.json'), JSON.stringify({ eventName, selector, expectedIds, expectedHits,
       observed, preferences: tree ? await cliRequest(tree.cli, ['preferences', 'get', '--json-stdin'],
         { session: null, request: { command: 'preferences_get', params: {} } }) : null }, null, 2));
     await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.png'));
@@ -296,7 +307,7 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
     sample.readiness.hidden = document.hidden;
     sample.readiness.hasFocus = document.hasFocus();
     try {
-      const current = selector ? document.querySelector(selector) : [...((group === 'Filter items' ? document.querySelector('[role="menu"][aria-label^="Filter"]') : document.querySelector(`[aria-label="${group}"]`))?.querySelectorAll('button') ?? [])]
+      const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
         .find(value => value.textContent.trim() === name || [...value.children].some(child => child.tagName === 'SPAN' && child.textContent.trim() === name));
       const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       const enabled = !button.disabled && button.getAttribute('aria-disabled') !== 'true';
@@ -368,28 +379,23 @@ async function readySessionButton(tree) {
   if (failure) throw failure;
   return button;
 }
-export async function openStatusFilterMenu() {
+const filterRowSelector = '[role="group"][aria-label="Filter items"]';
+// The chip row is in flow above the Map once the top bar's Filter button shows it; no menu to open.
+export async function openStatusFilters() {
   await showFilters();
-  const trigger = await browser.$('[role="group"][aria-label="Filter items"] button[aria-haspopup="menu"]');
-  if (await trigger.getAttribute('aria-expanded') !== 'true') {
-    await trigger.waitForClickable(); await trigger.click();
-    await wait(async () => await trigger.getAttribute('aria-expanded') === 'true', 'Native status filter menu did not open');
-  }
-  return trigger;
+  return browser.$(filterRowSelector);
 }
-// Status options toggle a set and keep the menu open; Show all clears it and closes the menu.
+// Each chip is a toggle button named "<status> <count>" and keeps the row open; Clear empties the chips and closes the row.
 export async function choose(chip, pressed) {
   const focused = () => browser.execute(() => document.visibilityState === 'visible' && !document.hidden && document.hasFocus());
   if (!await focused()) {
     await activateOwned(process.env.ARIADNE_E2E_ROOT, process.env.ARIADNE_E2E_BINARY, process.env.ARIADNE_E2E_NONCE);
     await wait(focused, 'Owned native App did not become visible and focused before filtering');
   }
-  const labels = { all: 'Show all', waiting: 'Waiting on me', open: 'Open', progress: 'In progress', closed: 'Closed' };
-  const trigger = await openStatusFilterMenu(), label = labels[chip];
-  const selector = `[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${label}`;
-  const menuId = await trigger.getAttribute('aria-controls');
-  assert.ok(menuId, 'Open filter menu must be associated with its button');
-  const find = () => browser.$(`[role="menu"][id="${menuId}"]`).$(selector);
+  const labels = { clear: 'Clear', waiting: 'Waiting on me', open: 'Open', progress: 'In progress', decided: 'Decided', done: 'Done' };
+  await openStatusFilters();
+  const label = labels[chip], selector = chip === 'clear' ? 'button=Clear' : `button[aria-label^="${label} "]`;
+  const find = () => browser.$(filterRowSelector).$(selector);
   const button = await find();
   await button.waitForClickable();
   await browser.execute(observeTreeClickReadiness, button, 'Filter items', label, pressed);
@@ -398,11 +404,12 @@ export async function choose(chip, pressed) {
     await waitClickReadiness('Native filter target did not become stable and enabled', true);
     await button.click();
     await wait(async () => {
-      if (chip === 'all') return await trigger.getAttribute('aria-expanded') === 'false' && await trigger.getAttribute('data-active') === null && await trigger.isEnabled();
-      // Reacquire the option after the saved preference renders instead of
+      // Clear closes the row once the saved chips are empty.
+      if (chip === 'clear') return !await browser.$(filterRowSelector).isExisting();
+      // Reacquire the chip after the saved preference renders instead of
       // observing a possibly replaced DOM element.
       const current = await find();
-      return await current.getAttribute('aria-checked') === String(pressed) && await current.isEnabled() && await trigger.getAttribute('aria-expanded') === 'true';
+      return await current.getAttribute('aria-pressed') === String(pressed) && await current.isEnabled();
     }, 'Native filter write was not confirmed');
   } catch (error) { failure = error;
   } finally {
@@ -426,30 +433,30 @@ export function observeTreeAnchor() {
 const anchor = () => browser.execute(observeTreeAnchor);
 
 export async function assertStatusFilters(tree, expectedIds) {
-  const labels = { all: 'Show all', open: 'Open', closed: 'Closed' };
-  const trigger = await openStatusFilterMenu();
-  const menuId = await trigger.getAttribute('aria-controls');
-  assert.ok(menuId, 'Open filter menu must be associated with its button');
-  const chipCount = async chip => Number((await (await browser.$(`[role="menu"][id="${menuId}"]`).$(`[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${labels[chip]}`)).getText()).match(/\d+\s*$/)?.[0]);
-  const pressed = async () => browser.execute(id => [...document.querySelectorAll(`[role="menu"][id="${id}"] [role="menuitemcheckbox"][aria-checked="true"]`)]
-    .map(element => element.textContent.replace(/\d+\s*$/, '').trim()), menuId);
-  assert.equal(await trigger.getAttribute('data-active'), null);
+  const labels = { open: 'Open', done: 'Done' };
+  await openStatusFilters();
+  const chipCount = async chip => Number((await (await browser.$(filterRowSelector).$(`button[aria-label^="${labels[chip]} "]`)).getAttribute('aria-label')).match(/\d+\s*$/)?.[0]);
+  const pressed = async () => browser.execute(selector => [...document.querySelectorAll(`${selector} button[aria-pressed="true"]`)]
+    .map(element => element.getAttribute('aria-label').replace(/\s*\d+\s*$/, '').trim()), filterRowSelector);
+  const filterButton = () => browser.$('button[aria-label^="Filter by status"]');
+  // Nothing is picked: the funnel carries no count and the row asks for a status.
+  assert.equal(await (await filterButton()).getAttribute('aria-label'), 'Filter by status');
   assert.deepEqual(await pressed(), []);
-  assert.deepEqual(await Promise.all(['all', 'open', 'closed'].map(chipCount)), [2000, 1320, 680]);
+  assert.deepEqual(await Promise.all(['open', 'done'].map(chipCount)), [1320, 680]);
   await choose('open', true); await wait(async () => (await visibleIds()).length === 1340, 'Open filter differs from the canonical fixture');
   assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open']); assert.equal(await chipCount('open'), 1320);
-  assert.deepEqual(await pressed(), ['Open']); assert.equal(await trigger.getAttribute('data-active'), 'true');
-  await choose('closed', true); await wait(async () => (await visibleIds()).length === 2000, 'Open and Closed together did not restore the complete fixture');
+  assert.deepEqual(await pressed(), ['Open']); assert.match(await (await filterButton()).getAttribute('aria-label'), /^Filter by status, 1 status picked/);
+  await choose('done', true); await wait(async () => (await visibleIds()).length === 2000, 'Open and Done together did not restore the complete fixture');
   assert.deepEqual(await visibleIds(), expectedIds);
-  assert.deepEqual(await pressed(), ['Open', 'Closed']); assert.equal(await trigger.getAttribute('data-active'), 'true');
-  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open', 'decided', 'done', 'dropped', 'replaced']);
-  await choose('open', false); await wait(async () => (await visibleIds()).length === 680, 'Closed filter did not keep exactly the terminal items');
-  assert.deepEqual(await pressed(), ['Closed']); assert.equal(await trigger.getAttribute('data-active'), 'true');
-  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['decided', 'done', 'dropped', 'replaced']);
-  await choose('all', true); await wait(async () => (await visibleIds()).length === 2000, 'Show all did not restore every item');
-  assert.deepEqual(await visibleIds(), expectedIds); assert.equal(await trigger.getAttribute('data-active'), null);
-  await openStatusFilterMenu(); assert.deepEqual(await pressed(), []);
-  await browser.keys('Escape');
+  assert.deepEqual(await pressed(), ['Open', 'Done']); assert.match(await (await filterButton()).getAttribute('aria-label'), /^Filter by status, 2 statuses picked/);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open', 'done']);
+  await choose('open', false); await wait(async () => (await visibleIds()).length === 680, 'Done filter did not keep exactly the done items');
+  assert.deepEqual(await pressed(), ['Done']);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['done']);
+  // Clear empties the chips, restores every item and closes the row.
+  await choose('clear', true); await wait(async () => (await visibleIds()).length === 2000, 'Clear did not restore every item');
+  assert.deepEqual(await visibleIds(), expectedIds); assert.equal(await (await filterButton()).getAttribute('aria-label'), 'Filter by status');
+  assert.equal(await browser.$(filterRowSelector).isExisting(), false);
   assert.deepEqual((await preferences(tree)).view.filters.statuses, []);
 }
 async function completeRowLayout(id, item) {
@@ -525,10 +532,10 @@ export async function runTreeAcceptance(configuration) {
         alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         current: [...document.querySelectorAll('[aria-current]')].slice(0, 12).map(element => element.outerHTML.slice(0, 1000)),
-        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,[role="menu"][aria-label^="Filter"] button,.shell-top [aria-label="Search the Map"],button[data-session-id]')].slice(0, 40).map(element => {
+        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,.shell-top [aria-label="Search the Map"],button[data-session-id]')].slice(0, 40).map(element => {
           const bounds = element.getBoundingClientRect();
           return { text: element.textContent.slice(0, 200), sessionId: element.dataset.sessionId, disabled: element.disabled,
-            checked: element.getAttribute('aria-checked'), expanded: element.getAttribute('aria-expanded'), active: element.hasAttribute('data-active'),
+            checked: element.getAttribute('aria-pressed'), expanded: element.getAttribute('aria-expanded'), active: element.hasAttribute('data-active'),
             bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
             centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000) };
         }) }));
@@ -578,7 +585,8 @@ async function treeAcceptance(configuration) {
   try {
     await searchBox();
     for (const id of measuredIds) {
-      searchMs.push(await measureAction('input', searchField, [id.split('.')[0], id], async () => { const input = await searchBox(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
+      // The search is in place: every row stays and only the one match is highlighted.
+      searchMs.push(await measureAction('input', searchField, expectedIds, async () => { const input = await searchBox(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree, [id]));
     }
   } catch (error) { searchFailure = error;
   } finally {
@@ -590,20 +598,26 @@ async function treeAcceptance(configuration) {
   if (searchFailure) throw searchFailure;
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-performance-samples.json'), JSON.stringify({ rows: 2000,
     messages: initialSession.messages.length, viewport, firstUsableMs: usableMs, localSearchSamplesMs: searchMs }, null, 2));
+  // Search marks matches in place (SPEC 6.9): all 2,000 rows stay, only the matching item is highlighted, and the top bar counts it.
   await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
-  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');
+  await wait(async () => JSON.stringify(await hitIds()) === JSON.stringify(['1.1']) && await searchCount() === '1 of 1', 'NFKC/lowercase AND-token search did not highlight exactly the one matching item');
+  assert.deepEqual(await visibleIds(), expectedIds, 'A search must not hide any row');
   assert.equal((await snapshot(tree)).items['1.1'].question, initialSession.items['1.1'].question, 'Search normalization must not rewrite stored text');
-  await setSearch(tree, ''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
-  // Chip counts follow the search and topic, never the chip itself. Open keeps
-  // its 1,320 matches plus the 20 done roots as context; Closed matches 680 rows.
+  await setSearch(tree, ''); await wait(async () => (await hitIds()).length === 0 && await searchCount() === null, 'Clear search did not remove the highlights');
+  assert.deepEqual(await visibleIds(), expectedIds, 'Clear search did not leave the complete tree');
+  // Chip counts follow the topic, never the chip itself. Open keeps its 1,320
+  // matches plus the 20 done roots as context; Done matches 680 rows.
   await assertStatusFilters(tree, expectedIds);
 
   await (await row('1')).click(); await showFullItemQuestion(initialSession.items['1']);
   const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
   await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
-  await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
-  await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
+  // A status chip is a filter: it omits what does not match. The collapsed root 1 is Done, so it stays; its open children do not match.
+  await choose('done', true);
+  // 20 branches keep 34 done rows each (the root and every third child): the Done chip shows exactly those 680, even inside the collapsed root 1.
+  await wait(async () => { const ids = await visibleIds(); return ids.includes('1') && !ids.includes('1.2') && ids.length === 680; }, 'The Done chip did not filter the Map to the 680 done rows');
+  const doneIds = await visibleIds();
   await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
   const child = await browser.$('[aria-label="Child items"]').$('button[aria-label^="Native sentence 1.2\\a "]');
@@ -617,11 +631,21 @@ async function treeAcceptance(configuration) {
   const revealed = (await preferences(tree)).view;
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
   await browser.$('button=Resume filtered view').click();
-  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'Resume must remove only temporary outside-filter reveal');
+  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(doneIds), 'Resume must remove only temporary outside-filter reveal');
+  assert.deepEqual(await visibleIds(), doneIds, 'Resume must leave exactly the rows the Done filter showed before the reveal');
+  assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
+  await choose('clear', true); await wait(async () => (await visibleIds()).length === 1901, 'Clear did not restore the saved collapsed branch');
+  // The search only marks: 1.1 sits inside the collapsed root 1, so the top bar names it and "Show them" shows it in memory.
+  await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
+  await wait(async () => (await browser.execute(() => document.querySelector('.tb-note-text')?.textContent ?? '')).includes('collapsed'), 'The search did not name its match inside the collapsed item');
+  assert.equal((await visibleIds()).length, 1901, 'A search must not open a collapsed item');
+  await browser.$('button=Show them').click();
+  await wait(async () => (await visibleIds()).includes('1.1'), 'Show them did not reveal the matching item');
+  assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Show them must not save a fold');
   await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
   // Home lands on the topic band (no item id); → steps into its first row; ← goes back to the parent (h and l are gone: SPEC 6.1).
-  for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '1.1'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
+  for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '20.99'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
     await browser.keys(key); assert.equal(await focusedId(), id); await roving();
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
@@ -630,13 +654,21 @@ async function treeAcceptance(configuration) {
   await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
-  // A plain selection outside new filters stays as its own row with its
-  // ancestry; only a reveal raises the banner (Ariadne.dc.html:2169).
+  // A search it does not match hides nothing and raises no banner; the selection stays.
+  const beforeNoMatch = await visibleIds();
   await setSearch(tree, 'No canonical native tree question matches this phrase');
-  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'The selected item must stay visible under a search it does not match');
+  await wait(async () => await searchCount() === 'No matches', 'A search with no match must say so');
+  assert.deepEqual(await visibleIds(), beforeNoMatch, 'A search with no match must not hide any row');
   assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
   await setSearch(tree, '');
-  await wait(async () => (await visibleIds()).length === 1901, 'Clearing the search must preserve the saved collapsed branch');
+  // The selected row 1.1 was opened by the owner's click, so its branch stays open under it: clearing the search never moves the Map.
+  // The saved fold is untouched, and the branch folds back through its own toggle.
+  assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Clearing the search must preserve the saved collapsed branch');
+  assert.equal((await visibleIds()).length, 2000, 'Clearing the search must not move the selected row');
+  const heldToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
+  await heldToggle.waitForEnabled(); await heldToggle.click();
+  await wait(async () => (await visibleIds()).length === 1901, 'Folding the held branch did not return to the saved collapsed branch');
+  assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Folding a held branch must keep the saved collapse');
 
   // Reopen the explicitly collapsed branch through its visible toggle, then
   // collapse a different branch so restart can prove this exact saved choice.

@@ -51,8 +51,21 @@ export function useCopy(ms = 2000): [CopyState, (write: () => Promise<boolean>) 
 }
 
 /**
+ * An open peek card takes the first Escape over whatever sits under it (the same rule as the conversation's window-level
+ * handler): this closes it and says so. False when no peek offers a way to close, and then the popover may close itself.
+ */
+export function closePeekFirst(): boolean {
+  // An open top-bar menu owns Escape before a peek does.
+  if (document.querySelector('.tb-pop')) return false;
+  const close = document.querySelector<HTMLButtonElement>('.item-peek [aria-label="Close peek"]');
+  if (!close) return false;
+  close.click();
+  return true;
+}
+
+/**
  * Closes a popover on Esc (anywhere, in the capture phase so a window key never also fires) and on a press outside it.
- * `onClose(true)` asks the owner of the trigger to give focus back to it.
+ * An open peek card takes the first Esc. `onClose(true)` asks the owner of the trigger to give focus back to it.
  */
 export function usePopover(open: boolean, onClose: (restoreFocus: boolean) => void, panel: RefObject<HTMLElement | null>, trigger?: RefObject<HTMLElement | null> | string): void {
   const close = useRef(onClose);
@@ -72,7 +85,7 @@ export function usePopover(open: boolean, onClose: (restoreFocus: boolean) => vo
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
-      close.current(true);
+      if (!closePeekFirst()) close.current(true);
     };
     window.addEventListener('pointerdown', press);
     document.addEventListener('keydown', key, true);

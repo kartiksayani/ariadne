@@ -13,7 +13,7 @@ async function openFirst() {
   await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 
-describe('peek desktop composition', { timeout: 10_000 }, () => {
+describe('peek desktop composition', () => {
   it.each(['Tree', 'Graph'] as const)('Go to from a filtered detail child focuses the revealed %s row without scrolling via focus', async mode => {
     const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
     source.items['1']!.question = 'Parent search match';
@@ -62,7 +62,7 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(document.activeElement).toBe(document.querySelector(`${selector}[data-item-id="1"]`)));
   });
 
-  it('previews a historical fork with its full title while its chip keeps the disambiguated name before Go to selects it', async () => {
+  it('previews a historical fork under its disambiguated name, with its full question, before Go to selects it', async () => {
     const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
     const fork = source.items['1.1']!, elsewhere = source.items['8']!;
     fork.short = elsewhere.short = 'Cache lookup'; elsewhere.topic_id = fork.topic_id;
@@ -78,8 +78,11 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     expect(chip.title).toBe(fork.question); expect(chip.classList.contains('name-chip')).toBe(true);
     fireEvent.click(chip);
     const peek = await screen.findByRole('dialog', { name: `Peek: ${fork.question}` });
-    expect(within(peek).getByRole('heading', { level: 2 }).textContent).toBe(fork.question);
-    expect(within(peek).queryByText('Redis · Cache lookup')).toBeNull();
+    // The card heads with the same disambiguated name; the full question is its title and its summary.
+    const heading = within(peek).getByRole('heading', { level: 2 });
+    expect(heading.textContent).toBe('Redis · Cache lookup');
+    expect(heading.title).toBe(fork.question);
+    expect(peek.querySelector('.peek-summary')!.textContent).toBe(fork.question);
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
     expect(transport.preferences.sessions[0]!.selected_item_id).toBe('1');
     fireEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
@@ -177,5 +180,33 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: `Peek: ${source.items['2']!.question}` })).toBeNull();
+  });
+
+  // A card the owner opened closes on every key that moves focus or scrolls the Map from a row, including the anchor row itself.
+  const mapKeys = ['j', 'k', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'] as const;
+  it.each(mapKeys)('an opened card closes on %s pressed on a Map row, including its own anchor row', async key => {
+    render(<DesktopApp service={createDesktopService(new AppTransport())} />); await openFirst();
+    const items = [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')];
+    const anchor = items[1]!;
+    anchor.focus(); fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+    fireEvent.keyDown(anchor, { key });
+    expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull();
+    // Another row also closes it.
+    anchor.focus(); fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+    fireEvent.keyDown(items[0]!, { key });
+    expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull();
+  });
+
+  it('Space on the anchor row toggles its card: one press closes it, the next opens it again', async () => {
+    render(<DesktopApp service={createDesktopService(new AppTransport())} />); await openFirst();
+    const anchor = [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')][1]!;
+    anchor.focus(); fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+    fireEvent.keyDown(anchor, { key: ' ' });
+    expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull();
+    fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
   });
 });

@@ -94,12 +94,12 @@ describe('the Map never moves and the dock never opens by itself', () => {
     const value = await mount();
     if (start === 'open') fireEvent.click(within(value.dock()).getByRole('button', { name: /^1 waiting$/ }));
     await goToSession({ ...route, session_id: secondId });
-    await waitFor(() => expect(value.dock().textContent).toContain('Nothing waiting on you'), { timeout: 4000 });
+    await waitFor(() => expect(value.dock().textContent).toContain('Nothing waiting on you'));
     expect(value.dock().getAttribute('data-open')).toBeNull();
     expect(document.querySelectorAll('[role="tree"] [aria-selected="true"]')).toHaveLength(0);
     // Back again: the first session's dock is folded too, and its selection is the saved one.
     await goToSession(route);
-    await waitFor(() => within(value.dock()).getByRole('button', { name: /^1 waiting$/ }), { timeout: 4000 });
+    await waitFor(() => within(value.dock()).getByRole('button', { name: /^1 waiting$/ }));
     expect(value.dock().getAttribute('data-open')).toBeNull();
     await waitFor(() => expect([...document.querySelectorAll('[role="tree"] [aria-selected="true"]')].map(element => element.getAttribute('data-item-id'))).toEqual(['3']));
     expect(value.transport.mutations.filter(request => request.command.command === 'preferences_patch'

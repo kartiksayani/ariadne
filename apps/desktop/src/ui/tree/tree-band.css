@@ -1,0 +1,631 @@
+/* The topic band (the topic band piece owns this file). */
+.tree-topic {
+  --tree-bullet-y: 22px;
+
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 10px 10px 12px;
+  border-top: 1px solid var(--color-divider);
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--a-side);
+
+  /* The band's own width, not the window's, picks the narrow word forms (D10): Details opening narrows the Map. */
+  container: band / inline-size;
+}
+
+.tree-topic[data-first] {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.tree-topic:focus,
+.tree-topic:focus-within {
+  background: color-mix(in srgb, var(--color-text) 7%, var(--a-side));
+}
+
+/* The band's height depends on nothing that changes while the owner reads (alpha.20): the head is one line and the counts
+   line is one line of a fixed height, at every width. A count appearing, Ack all going, "Acked N results · Undo" showing or
+   the Map narrowing as Details opens never adds or removes a line, so the rows below never move. A long name ends in "…"
+   (its title has it whole). Buttons never shrink and are never clipped: on the counts line the words shrink first (they
+   end in "…"), then the changes opener, so Ack all, Next and the head's buttons always stay in reach.
+   Deviation from SPEC §2.2 (approved 2026-10-17, "the Map never moves on its own" outranks the look): the board draws a wide
+   Map's band as one line and a narrow one as two. Any width switch would add a line as Details opens and push every row
+   down, so the band is always these two lines. */
+.tree-topic-head {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: calc(22px * var(--text-scale));
+}
+
+.tree-topic-head > * {
+  flex: none;
+}
+
+.tree-topic-name {
+  flex: 1 1 0;
+  min-width: 8ch; /* A long session chip shrinks (it ends in "…") before the topic's name does. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  position: relative;
+  top: -1px; /* The board sets the name a pixel above the buttons' middle. */
+  font-size: calc(15.5px * var(--text-scale));
+  font-weight: 500;
+  line-height: calc(22px * var(--text-scale));
+  letter-spacing: -.01em;
+  color: var(--a-acc-text);
+}
+
+.tree-topic-name[data-earlier] {
+  color: color-mix(in srgb, var(--a-acc-text) 82%, transparent);
+}
+
+.tree-session-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: calc(11.5px * var(--text-scale));
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.tree-session-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-session-chip i {
+  flex: none;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.tree-topic-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+/* The archive view's Restore keeps its room at all times and only fades in (as .tree-actions does on items),
+   so the name never rewraps between hover and no hover. visibility keeps it unclickable while hidden. */
+.tree-topic-actions {
+  display: grid;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: 2px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity .12s;
+}
+
+.tree-topic:hover .tree-topic-actions,
+.tree-topic:focus .tree-topic-actions,
+.tree-topic:focus-within .tree-topic-actions {
+  visibility: visible;
+  opacity: 1;
+}
+
+.tree-topic-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px; /* No taller than the name's line, so the always-present actions never make the band taller. */
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+  background: transparent;
+}
+
+.tree-topic-action i,
+.tree-count i {
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tree-topic-tally > .tree-count + .tree-count {
+  margin-left: 12px;
+}
+
+.tree-topic-counts {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 12px;
+  height: calc(20px * var(--text-scale));
+  padding-left: 26px;
+  overflow: hidden;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+/* Buttons never shrink; the counts text and the changes opener give way, in that order. */
+.tree-topic-counts > * {
+  flex: none;
+}
+
+.tree-topic-counts > .tree-topic-tally {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tree-topic-counts > .changes-opener {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden; /* Its tail gives way; the button stays pressable, and Next after it stays in reach. */
+}
+
+.tree-topic-status > span {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tree-topic-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 26px;
+  font-size: calc(13px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
+}
+
+.tree-topic-line > i {
+  font-size: calc(13px * var(--text-scale));
+}
+
+/* Band buttons. Ack all sits on the title line before Focus: outlined, check + "Ack all (N)". */
+.tree-topic-head > .tree-topic-ack-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 5px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: var(--color-text);
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+}
+
+.tree-topic-ack-all i,
+.tree-band-next i,
+.tree-band-continue i,
+.ack-all-held i {
+  font-size: calc(12px * var(--text-scale));
+}
+
+/* After Ack all: "✓ Acked N results  Undo" for 8 s, in the Ack all button's place. */
+.ack-all-held {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.ack-all-held i {
+  color: var(--st-done);
+}
+
+/* Every button on the counts line fits the line's height. */
+.tree-topic-counts > button {
+  height: calc(20px * var(--text-scale));
+  padding-block: 0;
+  line-height: 1;
+}
+
+.ack-all-undo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Next unseen: 20px, an arrow, "Next unseen" (or "Next · 5 of 10") and an `n` keycap. */
+.tree-band-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 3px 0 7px;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  white-space: nowrap;
+  color: var(--color-text);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  cursor: pointer;
+}
+
+.tree-band-next .p-key {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: calc(10.5px * var(--text-scale));
+  line-height: 14px;
+}
+
+/* Focus / Unfocus: one fixed 92px, so the words swapping never move the buttons beside it (D9). */
+.tree-band-focus {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-sizing: border-box;
+  width: 92px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: var(--color-text);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  cursor: pointer;
+}
+
+.tree-band-focus[data-on] {
+  color: var(--a-bg);
+  background: var(--a-acc-text);
+  box-shadow: none;
+}
+
+.tree-band-continue {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: var(--color-text);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  cursor: pointer;
+}
+
+/* The "…" menu button: 22 × 22, an accent wash while its menu is open. */
+.tree-band-menu {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--color-text);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  cursor: pointer;
+}
+
+.tree-band-menu[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.tree-band-menu i {
+  position: relative;
+  top: 1px; /* The board sets the dots a pixel lower. */
+  font-size: calc(14px * var(--text-scale));
+}
+
+.tree-band-focus[data-hidden] {
+  visibility: hidden;
+}
+
+.tree-band-focus:disabled,
+.tree-band-continue:disabled,
+.tree-band-menu:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.tree-band-next:focus-visible,
+.tree-band-focus:focus-visible,
+.tree-band-continue:focus-visible,
+.tree-band-menu:focus-visible,
+.ack-all-undo:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* The Ack all review: a popover under the band (SPEC 4.3), outside the Map's flow, so it never moves a row. AckAll.tsx places it. */
+.ack-all-review {
+  position: fixed;
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg);
+}
+
+.ack-all-title {
+  margin: 0 0 1.5px;
+  line-height: 1.45;
+  letter-spacing: normal; /* The shared heading rule's -0.015em is not the board's. */
+  font-size: calc(14px * var(--text-scale));
+  font-weight: 500;
+}
+
+.ack-all-text {
+  margin: 0;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.ack-all-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+.ack-all-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ack-all-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ack-all-error {
+  margin: 0;
+  font-size: calc(12.5px * var(--text-scale));
+  color: var(--a-danger);
+}
+
+.ack-all-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* The review's two buttons are the board's (SPEC 4.3): 28px, Cancel in plain text, Ack all solid. */
+.ack-all-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  font-size: calc(12.5px * var(--text-scale));
+  box-shadow: none;
+}
+
+.ack-all-actions .btn-ghost {
+  color: var(--color-text);
+  background: transparent;
+}
+
+.ack-all-actions .btn-ghost:hover {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.ack-all-actions .btn-primary {
+  gap: 6px;
+  padding: 0 11px 0 9px;
+  font-weight: 500;
+  color: var(--a-bg);
+  background: var(--a-acc-text);
+}
+
+.ack-all-progress {
+  font-size: calc(12px * var(--text-scale));
+}
+
+/* The Ack all failed-state text shrinks with an ellipsis (its title has it whole), so Continue and "…" always fit. */
+.tree-topic-head > .ack-all-progress {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Narrow band (D10): the counts say "2 waiting", the opener drops "since …", and Continue is its icon. Two things make a band narrow:
+   its own width (Details squeezing the Map to 520px or less, at any window), and a window of 900px or less. The board draws these
+   forms in its 900px window whatever the Map's width (900px with nothing selected, 560px with Details open) and the wide ones at
+   a Map of 880px, so the window decides there; the container query keeps the buttons in reach when Details is dragged wide. */
+@container band (max-width: 520px) {
+  .tree-wide-only,
+  .tree-topic-counts .changes-since,
+  .tree-band-continue-label {
+    display: none;
+  }
+}
+
+@media (width <= 900px) {
+  .tree-wide-only,
+  .tree-topic-counts .changes-since,
+  .tree-band-continue-label {
+    display: none;
+  }
+}
+
+.tree-topic-fix {
+  padding-left: 26px;
+}
+
+.tree-topic-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 6px 26px;
+}
+
+.tree-topic-reply textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.tree-topic-reply-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-prompt {
+  gap: 8px;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.tree-prompt > i {
+  color: var(--st-done);
+}
+
+.tree-prompt .btn {
+  padding: 2px 8px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+/* Last: more specific than every other topic-line icon rule. */
+.tree-topic-line .btn i {
+  font-size: calc(13px * var(--text-scale));
+}
+
+/* The "…" menu (SPEC 10.12): rows of an icon, a label and a line of what it does. */
+.tree-menu-row {
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 1px 8px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--color-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+/* The panel (SPEC 2.2): 300px wide with 6px padding and 1px between rows, a divider ring in place of a border. */
+.tree-menu-panel {
+  box-sizing: border-box;
+  width: min(300px, calc(100vw - 16px));
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  gap: 1px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  line-height: 1.4;
+}
+
+/* The shared menu panel makes its buttons flex rows; these are grids that fill the panel. */
+.action-menu-options > .tree-menu-row {
+  display: grid;
+  gap: 1px 7px; /* The shared menu's own gap (8px, from a more specific rule) would put the detail 7px under the title. */
+  box-sizing: border-box;
+  width: 100%;
+  align-items: start;
+  align-content: start;
+}
+
+.tree-menu-icon {
+  grid-row: 1;
+
+  /* No taller than the label's line, so the detail sits right under the title (SPEC 10.12). */
+  line-height: calc(17.5px * var(--text-scale));
+  font-size: calc(15px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.tree-menu-label {
+  font-weight: 500;
+}
+
+.tree-menu-detail {
+  grid-column: 2;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-menu-row[data-danger] .tree-menu-icon,
+.tree-menu-row[data-danger] .tree-menu-label {
+  color: var(--a-danger);
+}
+
+.tree-menu-row:focus-visible {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.tree-menu-row:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.tree-menu-row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.tree-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-divider);
+}

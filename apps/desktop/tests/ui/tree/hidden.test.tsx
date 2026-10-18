@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { immutable } from '../../../src/data';
 import { hiddenGroupKey, hiddenItems, hiddenParentSource, hiddenSource } from '../../../src/ui/tree/hidden';
-import { treeModel, type TreeInput } from '../../../src/ui/tree/model';
+import { stripKey } from '../../../src/ui/tree/model';
+import { shimTree, type ShimInput } from './shimTree';
 import { AppTransport, route } from '../app/transport';
 import { FILTER_STATUSES } from '../../../src/selectors/tree/folds';
+import { chipCounts, summaryCounts } from '../../../src/selectors/tree/filter';
 
 function fixture(hidden: string[] = []) {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
   const view = transport.view(); view.hidden_item_ids = hidden;
-  const input: TreeInput = { session: immutable(session), view, search: '', later: new Set(), collapsedTopics: new Set(),
+  const input: ShimInput = { session: immutable(session), view, search: '', later: new Set(), collapsedTopics: new Set(),
     selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse('2026-10-07T12:00:00Z') };
-  return { session, view, input, model: (extra: Partial<TreeInput> = {}) => treeModel({ ...input, ...extra }) };
+  return { session, view, input, model: (extra: Partial<ShimInput> = {}) => shimTree({ ...input, ...extra }) };
 }
 
 describe('hidden item tree projection', () => {
@@ -55,10 +57,16 @@ describe('hidden item tree projection', () => {
     expect(model()).toEqual(normal);
     view.expanded_item_ids = [];
     const topicId = session.items['1']!.topic_id;
-    const input = { search: session.items['1.1']!.question, collapsedTopics: new Set([topicId]) };
+    const inTopic = (rows: ReturnType<typeof model>['rows']) => rows.filter(row => row.kind === 'topic' ? row.key === topicId
+      : row.kind === 'strip' ? row.topicId === topicId : row.item.topic_id === topicId).map(row => row.key);
+    // A search neither filters nor opens anything: the folded topic stays folded.
+    expect(inTopic(model({ search: session.items['1.1']!.question, collapsedTopics: new Set([topicId]) }).rows)).toEqual([topicId]);
+    // A status filter opens the way to its matches, until the owner folds them under it.
+    view.filters.statuses = ['open'];
+    const input = { collapsedTopics: new Set([topicId]) };
     expect(model(input).rows.find(row => row.key === '1.1')).toBeDefined();
     expect(model({ ...input, filterCollapsedItemIds: new Set(['1']) }).rows.some(row => row.key === '1.1')).toBe(false);
-    expect(model({ ...input, filterCollapsedTopicIds: new Set([topicId]) }).rows.map(row => row.key)).toEqual([topicId]);
+    expect(inTopic(model({ ...input, filterCollapsedTopicIds: new Set([topicId]) }).rows)).toEqual([topicId]);
     expect(model({ ...input, filterCollapsedItemIds: new Set(['1']), filterCollapsedTopicIds: new Set([topicId]), revealId: '1.1' })
       .rows.find(row => row.key === '1.1')).toBeDefined();
     expect(view.expanded_item_ids).toEqual([]);
@@ -67,7 +75,7 @@ describe('hidden item tree projection', () => {
     const { session, view, model } = fixture(['1']), before = JSON.stringify(session);
     expect([...hiddenItems(immutable(session), new Set(['1']))]).toEqual(['1', '1.1']);
     expect(model().rows.filter(row => row.kind === 'item').map(row => row.key)).not.toContain('1.1');
-    expect(model().rows.find(row => row.kind === 'hidden')).toMatchObject({ count: 1, depth: 1, parent: null, expanded: false });
+    expect(model().rows.find(row => row.kind === 'strip')).toMatchObject({ reason: 'hidden', count: 1, depth: 1, parent: null, expanded: false });
     expect(JSON.stringify(session)).toBe(before); expect(view.expanded_item_ids).toContain('1');
     view.hidden_item_ids = [];
     expect(model().rows.filter(row => row.kind === 'item').map(row => row.key)).toContain('1.1');
@@ -81,13 +89,15 @@ describe('hidden item tree projection', () => {
     session.items['1.3.1'] = { ...session.items['1.1']!, id: '1.3.1', parent: '1.3', ordinal: 1 };
     view.expanded_item_ids.push('1.1', '1.3');
     const topic = session.items['1']!.topic_id, nestedKey = hiddenGroupKey(topic, '1'), rootKey = hiddenGroupKey(topic, null);
-    const model = treeModel({ ...input, session: immutable(session), view, expandedHiddenGroups: new Set(expanded ? [nestedKey, rootKey] : []) });
-    const groups = model.rows.filter(row => row.kind === 'hidden');
+    const model = shimTree({ ...input, session: immutable(session), view, expandedHiddenGroups: new Set(expanded ? [nestedKey, rootKey] : []) });
+    const groups = model.rows.filter(row => row.kind === 'strip');
+    expect(groups.every(row => row.reason === 'hidden')).toBe(true);
+    const nestedStrip = stripKey(topic, '1', 'hidden', '1.1'), rootStrip = stripKey(topic, null, 'hidden', '2');
     expect(groups.map(row => [row.parent, row.count, row.depth])).toEqual([['1', 2, 2], [null, 2, 1]]);
     expect(groups.every(row => row.expanded === expanded)).toBe(true);
-    expect(model.rows.filter(row => row.kind === 'topic' ? row.key === topic : row.kind === 'hidden' ? row.topicId === topic : row.item.topic_id === topic)
-      .map(row => row.key)).toEqual([topic, '1', '1.2', nestedKey, ...(expanded ? ['1.1', '1.1.1', '1.3', '1.3.1'] : []),
-      '3', '5', '6', '7', rootKey, ...(expanded ? ['2', '4'] : [])]);
+    expect(model.rows.filter(row => row.kind === 'topic' ? row.key === topic : row.kind === 'strip' ? row.topicId === topic : row.item.topic_id === topic)
+      .map(row => row.key)).toEqual([topic, '1', '1.2', nestedStrip, ...(expanded ? ['1.1', '1.1.1', '1.3', '1.3.1'] : []),
+      '3', '5', '6', '7', rootStrip, ...(expanded ? ['2', '4'] : [])]);
     if (expanded) {
       expect(model.rows.find(row => row.key === '1.1')).toMatchObject({ depth: 2, hidden: true });
       expect(model.rows.find(row => row.key === '1.3.1')).toMatchObject({ depth: 3, hidden: true });
@@ -97,8 +107,8 @@ describe('hidden item tree projection', () => {
   });
 
   it('opens hidden siblings together with their subtrees and dims inherited descendants', () => {
-    const { session, model } = fixture(['1', '3']), key = hiddenGroupKey(session.items['1']!.topic_id, null);
-    const opened = model({ expandedHiddenGroups: new Set([key]) });
+    const { session, model } = fixture(['1', '3']), topic = session.items['1']!.topic_id;
+    const opened = model({ expandedHiddenGroups: new Set([hiddenGroupKey(topic, null)]) }), key = stripKey(topic, null, 'hidden', '1');
     expect(opened.rows.slice(0, 10).map(row => row.key)).toEqual([session.items['1']!.topic_id, '2', '4', '5', '6', '7', key, '1', '1.1', '3']);
     for (const id of ['1', '1.1', '3']) expect(opened.rows.find(row => row.key === id)).toMatchObject({ hidden: true });
     expect(opened.rows.find(row => row.key === '2')).toMatchObject({ hidden: false });
@@ -109,7 +119,7 @@ describe('hidden item tree projection', () => {
     const { session, view, model } = fixture(['1', '1.1']);
     view.hidden_item_ids = ['1.1'];
     expect(model().rows.find(row => row.key === '1')).toMatchObject({ hidden: false });
-    expect(model().rows.find(row => row.key === hiddenGroupKey(session.items['1']!.topic_id, '1'))).toMatchObject({ count: 1 });
+    expect(model().rows.find(row => row.key === stripKey(session.items['1']!.topic_id, '1', 'hidden', '1.1'))).toMatchObject({ count: 1 });
     expect(model().rows.some(row => row.key === '1.1')).toBe(false);
     view.hidden_item_ids = [];
     expect(model().rows.find(row => row.key === '1.1')).toMatchObject({ hidden: false });
@@ -117,38 +127,36 @@ describe('hidden item tree projection', () => {
 
   it('flags a waiting descendant under a hidden parent and retains the waiting chip count', () => {
     const { session, input } = fixture(['1']); session.items['1.1']!.status = 'waiting_on_me';
-    const hidden = treeModel({ ...input, session: immutable(session) });
-    const visible = treeModel({ ...input, session: immutable(session), view: { ...input.view, hidden_item_ids: [] } });
-    expect(hidden.rows.find(row => row.kind === 'hidden')).toMatchObject({ waiting: true });
-    expect(hidden.counts.waiting).toBe(visible.counts.waiting);
-    expect(hidden.counts.all).toBe(visible.counts.all - 2);
+    const hidden = shimTree({ ...input, session: immutable(session) });
+    expect(hidden.rows.find(row => row.kind === 'strip')).toMatchObject({ reason: 'hidden', waiting: 1 });
+    const scopeOf = (view: typeof input.view) => ({ session: immutable(session), view, later: new Set<string>(), local: [] });
+    expect(chipCounts(scopeOf(input.view)).waiting).toBe(chipCounts(scopeOf({ ...input.view, hidden_item_ids: [] })).waiting);
+    expect(summaryCounts(scopeOf(input.view)).total).toBe(summaryCounts(scopeOf({ ...input.view, hidden_item_ids: [] })).total - 2);
   });
 
   it('reveals nested hidden groups from outside the tree without removing hidden preferences', () => {
     const { session, view, model } = fixture(['1', '1.1']);
     const revealed = model({ revealId: '1.1', temporaryExpanded: [] });
-    expect(revealed.rows.filter(row => row.kind === 'hidden').every(row => row.expanded)).toBe(true);
+    expect(revealed.rows.filter(row => row.kind === 'strip').every(row => row.expanded)).toBe(true);
     const topic = session.items['1']!.topic_id;
-    expect(revealed.rows.slice(0, 11).map(row => row.key)).toEqual([topic, '2', '3', '4', '5', '6', '7', hiddenGroupKey(topic, null),
-      '1', hiddenGroupKey(topic, '1'), '1.1']);
+    expect(revealed.rows.slice(0, 11).map(row => row.key)).toEqual([topic, '2', '3', '4', '5', '6', '7', stripKey(topic, null, 'hidden', '1'),
+      '1', stripKey(topic, '1', 'hidden', '1.1'), '1.1']);
     expect(revealed.rows.find(row => row.key === '1.1')).toMatchObject({ hidden: true });
     expect(view.hidden_item_ids).toEqual(['1', '1.1']);
   });
 
-  it('counts search matches and status chips without hidden rows while reporting hidden matches', () => {
+  it('keeps the status chip counts under a search and reports matches in hidden items apart', () => {
     const { model } = fixture(['1.1']);
-    const searched = model({ search: 'receipt' });
-    expect(searched.searchCount).toBe(1); expect(searched.itemCount).toBe(8); expect(searched.hiddenCount).toBe(1);
-    expect(searched.counts.open).toBe(0); expect(searched.counts.progress).toBe(1); expect(searched.counts.all).toBe(1);
-    expect(model({ search: 'unmatched' }).hiddenCount).toBe(0);
+    const plain = model(), searched = model({ search: 'receipt' });
+    // The search changes no count and no row; the hidden 1.1 ("Add the receipt lookup test") is named in the note.
+    expect(searched.rows.map(row => row.key)).toEqual(plain.rows.map(row => row.key));
+    expect(searched.rows.find(row => row.key === '3')).toMatchObject({ matches: ['question'] });
+    expect(searched.search).toMatchObject({ hidden: 1, collapsed: 0 });
+    expect(model({ search: 'unmatched' }).search).toMatchObject({ hidden: 0, collapsed: 0 });
   });
 
   it('counts hidden matches only for the selected statuses without search text', () => {
-    const { view, model } = fixture(['1.1']); view.filters.statuses = ['open'];
-    const filtered = model();
-    expect(filtered.searchCount).toBe(2); expect(filtered.itemCount).toBe(8); expect(filtered.hiddenCount).toBe(1);
-    expect(filtered.counts.open).toBe(2);
-    view.filters.statuses = ['in_progress'];
-    expect(model().hiddenCount).toBe(0);
+    const { session, view } = fixture(['1.1']); view.filters.statuses = ['open'];
+    expect(chipCounts({ session: immutable(session), view, later: new Set(), local: [] }).open).toBe(2);
   });
 });

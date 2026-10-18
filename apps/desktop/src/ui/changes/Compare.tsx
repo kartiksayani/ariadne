@@ -19,19 +19,24 @@ function valueText(value: ChangedField['before'], field: ChangedField['field'], 
 }
 
 /** All before/after surfaces share this compact control and accessible label. */
-export function Compare({ row, session }: { readonly row: ChangeRow; readonly session: Immutable<Session> }) {
+export function Compare({ row, session, why, variant = 'icon' }: { readonly row: ChangeRow; readonly session: Immutable<Session>; readonly why?: string | null;
+  /** `link` is the board's "› Before → after" line (SPEC 5.3); `icon` is the compact button the other surfaces use. */
+  readonly variant?: 'icon' | 'link' }) {
   const [open, setOpen] = useState(false), id = useId();
   if (!row.fields.length) return null;
-  return <span className="change-compare">
-    <button type="button" className={`btn btn-ghost change-compare-button${open ? ' is-open' : ''}`} title="Show before and after"
+  const link = variant === 'link';
+  return <span className={link ? 'change-compare change-compare-link' : 'change-compare'}>
+    {link ? <button type="button" className="change-compare-toggle" title="Show before and after" aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)}>
+      <i className={open ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />{open ? 'Hide before → after' : 'Before → after'}</button>
+    : <button type="button" className={`btn btn-ghost change-compare-button${open ? ' is-open' : ''}`} title="Show before and after"
       aria-label="Show before and after" aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
         <path d="M4 3h6v18H4zM14 3h6v18h-6M7 8h10m-3-3 3 3-3 3M17 16H7m3-3-3 3 3 3" />
       </svg>
-    </button>
+    </button>}
     {open && <span id={id} className="change-comparison">{row.fields.map(field => <span key={field.field} className="change-field">
       <strong>{fieldNames[field.field]}</strong><span><span className="change-value-label">Before</span><del>{valueText(field.before, field.field, session)}</del></span>
       <span><span className="change-value-label">After</span><mark>{valueText(field.current, field.field, session)}</mark></span>
-    </span>)}</span>}
+    </span>)}{why && !row.fields.some(field => field.field === 'why') && <span className="change-field"><strong>Why</strong><span>{why}</span></span>}</span>}
   </span>;
 }

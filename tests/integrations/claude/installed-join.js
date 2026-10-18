@@ -6,6 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { deferred, host } from './fixtures.js';
 
 const [pluginRoot, projectRoot] = process.argv.slice(2);
+// The Rust test sets this when a busy machine can make a debug helper slower than the plugin's
+// own 8 s helper timeout. It only stretches this harness's bounds; the plugin is unchanged.
+const SCALE = Math.min(100, Math.max(1, Number.parseInt(process.env.ARIADNE_TEST_DEADLINE_SCALE ?? '1', 10) || 1));
 const { register } = await import(pathToFileURL(`${pluginRoot}/hooks/register.js`));
 const hooks = new Map();
 const reports = [];
@@ -18,7 +21,7 @@ async function execute(argv, options) {
   running += 1;
   try {
     const result = await new Promise((resolve, reject) => {
-      const child = spawn(argv[0], argv.slice(1), { stdio:['pipe','pipe','pipe'], timeout:options.timeoutMs });
+      const child = spawn(argv[0], argv.slice(1), { stdio:['pipe','pipe','pipe'], timeout:options.timeoutMs * SCALE });
       let stdout = '', stderr = '';
       child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
       child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
@@ -50,7 +53,7 @@ fixture.$.session.cwd = async () => projectRoot;
 register((event, spec, callback) => hooks.set(`${event}:${typeof spec === 'function' ? '' : spec.command}`, typeof spec === 'function' ? spec : callback));
 const next = event => event;
 async function drain() {
-  const until = Date.now() + 6000;
+  const until = Date.now() + 6000 * SCALE;
   // Timer callbacks and detached settlement deliberately do not return their jobs.
   do {
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -58,7 +61,7 @@ async function drain() {
   } while (running);
 }
 async function until(predicate) {
-  const deadline = Date.now() + 6000;
+  const deadline = Date.now() + 6000 * SCALE;
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error('Detached Mod evidence did not settle within the fixture bound');
     await new Promise(resolve => setTimeout(resolve, 10));

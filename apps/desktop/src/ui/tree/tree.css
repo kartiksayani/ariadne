@@ -1,4 +1,7 @@
-/* The session tree column: Ariadne.dc.html:93-162 and 285-320, Item Row.dc.html. */
+/* The session tree column: Ariadne.dc.html:93-162 and 285-320, Item Row.dc.html.
+   The column, its bars, the path row and the states live here. Items are in tree-rows.css, the topic band in
+   tree-band.css and the filter control in tree-filter.css, all imported after this file. A few row and band
+   rules that tests read from this file stay here until those tests move with their pieces. */
 .tree-column {
   position: relative;
   display: flex;
@@ -18,6 +21,7 @@
   scroll-padding-top: var(--tree-header-height, 0);
   overflow: auto;
   overflow-anchor: none; /* Use Ariadne's position hold in Chromium as in the shipped WKWebView. */
+  container: tree-map / inline-size; /* rows narrow their end cluster below a 560px Map (D5) */
 }
 
 .tree-rows {
@@ -72,78 +76,6 @@
   font-size: calc(12.5px * var(--text-scale));
 }
 
-/* The filter control ends the Recent row. */
-.tree-filters {
-  display: flex;
-  flex: none;
-  align-items: center;
-  margin-left: auto;
-}
-
-.tree-filter-button {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  font-size: calc(14px * var(--text-scale));
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 74%, transparent);
-  background: transparent;
-  box-shadow: 0 0 0 1px var(--color-divider);
-}
-
-.tree-filter-button[data-active] {
-  color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
-}
-
-.tree-filter-button:disabled {
-  cursor: default;
-}
-
-.tree-filter-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentcolor;
-}
-
-.tree-filter-option {
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 4px;
-  font: inherit;
-  cursor: pointer;
-  color: var(--color-text);
-  background: transparent;
-}
-
-.tree-filter-option:disabled {
-  cursor: default;
-  opacity: .5;
-}
-
-.tree-filter-check {
-  width: 14px;
-  color: var(--color-accent);
-}
-
-.tree-chip-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  opacity: .7;
-}
-
 .tree-banner-text {
   flex: 1;
   min-width: 0;
@@ -187,6 +119,7 @@
 
 .tree-row {
   --tree-bullet-y: 23px;
+  --tree-x: calc(20px + 22px * var(--depth, 0)); /* X(k): the column of a depth's chevron or icon */
 
   position: relative;
   cursor: pointer;
@@ -218,13 +151,49 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 16%, transparent);
 }
 
-.tree-topic .tree-chevron {
-  --tree-chevron-base: var(--a-side);
-}
-
 .tree-chevron:hover {
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-text) 18%, var(--tree-chevron-base));
+}
+
+/* The band's chevron is a soft fill with no ring (SPEC 2.2): 18 x 18, one pixel left of the band's padding and one above the title line's
+   middle. The fill is the board's translucent wash over the chevron's opaque base. When the thread is on, its line and halo run into the
+   chevron from the arrow, under that wash, as the board draws it. */
+.tree-topic .tree-chevron {
+  --tree-chevron-base: var(--a-side);
+  --tree-chevron-wash: 11%;
+
+  width: 18px;
+  height: 18px;
+  margin: 0 0 2px -1px;
+  border-radius: 5px;
+  color: var(--color-text);
+  background: var(--tree-chevron-base);
+  box-shadow: none;
+}
+
+.tree-topic .tree-chevron::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-text) var(--tree-chevron-wash), transparent);
+}
+
+.tree-topic:has(> .tree-thread) .tree-chevron::after {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  top: 9px;
+  bottom: 0;
+  left: 6px;
+  width: 7px;
+  background: linear-gradient(90deg, var(--tree-halo) 2px, var(--color-accent) 2px 5px, var(--tree-halo) 5px);
+}
+
+.tree-topic .tree-chevron:hover {
+  --tree-chevron-wash: 18%;
 }
 
 .tree-chevron i {
@@ -238,168 +207,7 @@
   height: 22px;
 }
 
-/* Topic band. */
-.tree-topic {
-  --tree-bullet-y: 22px;
-
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 16px 10px 12px;
-  border-top: 1px solid var(--color-divider);
-  border-bottom: 1px solid var(--color-divider);
-  background: var(--a-side);
-}
-
-.tree-topic[data-first] {
-  margin-top: 0;
-  border-top: 0;
-}
-
-.tree-topic:focus,
-.tree-topic:focus-within {
-  background: color-mix(in srgb, var(--color-text) 7%, var(--a-side));
-}
-
-/* The name owns the space beside the compact actions; counts wrap below it. */
-.tree-topic-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.tree-topic-name {
-  flex: 1 1 calc(12em / var(--text-scale));
-  min-width: 0;
-  padding-left: 4px;
-  font-size: calc(15.5px * var(--text-scale));
-  font-weight: 500;
-  line-height: calc(22px * var(--text-scale));
-  letter-spacing: -.01em;
-  color: var(--a-acc-text);
-}
-
-.tree-topic-name[data-earlier] {
-  color: color-mix(in srgb, var(--a-acc-text) 82%, transparent);
-}
-
-.tree-session-chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: calc(11.5px * var(--text-scale));
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-
-.tree-session-chip i {
-  font-size: calc(12px * var(--text-scale));
-}
-
-.tree-topic-end {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-left: auto;
-  font-size: calc(12px * var(--text-scale));
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-/* The band's actions keep their room at all times and only fade in (as .tree-actions does on items),
-   so the name never rewraps between hover and no hover. visibility keeps them unclickable while hidden. */
-.tree-topic-actions {
-  display: grid;
-  grid-template-rows: repeat(2, auto);
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  gap: 2px;
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity .12s;
-}
-
-.tree-topic:hover .tree-topic-actions,
-.tree-topic:focus .tree-topic-actions,
-.tree-topic:focus-within .tree-topic-actions {
-  visibility: visible;
-  opacity: 1;
-}
-
-.tree-topic-action {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 22px; /* No taller than the name's line, so the always-present actions never make the band taller. */
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  font: inherit;
-  font-size: calc(12px * var(--text-scale));
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 74%, transparent);
-  background: transparent;
-}
-
-.tree-topic-action i,
-.tree-count i {
-  font-size: calc(13px * var(--text-scale));
-}
-
-.tree-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-.tree-topic-counts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-  padding-left: 26px;
-  font-size: calc(12px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-.tree-topic-line {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding-left: 26px;
-  font-size: calc(13px * var(--text-scale));
-  line-height: calc(20px * var(--text-scale));
-}
-
-.tree-topic-line > i {
-  font-size: calc(13px * var(--text-scale));
-}
-
-.tree-topic-status > span {
-  overflow: hidden;
-  min-width: 0;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* The topic's cards sit right of the rail (their left margin clears it); the wrapper's own height, margins
-   included, is what lets the rail run unbroken from the band down to the first item. */
-.tree-topic-cards {
-  position: relative;
-  display: flow-root;
-}
+/* The topic band's rules are in tree-band.css. */
 
 /* Reply and recovery controls scroll with the section, below its sticky band. */
 .tree-topic-content {
@@ -411,138 +219,28 @@
   background: var(--a-side);
 }
 
-.tree-topic-fix {
-  padding-left: 26px;
-}
-
 .tree-fix .stuck-note {
   position: relative;
   margin: 2px 0;
 }
 
-.tree-topic-reply {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 4px 0 6px 26px;
-}
-
-.tree-topic-reply textarea {
-  width: 100%;
-  resize: vertical;
-}
-
-.tree-topic-reply-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.tree-prompt {
-  gap: 8px;
-  color: color-mix(in srgb, var(--color-text) 64%, transparent);
-}
-
-.tree-prompt > i {
-  color: var(--st-done);
-}
-
-.tree-prompt .btn {
-  padding: 2px 8px;
-  font-size: calc(12.5px * var(--text-scale));
-}
-
-/* Item row. */
+/* Item row. Its padding is fixed per depth (SPEC 3.4 with the opening rows' values): whether a box opens or closes at a
+   row never changes its height, which depends only on its text and the Map's width. The tinted boxes are slices behind it
+   (tree-rows.css), so the row is its own stacking context. */
 .tree-item {
+  --tree-pad-top: 10px;
+  --tree-bullet-y: calc(var(--tree-pad-top) + 11px);
+
   display: flex;
+  isolation: isolate;
   align-items: flex-start;
   gap: 6px;
-  padding-top: 12px;
-  padding-right: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--color-divider);
+  padding: var(--tree-pad-top) calc(18px + (var(--depth) - 1) * 6px) 13px calc(var(--tree-x) - 9px);
 }
 
-/* Extra room before a root keeps its descendants together without breaking guide lines. */
+/* A top item sits a little lower than its children's rows. */
 .tree-item-root {
-  --tree-bullet-y: 31px;
-
-  padding-top: 20px;
-}
-
-.tree-item:hover {
-  background: color-mix(in srgb, var(--color-text) 4%, transparent);
-}
-
-.tree-item[aria-selected="true"] {
-  background: color-mix(in srgb, var(--color-text) 7%, transparent);
-}
-
-.tree-guide {
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  bottom: -1px;
-}
-
-.tree-guide[data-from-bullet] { top: var(--tree-bullet-y); }
-
-.tree-guide[data-to-bullet] {
-  bottom: auto;
-  height: var(--tree-bullet-y);
-}
-
-.tree-elbow {
-  position: absolute;
-  top: 0;
-  height: var(--tree-bullet-y);
-  pointer-events: none;
-}
-
-.tree-chevron-space::after {
-  content: '';
-  display: block;
-  width: 5px;
-  height: 5px;
-  margin: 8px auto;
-  border: 1px solid var(--a-guide);
-  border-radius: 50%;
-  background: var(--a-bg);
-}
-
-.tree-top-colour {
-  position: absolute;
-  top: 25px;
-  left: 4px;
-  width: 3px;
-  height: 13px;
-  border-radius: 2px;
-}
-
-.tree-heading {
-  display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  min-width: 0;
-}
-
-.tree-icon {
-  position: relative;
-  z-index: 1;
-  flex: none;
-  display: flex;
-  align-items: center;
-  height: 22px;
-}
-
-.tree-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  --tree-pad-top: 13px;
 }
 
 /* Titles and options remain fully readable. */
@@ -552,16 +250,6 @@
   white-space: pre-line;
   overflow-wrap: anywhere;
   text-wrap: pretty;
-}
-
-.tree-heading > .tree-question {
-  flex: 1 1 12ch;
-  min-width: 0;
-}
-
-.tree-hit {
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
 }
 
 .tree-line {
@@ -575,69 +263,6 @@
   line-height: var(--tree-preview-line);
 }
 
-.tree-line-tight {
-  flex-wrap: nowrap;
-  gap: 6px;
-}
-
-.tree-line > i {
-  font-size: calc(14px * var(--text-scale));
-}
-
-.tree-line > i.tree-line-small {
-  font-size: calc(13px * var(--text-scale));
-}
-
-.tree-ask {
-  display: block;
-  font-size: calc(14px * var(--text-scale));
-  color: var(--a-acc-text);
-}
-
-.tree-outcome {
-  flex-wrap: nowrap;
-  align-items: flex-start;
-  font-size: calc(14px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 84%, transparent);
-}
-
-.tree-outcome > i {
-  flex: none;
-  margin-top: 4px;
-  font-size: calc(13px * var(--text-scale));
-}
-
-.tree-outcome > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  text-wrap: pretty;
-}
-
-/* Four body lines remain visible when at least three lines can be folded. */
-.tree-preview {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-
-.tree-preview > .tree-line {
-  align-self: stretch;
-}
-
-/* Preserve Markdown structure; only eligible bodies have a height limit. */
-.tree-clamp {
-  display: block;
-  min-width: 0;
-
-  /* Markdown supplies <br> for each line break and a newline for copied text.
-     Collapse that newline so it does not create a second visual line. */
-  white-space: normal;
-}
-.tree-line > .tree-clamp { flex: 1; }
-
-.tree-clamp-content { display: block; }
-
 .tree-preview[data-clamped] .tree-clamp {
   max-height: var(--tree-clamp-height);
   overflow: hidden;
@@ -646,45 +271,6 @@
 .tree-preview .md-pre {
   max-height: none;
   overflow: visible;
-}
-
-.tree-more {
-  margin-left: 21px;
-  padding: 1px 6px;
-  border: 0;
-  border-radius: 5px;
-  font: inherit;
-  font-size: calc(12.5px * var(--text-scale));
-  line-height: calc(18px * var(--text-scale));
-  cursor: pointer;
-  color: var(--a-acc-text);
-  background: transparent;
-}
-
-.tree-more:hover {
-  background: color-mix(in srgb, var(--color-text) 7%, transparent);
-}
-
-.tree-ask + .tree-more {
-  margin-left: 0;
-}
-
-/* The owner's message on its way: a small line under the details, never in their place. */
-.tree-delivery {
-  font-size: calc(12.5px * var(--text-scale));
-}
-
-.tree-jump {
-  padding: 0;
-  border: 0;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  color: var(--a-acc-text);
-  background: transparent;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
-  text-underline-offset: 3px;
 }
 
 .tree-collapsed {
@@ -722,89 +308,38 @@
   font-size: calc(14px * var(--text-scale));
 }
 
+/* The end cluster (alpha.20 C4): marker, session-closed chip, status badge, related count and Ack, right of the text and in
+   one line beside its first line. Each slot keeps its width filled or empty, so a marker clearing, an Ack landing, a status
+   changing or a related count appearing never changes the text's width: the row never rewraps. The widths are tokens the
+   row look tunes with its pills. */
 .tree-end {
+  --tree-end-marker: calc(23px + 44.5px * var(--text-scale)); /* as wide as the "Changed" pill: its padding and diamond, then its word */
+  --tree-end-badge: calc(104px * var(--text-scale)); /* "Waiting on me", the longest badge */
+  --tree-end-related: 26px;
+  --tree-end-ack: 22px;
+
+  position: relative;
   flex: none;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.tree-row-status {
-  display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  padding-top: 2px;
+  gap: 6px;
+  min-height: calc(22px * var(--text-scale));
+  white-space: nowrap;
 }
 
-.tree-change-marker {
+.tree-end-slot {
   flex: none;
-  color: var(--attention);
-}
-
-.tree-change-new {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--attention) 13%, var(--a-bg));
-  font-size: calc(10.5px * var(--text-scale));
-  font-weight: 600;
-  line-height: calc(16px * var(--text-scale));
-}
-
-.tree-change-changed {
-  width: 7px;
-  height: 7px;
-  margin: 0 3px;
-  border-radius: 50%;
-  background: var(--attention);
-}
-
-.tree-item[data-next-unseen] {
-  outline: 2px solid var(--attention);
-  outline-offset: -2px;
-}
-
-.tree-item[data-next-unseen-pulse] {
-  animation: tree-unseen-arrival .9s ease-out;
-}
-
-@keyframes tree-unseen-arrival {
-  0%, 45% { background: color-mix(in srgb, var(--attention) 18%, var(--a-bg)); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tree-item[data-next-unseen-pulse] { animation: none; }
-}
-
-.tree-unseen-announcement {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* Only present for actions: the intrinsic grid never reserves an empty column. */
-.tree-action-grid {
-  display: grid;
-  grid-template-rows: repeat(2, auto);
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  gap: 1px;
-}
-
-.tree-round {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: calc(11.5px * var(--text-scale));
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  justify-content: flex-end;
 }
 
-/* Related counts reserve their space before hover, so the question never rewraps. */
+.tree-end-marker { width: var(--tree-end-marker); }
+.tree-end-badge { width: var(--tree-end-badge); }
+.tree-end-related { width: var(--tree-end-related); }
+.tree-ack-slot { width: var(--tree-end-ack); }
+
+/* The count's own slot reserves its room; it brightens on hover or selection. */
 .tree-related {
   display: inline-flex;
   flex: none;
@@ -826,63 +361,47 @@
   opacity: 1;
 }
 
-.tree-round i {
-  font-size: calc(12px * var(--text-scale));
-}
-
-/* The shortcut icons keep their room at all times and only fade in, so the text column
-   never changes width between hover and no hover. */
+/* The hover bar floats over the row, left of the end cluster, on a card: it takes no room, so showing it moves nothing.
+   visibility keeps its buttons unclickable while hidden. */
 .tree-actions {
-  display: contents;
+  position: absolute;
+  z-index: 2;
+  top: -3px;
+  right: calc(100% + 6px);
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--color-divider);
   visibility: hidden;
   opacity: 0;
-}
-
-.tree-item-hidden .tree-actions,
-.tree-item:hover .tree-actions,
-.tree-item[aria-selected="true"] .tree-actions,
-.tree-column[data-kbd] .tree-item:focus .tree-actions {
-  visibility: visible;
-  opacity: 1;
-}
-
-.tree-action {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 70%, transparent);
-  background: transparent;
-}
-
-/* Contents places each shortcut in the shared grid; its buttons own the fade. */
-.tree-actions > .tree-action {
-  opacity: inherit;
   transition: opacity .12s;
 }
 
-.tree-action i {
-  font-size: calc(14px * var(--text-scale));
-}
-
-/* Ack stays visible; the adjacent hover actions already reserve their space. */
-.tree-ack-slot {
-  display: contents;
-}
-
-.tree-action-ack {
-  border: 1px solid var(--color-divider);
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+.tree-item:hover .tree-actions,
+.tree-column[data-kbd] .tree-item:focus .tree-actions {
+  visibility: visible;
+  opacity: 1;
 }
 
 .tree-topic-action:hover,
 .tree-action:hover {
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-text) 9%, transparent);
+}
+
+/* ---------------------------------------------------------------- search in place */
+
+/* Hits are a background and a ring only, so a search never changes a line (SPEC §5.8 8.1). */
+.tree-hit {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.tree-hit[data-current] {
+  background: color-mix(in srgb, var(--color-accent) 34%, transparent);
+  box-shadow: 0 0 0 1.5px var(--color-accent);
 }
 
 /* ---------------------------------------------------------------- states */
@@ -937,6 +456,12 @@
   font-weight: 500;
 }
 
+.tree-no-match-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tree-loading {
   display: flex;
   flex-direction: column;
@@ -986,35 +511,8 @@
   font-size: calc(14px * var(--text-scale));
 }
 
-/* Last: more specific than every other tree icon rule. */
-.tree-topic-line .btn i {
-  font-size: calc(13px * var(--text-scale));
-}
-
-.tree-hidden-group {
-  --tree-bullet-y: 20px;
-
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
-  cursor: pointer;
-}
-
-.tree-hidden-waiting {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: calc(11px * var(--text-scale));
-  color: var(--st-waiting);
-}
-
-.tree-item-hidden {
-  opacity: .58;
-}
-
 .tree-scroll-shell {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -1028,147 +526,56 @@
   left: calc(-1em - 8px);
 }
 
-/* The path row keeps the same height with or without the tag; it never covers or shifts rows.
-   The tag sits at the row's right end; the ancestors beside it shorten their names first. */
-.tree-path {
-  display: flex;
-  flex: none;
-  align-items: center;
-  min-width: 0;
-}
-
-.tree-selected-slot {
-  flex: none;
-  min-width: 0;
-  max-width: 60%;
-  height: 28px;
-  margin-right: 16px;
-  display: flex;
-  align-items: center;
-}
-
-.tree-selected-slot:empty {
-  margin-right: 0;
-}
-
-/* Content width, with an opaque surface in every state, including the global button reset. */
-.tree-selected-edge,
-.tree-selected-edge:hover,
-.tree-selected-edge:focus,
-.tree-selected-edge:active {
+/* "↑ Back to “name” ." (SPEC §5.8 8.5): floats centred over the Map, so it appearing or going never moves a row. Above:
+   12px under the sticky band (TreeView keeps --tree-header-height on the shell); below: 14px above the floating dock. An
+   opaque surface in every state, including the global button reset. */
+.tree-back,
+.tree-back:hover,
+.tree-back:focus,
+.tree-back:active {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  max-width: min(100%, 34ch);
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--color-divider);
-  border-radius: 5px;
+  gap: 7px;
+  max-width: min(70%, 48ch);
+  height: 30px;
+  padding: 0 6px 0 9px;
+  border: 0;
+  border-radius: 999px;
   background: var(--a-card);
-  color: var(--a-acc-text);
-  box-shadow: var(--a-lift);
+  color: var(--color-text);
+  box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-md);
   font: inherit;
   font-size: calc(12.5px * var(--text-scale));
-  overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
   cursor: pointer;
+  transform: translateX(-50%);
 }
 
-.tree-selected-label {
+.tree-back[data-edge="above"] { top: calc(var(--tree-header-height, 0px) + 12px); }
+.tree-back[data-edge="below"] { bottom: calc(var(--dock-inset, 0px) + 14px); }
+
+.tree-back-arrow {
+  flex: none;
+  width: 10px; /* The board's arrow is an icon box, wider than the text arrow: the words start 2px further right. */
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-back-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.tree-selected-edge:focus-visible {
+.tree-back:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-/* The fixed slot is outside the scroller: changing its names neither overlaps rows nor moves them. */
-.tree-breadcrumb {
-  display: flex;
-  flex: 1 1 0;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  min-width: 0;
-  padding: 0 16px;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: calc(12px * var(--text-scale));
-}
-
-.tree-breadcrumb > span {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 4px;
-}
-
-.tree-breadcrumb button,
-.tree-focus-action {
-  min-width: 0;
-  padding: 2px 5px;
-  border: 0;
-  border-radius: 4px;
-  font: inherit;
-  font-size: calc(12px * var(--text-scale));
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  color: var(--a-acc-text);
-  background: transparent;
-}
-
-.tree-focus-action {
-  align-self: flex-start;
-  height: 24px;
-  box-sizing: border-box;
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-
-.tree-breadcrumb button {
-  padding: 0;
-  line-height: inherit;
-}
-
-/* The sticky copy of the focused item's button, at the end of the ancestors: the same look as on its row. */
-.tree-breadcrumb .tree-focus-action {
-  flex: none;
-  align-self: center;
-  height: 22px;
-  margin-left: 4px;
-  padding: 0 6px;
-}
-
-.tree-selected-edge > span:first-child {
-  flex: none;
-}
-
-.tree-recent > button {
-  flex: none;
-  font-size: calc(12px * var(--text-scale));
-}
-
-.tree-focus-action:hover {
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
-}
-
-.tree-breadcrumb button:hover { text-decoration: underline; }
-
-.tree-recent {
-  display: flex;
-  flex: none;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-  padding: 4px 16px 0;
-}
-
-.tree-recent > nav {
-  flex: 1;
-  min-width: 0;
+/* The band's caret is the board's plain 12px one (not scaled, like its 18px box), not the rows' heavier 14px. */
+.tree-topic .tree-chevron i {
+  font-size: 12px;
+  -webkit-text-stroke: 0;
 }

@@ -1,12 +1,18 @@
-import { useState } from 'react';
-import type { RecentAction, RecentItem, SessionSeen } from '../../generated/core';
+import { useEffect, useMemo, useRef } from 'react';
+import type { RecentAction, RecentItem } from '../../generated/core';
 import type { Item, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data/session-store';
-import { isChangedSinceRead, isNewToOwner, type SeenState } from '../../selectors/changes/seen';
+import { changeLabel } from '../../selectors/changes/label';
+import { changedLately } from '../../selectors/changes/lately';
 import { itemRemoved } from '../../selectors/removed';
+import { displayStatus } from '../../selectors/waiting/replied';
+import { clockTime } from '../changes/clock';
 import { peekNames } from '../peek/names';
-import { Dialog } from '../dialogs/Dialog';
-import './navigation.css';
+import { usePeek } from '../peek/context';
+import { StatusBadge } from '../shared/StatusBadge';
+import { statusKey } from '../shared/status';
+import { usePopover, useRestoreFocus } from '../parts/parts';
+import './recent.css';
 
 export const RECENT_LIMIT = 15;
 /** Visits form a distinct-item recency list, independently of back/forward. */
@@ -18,43 +24,63 @@ export function recordRecent(entries: readonly Immutable<RecentItem>[] | undefin
     ids.add(entry.item_id); return true;
   }).map(entry => ({ ...entry }))].slice(0, RECENT_LIMIT);
 }
-export function recentEntries(session: Immutable<Session>, entries: readonly Immutable<RecentItem>[] | undefined,
-  changedOnly = false, seen: SeenState = null) {
+export function recentEntries(session: Immutable<Session>, entries: readonly Immutable<RecentItem>[] | undefined) {
   return (entries ?? []).slice(0, RECENT_LIMIT).flatMap(entry => {
     const item = session.items[entry.item_id];
-    return item && !itemRemoved(session, item.id) && (!changedOnly || isNewToOwner(item, seen) || isChangedSinceRead(item, seen))
-      ? [{ entry, item }] : [];
+    return item && !itemRemoved(session, item.id) ? [{ entry, item }] : [];
   });
 }
-interface RecentProps {
+
+/**
+ * The top-bar Recent popover (SPEC 8.3, D19), "Recent · viewed and changed". "Viewed": the items the owner visited, newest first,
+ * with the time. "Changed lately": the six items whose latest real change is newest, each with what changed. Each row has the
+ * item's status icon and its underlined name. A click selects the item and closes it.
+ * Hovering a name peeks it; neither opening nor peeking changes what the owner has seen.
+ */
+export function RecentPopover({ session, entries, onReveal, onClose }: {
   readonly session: Immutable<Session>;
   readonly entries: readonly Immutable<RecentItem>[] | undefined;
   readonly onReveal: (id: string) => void;
-}
-export function RecentTrail({ session, entries, nextWaiting, onReveal }: RecentProps & { readonly nextWaiting: Immutable<Item> | null }) {
-  const labels = peekNames(session);
-  return <nav className="recent-trail" aria-label="Your recent trail">
-    <div className="recent-trail-items">{recentEntries(session, entries).slice(0, 3).map(({ entry, item }, index) =>
-      <span key={item.id}>{index > 0 && <span className="recent-trail-separator" aria-hidden="true">›</span>}
-        <button type="button" title={item.question} onClick={() => onReveal(item.id)}>{labels.get(item.id)} <small>· {entry.action}</small></button></span>)}</div>
-    {nextWaiting && <button type="button" className="recent-next" onClick={() => onReveal(nextWaiting.id)} title={nextWaiting.question}>
-      Next: {labels.get(nextWaiting.id)} <span aria-hidden="true">→</span></button>}
-  </nav>;
-}
-export function RecentDialog({ session, entries, seen, onReveal, onClose }: RecentProps & {
-  readonly seen: Immutable<SessionSeen> | null | undefined;
-  readonly onClose: () => void;
+  readonly onClose: (restoreFocus: boolean) => void;
 }) {
-  const [changedOnly, setChangedOnly] = useState(false);
-  const visits = recentEntries(session, entries, changedOnly, seen);
+  const panel = useRef<HTMLDivElement>(null);
+  usePopover(true, onClose, panel, '[data-popover-trigger="recent"]');
+  useRestoreFocus(panel);
+  useEffect(() => { panel.current?.focus(); }, []);
+  const peek = usePeek();
   const labels = peekNames(session);
-  return <Dialog label="Recent items" width={560} onCancel={onClose}>
-    <div className="recent-header"><h2>Recent</h2><button type="button" className="btn btn-ghost" aria-pressed={changedOnly}
-      onClick={() => setChangedOnly(value => !value)}>Changed only</button>
-      <button type="button" className="btn btn-ghost" aria-label="Close recent" onClick={onClose}>×</button></div>
-    <p className="recent-caption">Up to 15 different items · newest first</p>
-    <div className="recent-list">{visits.map(({ entry, item }) => <button type="button" className="recent-item" key={item.id}
-      onClick={() => { onReveal(item.id); onClose(); }}><span>{labels.get(item.id)} <small>· {entry.action}</small></span></button>)}</div>
-    {!visits.length && <p className="recent-empty">{changedOnly ? 'No changed items in your recent visits.' : 'Open or peek at an item to start your recent trail.'}</p>}
-  </Dialog>;
+  const lately = useMemo(() => changedLately(session), [session]);
+  const visits = useMemo(() => recentEntries(session, entries), [session, entries]);
+  const route = { project_id: session.project_id, session_id: session.id };
+  const open = (id: string) => { onClose(false); onReveal(id); };
+  const hover = (id: string) => peek ? peek.hoverProps({ ...route, item_id: id }) : {};
+  const status = (item: Immutable<Item>) => <StatusBadge status={statusKey[displayStatus(session, item)]} variant="icon" size={14} />;
+  return <div ref={panel} className="recent-popover" role="dialog" aria-label="Recent items" tabIndex={-1}
+    onKeyDown={event => { if (!event.metaKey && !event.ctrlKey && event.key !== 'Escape' && event.key !== 'F6') event.stopPropagation(); }}>
+    <div className="recent-head">
+      <i className="ph ph-clock-counter-clockwise" aria-hidden="true" />
+      <h2>Recent<span className="recent-sub"><span className="recent-dot"> · </span>viewed and changed</span></h2>
+      <button type="button" className="btn btn-ghost recent-close" aria-label="Close recent" title="Close ( esc )" onClick={() => onClose(true)}><i className="ph ph-x" aria-hidden="true" /></button>
+    </div>
+    <section className="recent-section" aria-label="Viewed">
+      <h3 className="p-label">Viewed</h3>
+      {visits.length ? <ul className="recent-list">{visits.map(({ entry, item }) => <li key={item.id}>
+        <button type="button" className="recent-item" title={item.question} {...hover(item.id)} onClick={() => open(item.id)}>
+          {status(item)}
+          <span className="recent-name">{labels.get(item.id)}</span>
+          <small data-quiet={entry.action === 'viewed' || undefined}>· {entry.action}</small>
+          <time dateTime={entry.visited_at}>{clockTime(entry.visited_at)}</time>
+        </button></li>)}</ul> : <p className="recent-empty">Open or peek at an item to start your recent trail.</p>}
+    </section>
+    <section className="recent-section" aria-label="Changed lately">
+      <h3 className="p-label">Changed lately</h3>
+      {lately.length ? <ul className="recent-list">{lately.map(({ item, record, later, at }) => <li key={item.id}>
+        <button type="button" className="recent-item" title={item.question} {...hover(item.id)} onClick={() => open(item.id)}>
+          {status(item)}
+          <span className="recent-name">{labels.get(item.id)}</span>
+          <small>· {changeLabel(item, record, later)}</small>
+          <time dateTime={at}>{clockTime(at)}</time>
+        </button></li>)}</ul> : <p className="recent-empty">Nothing has changed yet.</p>}
+    </section>
+  </div>;
 }

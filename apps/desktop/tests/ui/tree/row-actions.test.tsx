@@ -5,8 +5,6 @@ import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { ItemRow, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
 import { TopicRow, type TopicAction, type TopicRowProps } from '../../../src/ui/tree/TopicRow';
-import { ItemRefs } from '../../../src/ui/shared/MarkdownText';
-import { peekNames } from '../../../src/ui/peek/names';
 
 afterEach(cleanup);
 
@@ -15,8 +13,8 @@ function itemProps(actions: readonly RowAction[]): ItemRowProps {
   const item = immutable({ ...template, question: 'Choose the orchard planting order', status: 'open' as const,
     outcome: 'Plant the pear trees first.', ask: null, note: null });
   return { row: { kind: 'item', key: item.id, item, status: 'open', ack: null, depth: 1, hasKids: false,
-    expanded: false, context: false, guides: [], later: false, hidden: false, segments: [{ text: item.question, hit: false }],
-    replacedBy: null, rounds: 3, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
+    expanded: false, context: false, guides: [], boxes: [], branch: 0, later: false, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
+    replacedBy: null, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
   selected: false, focused: true, note: null, actions, unfolded: false,
   onUnfold: vi.fn(), remember: vi.fn(), onFocus: vi.fn(), onKeyDown: vi.fn(), onSelect: vi.fn(),
   onToggle: vi.fn() };
@@ -32,42 +30,29 @@ function topicProps(actions: readonly TopicAction[]): TopicRowProps {
 }
 
 describe('compact row actions', () => {
-  it('reads cached names only for visible Focus buttons without looking up display status', () => {
-    const session = structuredClone(demo) as Session;
-    session.items['1']!.short = 'Shared name';
-    session.items['2']!.short = 'Shared name';
-    const names = peekNames(immutable(session)), get = vi.spyOn(names, 'get'), lookup = vi.fn();
-    const props = itemProps([]), onFocusBranch = vi.fn();
-    const show = (parent: string | null, focus = true) => <ItemRefs.Provider value={{ lookup, onOpenItem: vi.fn() }}>
-      <ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent } }} names={names} onFocusBranch={focus ? onFocusBranch : undefined} />
-    </ItemRefs.Provider>;
-    const mounted = render(show(null));
-    const label = names.get('1')!;
-    expect(label).not.toBe('Shared name');
-    fireEvent.click(within(mounted.container).getByRole('button', { name: `Focus on ${label}` }));
-    expect(onFocusBranch).toHaveBeenCalledWith('1');
-    get.mockClear();
-    mounted.rerender(show('2'));
-    expect(within(mounted.container).queryByRole('button', { name: /^Focus on/ })).toBeNull();
-    mounted.rerender(show(null, false));
-    expect(get).not.toHaveBeenCalled();
-    expect(lookup).not.toHaveBeenCalled();
-    get.mockRestore();
+  it('has no Focus button and no double-click Focus: the topic band and ⇧F own Focus (D9)', () => {
+    const props = itemProps([]), mounted = render(<ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} />);
+    expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
+    fireEvent.doubleClick(mounted.container.querySelector('.tree-icon')!);
+    expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
   });
 
-  it('turns the focused item’s Focus button into Unfocus in the same place, and it leaves Focus', () => {
-    const session = structuredClone(demo) as Session;
-    const names = peekNames(immutable(session)), props = itemProps([]), onFocusBranch = vi.fn(), label = names.get('1')!;
-    const mounted = render(<ItemRefs.Provider value={{ lookup: vi.fn(), onOpenItem: vi.fn() }}>
-      <ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} names={names} onFocusBranch={onFocusBranch} branchFocused />
-    </ItemRefs.Provider>);
-    const button = within(mounted.container).getByRole('button', { name: `Unfocus ${label}` });
-    expect(button.textContent).toBe('Unfocus');
-    expect(button.className).toBe('tree-focus-action');
-    expect(button.tabIndex).toBe(-1);
-    expect(within(mounted.container).queryByRole('button', { name: /^Focus on/ })).toBeNull();
-    fireEvent.click(button);
-    expect(onFocusBranch).toHaveBeenCalledWith(null);
+  it('draws a held Ack over the area left of the Ack slot, hides the Ack button, and Undo cancels it', () => {
+    const undo = vi.fn(), ack = vi.fn(), props = itemProps([{ title: 'Ack → Done', icon: 'ph ph-check', persistent: true, run: ack }]);
+    const { container, rerender } = render(<ItemRow {...props} />);
+    const before = container.querySelector('.tree-ack-slot')!;
+    expect(within(before as HTMLElement).getByRole('button', { name: 'Ack → Done' })).toBeTruthy();
+    expect(container.querySelector('.tree-acked')).toBeNull();
+    rerender(<ItemRow {...props} acked onUndoAck={undo} />);
+    const held = within(container).getByRole('status');
+    expect(held.textContent).toBe('Acked·Undo');
+    // The Ack slot keeps its place (empty), so the row never rewraps; the notice is inside the end cluster, drawn over it.
+    expect(container.querySelector('.tree-ack-slot')?.childElementCount).toBe(0);
+    expect(held.closest('.tree-end')).not.toBeNull();
+    fireEvent.click(within(held).getByRole('button', { name: /^Undo Ack of/ }));
+    expect(undo).toHaveBeenCalledWith(props.row.item.id);
+    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(ack).not.toHaveBeenCalled();
   });
 
   it('keeps every item action in its existing order with the same names, tab behavior and callbacks', () => {
@@ -76,25 +61,30 @@ describe('compact row actions', () => {
       ...(index === 0 ? { persistent: true } : {}),
       ...(title === 'Hide (x)' ? { glyph: <svg aria-hidden="true" data-testid="hide-icon" /> } : {}) }));
     const props = itemProps(actions), { container } = render(<ItemRow {...props} />);
-    const grid = container.querySelector('.tree-action-grid')!, buttons = within(grid as HTMLElement).getAllByRole('button');
-    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(names);
-    expect(buttons.map(button => button.title)).toEqual(names);
+    // The end cluster holds both: the floating hover bar in order, then Ack in its own reserved slot at the end.
+    const cluster = container.querySelector('.tree-end')!, buttons = within(cluster as HTMLElement).getAllByRole('button');
+    const shown = [...names.slice(1), names[0]!], byTitle = new Map(actions.map(action => [action.title, action]));
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(shown);
+    expect(buttons.map(button => button.title)).toEqual(shown);
+    expect(within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title)).toEqual(names.slice(1));
     expect(buttons.every(button => button.textContent === '')).toBe(true);
-    expect(buttons.map(button => button.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
+    expect(buttons.map(button => button.tabIndex)).toEqual([-1, -1, -1, -1, -1, -1, -1, 0]);
     expect(container.querySelectorAll('.tree-ack-slot')).toHaveLength(1);
     expect(container.querySelectorAll('.tree-actions')).toHaveLength(1);
-    expect(buttons[0]!.closest('.tree-actions')).toBeNull();
-    expect(within(buttons[6]!).getByTestId('hide-icon')).toBeTruthy();
-    for (const [index, button] of buttons.entries()) {
+    expect(buttons.at(-1)!.closest('.tree-actions')).toBeNull();
+    expect(buttons.at(-1)!.closest('.tree-ack-slot')).not.toBeNull();
+    expect(within(buttons[5]!).getByTestId('hide-icon')).toBeTruthy();
+    for (const button of buttons) {
       expect(button.getAttribute('type')).toBe('button');
       expect(button.classList.contains('tree-action')).toBe(true);
       fireEvent.click(button);
-      expect(actions[index]!.run).toHaveBeenCalledOnce();
+      expect(byTitle.get(button.title)!.run).toHaveBeenCalledOnce();
     }
     expect(props.onSelect).not.toHaveBeenCalled();
-    expect(container.querySelector('.tree-row-status')?.textContent).toBe('Open');
+    expect(container.querySelector('.tree-end-badge')?.textContent).toBe('Open');
     expect(container.querySelector('.tree-related')?.getAttribute('aria-label')).toBe('2 related items');
-    expect(container.querySelector('.tree-round')?.textContent).toBe('Round 3');
+    // The Round tag is gone (SPEC §7): it widened the cluster when the owner replied.
+    expect(container.querySelector('.tree-round')).toBeNull();
   });
 
   it('preserves disabled Ack and keeps action markup stable when hovering and selecting a row', () => {
@@ -103,25 +93,45 @@ describe('compact row actions', () => {
       { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
     ]);
     const { container, rerender } = render(<ItemRow {...props} />);
-    const row = container.querySelector('.tree-item')!, grid = container.querySelector('.tree-action-grid')!, before = grid.innerHTML;
+    const row = container.querySelector('.tree-item')!, grid = container.querySelector('.tree-end')!, before = grid.innerHTML;
     const button = within(grid as HTMLElement).getByRole('button', { name: 'Ack → Done' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     fireEvent.click(button); expect(ack).not.toHaveBeenCalled();
     fireEvent.mouseEnter(row);
     rerender(<ItemRow {...props} selected />);
-    expect(container.querySelector('.tree-action-grid')?.innerHTML).toBe(before);
+    expect(container.querySelector('.tree-end')?.innerHTML).toBe(before);
     expect(within(grid as HTMLElement).getByRole('button', { name: 'Reply (r)' }).tabIndex).toBe(-1);
     const selections = vi.mocked(props.onSelect).mock.calls.length;
     fireEvent.click(within(grid as HTMLElement).getByRole('button', { name: 'Reply (r)' }));
     expect(reply).toHaveBeenCalledOnce(); expect(props.onSelect).toHaveBeenCalledTimes(selections);
   });
 
-  it('retains item metadata without an empty action grid or hover placeholder', () => {
+  // The six-slot hover bar can float over the middle of a narrow row. A click there must still select the row, so a greyed
+  // slot sits in a titled wrapper that takes the pointer (the button ignores it) and the click bubbles to the row.
+  it('lets a click on a greyed hover-bar slot select the row, keeps its tooltip, and never runs it', () => {
+    const later = vi.fn(), reply = vi.fn(), props = itemProps([
+      { title: 'Later: not for Done items', icon: 'ph ph-clock', disabled: true, run: later },
+      { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
+    ]);
+    const { container } = render(<ItemRow {...props} />);
+    const bar = container.querySelector('.tree-actions')!;
+    const slot = bar.querySelector<HTMLElement>('.tree-action-off')!;
+    expect(slot.title).toBe('Later: not for Done items');
+    const button = within(slot).getByRole('button', { name: 'Later: not for Done items' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(bar.querySelectorAll('.tree-action-off')).toHaveLength(1);
+    fireEvent.click(slot);
+    expect(props.onSelect).toHaveBeenCalledWith(props.row.item.id);
+    expect(later).not.toHaveBeenCalled();
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('retains item metadata without an empty hover bar, and keeps the empty Ack slot so an Ack never rewraps the row', () => {
     const { container } = render(<ItemRow {...itemProps([])} />);
-    expect(container.querySelector('.tree-action-grid')).toBeNull();
     expect(container.querySelector('.tree-actions')).toBeNull();
-    expect(container.querySelector('.tree-ack-slot')).toBeNull();
-    expect(container.querySelector('.tree-row-status')?.textContent).toBe('Open');
+    expect(container.querySelector('.tree-ack-slot')?.childElementCount).toBe(0);
+    expect(container.querySelector('.tree-end-marker')?.childElementCount).toBe(0);
+    expect(container.querySelector('.tree-end-badge')?.textContent).toBe('Open');
     expect(container.querySelector('.tree-question')?.textContent).toBe('Choose the orchard planting order');
     expect(container.querySelector('.tree-outcome')?.textContent).toBe('Plant the pear trees first.');
   });

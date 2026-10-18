@@ -43,9 +43,10 @@ test('history failure evidence finds the docked follow-up send control', t => {
 
 test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
   const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale" data-session-busy="true"><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
-    <button aria-label="Continue here"><i></i></button><button aria-label="Archive"><i></i></button></div>
+    <button aria-label="Continue elsewhere"><i></i></button><button aria-label="More actions for “Native topic”"><i></i></button></div>
     <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
-    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div></section>`);
+    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div>
+    <div role="menu"><button role="menuitem" aria-label="Archive topic…"><span>Archive topic…</span><span>Out of the Map</span></button><button role="menuitem" aria-label="Remove topic…"><span>Remove topic…</span></button></div></section>`);
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
   const clicked = [], admitted = [];
@@ -58,14 +59,20 @@ test('history topic actions use their accessible names and the all-closed prompt
       async click() { clicked.push(node.getAttribute('aria-label') ?? node.textContent); },
       $(selector) { return wrap(node.querySelector(selector)); } };
   };
-  globalThis.browser = { $(selector) { return wrap(dom.window.document.querySelector(selector)); },
+  // WebdriverIO's `[role="menuitem"]*=Text` (a menu entry whose text contains Text) is not CSS, so the fake resolves it itself.
+  const bandActions = ['Continue elsewhere', 'More actions for “Native topic”', 'Archive topic…'];
+  globalThis.browser = { $(selector) {
+      const entry = /^\[role="menuitem"\]\*=(.*)$/.exec(selector);
+      if (entry) return wrap([...dom.window.document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent.includes(entry[1])));
+      return wrap(dom.window.document.querySelector(selector));
+    },
     async waitUntil(condition, options) {
-      assert.equal(options.timeout, 20000);
+      assert.equal(options.timeout, 60000);
       admitted.push(await condition());
-      assert.deepEqual(clicked, ['Continue here', 'Archive'], 'A stale session must wait before clicking its archive prompt');
+      assert.deepEqual(clicked, bandActions, 'A stale session must wait before clicking its archive prompt');
       dom.window.document.querySelector('.tree-column').setAttribute('data-session-status', 'ready');
       admitted.push(await condition());
-      assert.deepEqual(clicked, ['Continue here', 'Archive'], 'A busy session must also wait before clicking its archive prompt');
+      assert.deepEqual(clicked, bandActions, 'A busy session must also wait before clicking its archive prompt');
       dom.window.document.querySelector('.tree-column').setAttribute('data-session-busy', 'false');
       admitted.push(await condition());
       assert.equal(admitted.at(-1), true);
@@ -75,7 +82,7 @@ test('history topic actions use their accessible names and the all-closed prompt
   await topicAction('Native topic', 'Archive');
   await archiveClosedTopic('topic');
   assert.deepEqual(admitted, [false, false, true]);
-  assert.deepEqual(clicked, ['Continue here', 'Archive', 'Archive topic']);
+  assert.deepEqual(clicked, [...bandActions, 'Archive topic']);
 });
 
 test('archive diagnostics preserve the failure when browser inspection throws or rejects', async t => {
@@ -105,7 +112,7 @@ test('history choice and Send wait for both native enabled and refresh aria-disa
   let enabled = false, frozen = true;
   const admitted = [];
   globalThis.browser = { async waitUntil(condition, options) {
-    assert.equal(options.timeout, 20000);
+    assert.equal(options.timeout, 60000);
     admitted.push(await condition());
     enabled = true; admitted.push(await condition());
     frozen = false; admitted.push(await condition());
@@ -144,7 +151,7 @@ test('fork links and parent references cannot admit a different selected history
   globalThis.browser = {
     execute: async (condition, expected) => condition(expected),
     async waitUntil(condition, options) {
-      assert.equal(options.timeout, 20000);
+      assert.equal(options.timeout, 60000);
       for (const html of views) { document.body.innerHTML = html; admitted.push(await condition()); }
       assert.equal(admitted.at(-1), true);
     },
@@ -186,7 +193,7 @@ test('five ask anchors require the complete separate correlated reply and settle
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
   globalThis.browser = roundBrowser(dom.window.document, async (condition, options) => {
-    assert.equal(options.timeout, 20000);
+    assert.equal(options.timeout, 60000);
     for (const state of states) { dom.window.document.body.innerHTML = roundView(state); admitted.push(await condition()); }
     assert.equal(admitted.at(-1), true);
   });

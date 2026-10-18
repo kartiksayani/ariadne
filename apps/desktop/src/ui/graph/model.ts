@@ -1,19 +1,18 @@
-import { activeItems } from '../../selectors/removed';
-// Graph view model: one graph per topic, laid out left to right exactly as
-// Ariadne.dc.html `buildGraph` (with `only` set) does. Rows, filters and
-// expansion come from the tree's selector, so the graph follows the tree's
-// expansion and filters (handoff README §7).
+// Graph view model (SPEC §5.1 state 1.3): one canvas, topics stacked down it, each with its title, a trunk joining its
+// top items and orthogonal branch edges. Rows, filters and expansion come from the Tree's selector, so the Graph
+// follows the Tree's folds and status filter. Search never filters here: matches are tinted by the view.
 import type { Item, Session, Topic } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
-import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
+import { itemRemoved } from '../../selectors/removed';
+import { sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
 import { itemLabels } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
-import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from '../tree/hidden';
+import { hiddenItems } from '../tree/hidden';
+import { filterOf, type FilterScope, type LocalChip } from '../../selectors/tree/filter';
 import { connectedItems } from '../../selectors/related';
-import { ackTarget } from '../../selectors/ack';
-import { hasStatusFilter } from '../../selectors/tree/folds';
+import { branchSlot } from '../tree/branch';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
 
 export type GraphStatus = StatusKey;
@@ -26,264 +25,266 @@ export const graphStatus = (status: DisplayStatus): GraphStatus => statusKey[sta
 const closedStatuses: ReadonlySet<Item['status']> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const isClosed = (status: Item['status']): boolean => closedStatuses.has(status);
 
-/** Node and grid sizes (Ariadne.dc.html:1515). "Tight" is when detail is open. */
-export const NODE_WIDTH = 190, NODE_HEIGHT = 66, ROW_HEIGHT = 84;
-/** The "N hidden" stub that stands in for hidden siblings: far smaller than a card, with its own short slot. */
-export const STUB_WIDTH = 124, STUB_HEIGHT = 26, STUB_SLOT = 40;
-export const graphMetrics = (tight: boolean) => ({ pad: tight ? 14 : 20, gap: tight ? 18 : 26 });
+/** SPEC 1.3 geometry, in px: 40px nodes on 50px lanes, the first lane 50 down, depth 1 at 36, the trunk at 16. */
+export const NODE_HEIGHT = 40, LANE = 50, FIRST_LANE = 50, LEFT = 36, TRUNK_X = 16, TRUNK_TOP = 36;
+/** A branch edge leaves its parent's right edge, turns down this far out, then runs across into the child. */
+export const ELBOW = 13;
+/** Space between one topic's last lane and the next topic's title. */
+export const TOPIC_GAP = 16;
+const COLUMN_MIN = 150, COLUMN_MAX = 196, NODE_GAP = 26;
 
-/** The Map's "N items hidden" row, drawn as a stub: one per parent that has hidden children (ui/tree/hidden.ts keys). */
-export interface GraphStub {
-  readonly key: string;
-  readonly topicId: string;
-  readonly parent: string | null;
-  readonly x: number;
-  readonly y: number;
-  /** Hidden siblings it stands for. */
-  readonly count: number;
-  /** Something under them waits on the owner. */
-  readonly waiting: boolean;
-  readonly expanded: boolean;
-}
+/**
+ * SPEC 1.3's column, `clamp(150, floor((mapW − 56) / 5), 196)`. Deviation (maintainer, alpha.20): the view fits it to
+ * the Map's width (as it is with Details folded, so the names fit on one line) only when the Graph opens or the session
+ * changes, never on a Details or window width change, because re-fitting slides every node sideways and the Map never moves
+ * on its own.
+ */
+export const graphColumn = (mapWidth: number): number => Math.min(COLUMN_MAX, Math.max(COLUMN_MIN, Math.floor((mapWidth - 56) / 5)));
+export const nodeWidth = (column: number): number => column - NODE_GAP;
 
 export interface GraphNode {
   readonly item: Immutable<Item>;
+  readonly topicId: string;
   readonly status: GraphStatus;
   readonly short: string;
+  /** Top-left inside its topic's block. */
   readonly x: number;
   readonly y: number;
-  /** Whole visible subtree below this node, across every tier; hidden branches are excluded. Expanding opens only the next tier. */
-  readonly below: number;
-  /** Hidden items below this node (each hidden branch counted once): the stub's items. */
-  readonly hiddenBelow: number;
-  /** Has children but none are shown: draws the "+N" pill. */
-  readonly collapsed: boolean;
-  /** Shows "−": expanded with children, including filter context. */
-  readonly canCollapse: boolean;
+  readonly depth: number;
+  /** Folded with children: draws the quiet "+N" chip so children never vanish unseen. */
+  readonly folded: boolean;
+  /** Unfolded with drawn children: ← folds it. */
+  readonly canFold: boolean;
+  /** What unfolding would bring back into the Graph, across every tier (hidden branches are not drawn, so not counted). */
+  readonly inside: number;
+  /** Of those, the ones waiting on the owner. */
+  readonly waitingInside: number;
   readonly selected: boolean;
-  /** On the thread from the topic to the selected item, but not the selected item. */
-  readonly onThread: boolean;
+  /** On the path from the topic to the selected item, but not the selected item. */
+  readonly onPath: boolean;
   readonly closed: boolean;
-  /** Shown only as context for a filter: 40% opacity. */
+  /** Shown only as context for a status filter. */
   readonly dimmed: boolean;
-  /** Hidden by the owner, directly or through a parent. Still opens in detail. */
+  /** Hidden by the owner and drawn only because it is on the selected or revealed route. */
   readonly hidden: boolean;
-  readonly ack: NonNullable<Item['ack_to']> | null;
+  /** Slot in BRANCH_HUES, from the top item's ordinal (ui/tree/branch.ts). Carried, not drawn: the board's nodes are plain. */
+  readonly branch: number;
 }
-export interface GraphEdge { readonly id: string; readonly d: string; readonly on: boolean }
-export interface GraphReplacement { readonly id: string; readonly d: string; readonly labelX: number; readonly labelY: number }
-export interface RelatedEdge { readonly id: string; readonly from: string; readonly to: string }
+export interface GraphEdge { readonly id: string; readonly d: string }
 export interface TopicGraph {
   readonly topic: Immutable<Topic>;
-  readonly counts: string;
+  /** The topic block's top in the canvas. */
+  readonly top: number;
   readonly width: number;
   readonly height: number;
   readonly nodes: readonly GraphNode[];
-  readonly stubs: readonly GraphStub[];
+  /** The trunk, its branch into each top item, and every parent-to-child elbow. */
   readonly edges: readonly GraphEdge[];
-  readonly replacements: readonly GraphReplacement[];
-  readonly related: readonly { readonly id: string; readonly d: string }[];
 }
 export interface SessionGraph {
   readonly topics: readonly TopicGraph[];
-  /** Node ids and stub keys in layout order (topic by topic, depth first): the ↑/↓ order. */
+  readonly column: number;
+  readonly nodeWidth: number;
+  readonly width: number;
+  readonly height: number;
+  /** Node ids in layout order (topic by topic, depth first): the ↑/↓ order, and top-then-left reading order. */
   readonly order: readonly string[];
-  /** Visible node by id. */
+  /** Drawn node by id. */
   readonly nodes: ReadonlyMap<string, GraphNode>;
-  /** Hidden-sibling stubs by group key. */
-  readonly stubs: ReadonlyMap<string, GraphStub>;
   /** Drawn children by parent id, in layout order. */
   readonly children: ReadonlyMap<string, readonly string[]>;
   readonly filtering: boolean;
-  readonly crossTopicRelated: readonly RelatedEdge[];
+  /** The selected node's path from its topic's trunk, in canvas coordinates; null with no drawn selection. */
+  readonly path: string | null;
 }
 
 export interface GraphInput {
   readonly session: Immutable<Session>;
   readonly view: Immutable<SessionPreferences>;
   readonly later: ReadonlySet<string>;
+  /** The local chips picked in this session (D15); the saved chips are in `view`. */
+  readonly local?: readonly LocalChip[];
   readonly temporaryExpandedItemIds?: readonly string[];
   readonly revealedItemId?: string | null;
   readonly filterCollapsedItemIds?: ReadonlySet<string>;
-  /** Local hidden-group state; when omitted, initialize the selected/revealed route. An empty set folds every group. */
-  readonly expandedHiddenGroups?: ReadonlySet<string>;
   readonly selectedId: string | null;
-  readonly tight: boolean;
+  /** The fitted column (graphColumn); the narrowest when unmeasured. */
+  readonly column?: number;
 }
 
-/** Status counts over every item of the topic, including local reply delivery. */
-export function topicCounts(items: readonly Immutable<Item>[], session?: Immutable<Session>): string {
-  const shown = (item: Immutable<Item>): DisplayStatus => session ? displayStatus(session, item) : item.status;
-  const count = (status: DisplayStatus) => items.filter(item => shown(item) === status).length;
-  const closed = items.filter(item => isClosed(item.status)).length;
-  const ack = session ? items.filter(item => ackTarget(session, item)).length : 0;
-  const waiting = session ? items.filter(item => waitingOnOwner(session, item)).length : count('waiting_on_me');
-  return [[waiting, 'waiting on you'], [count('sent'), 'sent'], [count('queued'), 'queued'], [ack, 'to ack'],
-    [count('open'), 'open'], [count('in_progress'), 'in progress'], [closed, 'closed']]
-    .filter(([n]) => n).map(([n, words]) => `${n} ${words}`).join(' · ');
+type Point = { readonly x: number; readonly y: number };
+/** Orthogonal branch edge: from the parent's right edge, out ELBOW px, down (or up) to the child's centre, across into it. */
+export const elbowPath = (parentRight: number, parentCentre: number, childLeft: number, childCentre: number): string =>
+  `M${parentRight} ${parentCentre} H${parentRight + ELBOW} V${childCentre} H${childLeft}`;
+
+/**
+ * A related edge: cubic and undirected, between the nearest sides of two nodes (`a` and `b` are top-left corners in one
+ * coordinate space, `width` the node width).
+ */
+export function relatedPath(a: Point, b: Point, width: number): string {
+  const ac = a.y + NODE_HEIGHT / 2, bc = b.y + NODE_HEIGHT / 2;
+  if (Math.abs(a.x - b.x) < width / 2) {
+    // One above the other in a column: leave and enter on the right, bowing out.
+    const x = a.x + width, bow = Math.min(60, 18 + Math.abs(bc - ac) / 6);
+    return `M${x} ${ac} C${x + bow} ${ac} ${x + bow} ${bc} ${x} ${bc}`;
+  }
+  const [left, right] = a.x < b.x ? [{ x: a.x + width, y: ac }, { x: b.x, y: bc }] : [{ x: b.x + width, y: bc }, { x: a.x, y: ac }];
+  const mid = (left.x + right.x) / 2;
+  return `M${left.x} ${left.y} C${mid} ${left.y} ${mid} ${right.y} ${right.x} ${right.y}`;
 }
 
-export const isFiltering = (filters: Immutable<SessionPreferences['filters']>): boolean =>
-  normalizeSearch(filters.search).trim().length > 0 || hasStatusFilter(filters.statuses) || filters.owners.length > 0 || filters.hide_later;
-
-/** Bezier from the parent's right edge to the child's left edge (Ariadne.dc.html:1573). */
-export const edgePath = (x1: number, y1: number, x2: number, y2: number): string => {
-  const mx = (x1 + x2) / 2;
-  return `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
-};
-
-/** Connect the nearest sides without arrowheads: a related connection has no direction. */
-export function relatedEdgePath(a: { readonly x: number; readonly y: number }, b: { readonly x: number; readonly y: number }): string {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const horizontal = Math.abs(dx) / NODE_WIDTH > Math.abs(dy) / NODE_HEIGHT;
-  const x1 = a.x + NODE_WIDTH / 2 + (horizontal ? Math.sign(dx) * NODE_WIDTH / 2 : 0);
-  const y1 = a.y + NODE_HEIGHT / 2 + (horizontal ? 0 : Math.sign(dy) * NODE_HEIGHT / 2);
-  const x2 = b.x + NODE_WIDTH / 2 - (horizontal ? Math.sign(dx) * NODE_WIDTH / 2 : 0);
-  const y2 = b.y + NODE_HEIGHT / 2 - (horizontal ? 0 : Math.sign(dy) * NODE_HEIGHT / 2);
-  return `M${x1} ${y1} L${x2} ${y2}`;
+/**
+ * Related lines for `sources` (the selected node and the one under the pointer, SPEC 1.3) in canvas coordinates, once
+ * per pair whatever the kind or direction, and the drawn nodes they reach. Built apart from `sessionGraph` so a hover
+ * never rebuilds the layout.
+ */
+export function relatedLines(graph: SessionGraph, session: Immutable<Session>, sources: readonly (string | null)[]): {
+  readonly paths: readonly GraphEdge[]; readonly related: ReadonlySet<string>;
+} {
+  const paths: GraphEdge[] = [], related = new Set<string>(), pairs = new Set<string>();
+  const tops = new Map(graph.topics.map(topic => [topic.topic.id, topic.top]));
+  const at = (node: GraphNode) => ({ x: node.x, y: (tops.get(node.topicId) ?? 0) + node.y });
+  for (const source of new Set(sources)) {
+    const from = source ? graph.nodes.get(source) : undefined;
+    if (!from) continue;
+    for (const item of connectedItems(session, from.item.id)) {
+      const to = graph.nodes.get(item.id);
+      if (!to) continue;
+      related.add(to.item.id);
+      const pair = [from.item.id, to.item.id].sort().join('|');
+      if (pairs.has(pair)) continue;
+      pairs.add(pair);
+      paths.push({ id: `related:${from.item.id}:${to.item.id}`, d: relatedPath(at(from), at(to), graph.nodeWidth) });
+    }
+  }
+  return { paths, related };
 }
 
 export function sessionGraph(input: GraphInput): SessionGraph {
-  const { session, view, later, selectedId, tight } = input;
-  const filtering = isFiltering(view.filters);
+  const { session, view, later, selectedId } = input;
+  const column = input.column ?? COLUMN_MIN, width = nodeWidth(column);
+  // Search tints matches and never filters (contract C4); the scope has no search. The Tree and the Graph share one filter (D17).
+  const scope: FilterScope = { session, view, later, local: input.local ?? [] };
+  const filtering = filterOf(scope).active;
   const explicit = new Set(view.hidden_item_ids ?? []);
   const hidden = hiddenItems(session, explicit);
-  // The Tree's rule (ui/tree/model.ts): a hidden item folds into one stub among its siblings; an outside
-  // reveal opens the groups on its route, and the owner opens the rest, locally.
-  const selectedGroups = selectedId ? hiddenGroupsFor(session, explicit, selectedId) : [];
-  const openGroups = new Set(input.expandedHiddenGroups ?? [...selectedGroups,
-    ...(input.revealedItemId ? hiddenGroupsFor(session, explicit, input.revealedItemId) : [])]);
-  // Open selected hidden ancestors without granting selection a reveal's filter exemption.
-  const temporary = new Set(input.temporaryExpandedItemIds ?? []);
-  if (selectedGroups.length) {
-    for (let id = selectedId ? session.items[selectedId]?.parent : null; id; id = session.items[id]?.parent) temporary.add(id);
+  // Hidden items are not drawn (SPEC 1.3), except on the route to the selected or revealed item, dimmed: a path needs them.
+  const route = new Set<string>();
+  for (const end of [selectedId, input.revealedItemId ?? null]) {
+    for (let id = end; id && session.items[id]; id = session.items[id]?.parent ?? null) route.add(id);
   }
-  const rows = sentenceRows(session, view, later, [...temporary], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
-  const labels = itemLabels(rows.map(row => row.item), session.topics);
-  const indexes = indexSession(session);
-  const rowsByParent = new Map<string, SentenceRow[]>(), rootsByTopic = new Map<string, SentenceRow[]>();
+  const temporary = new Set(input.temporaryExpandedItemIds ?? []);
+  if (selectedId && [...route].some(id => hidden.has(id))) {
+    for (let id = session.items[selectedId]?.parent; id; id = session.items[id]?.parent) temporary.add(id);
+  }
+  const rows = sentenceRows(scope, [...temporary], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
+  const drawable = (id: string) => !hidden.has(id) || route.has(id);
+  const kidsByParent = new Map<string, SentenceRow[]>(), rootsByTopic = new Map<string, SentenceRow[]>();
   for (const row of rows) {
-    const list = row.depth === 0 ? rootsByTopic : rowsByParent, key = row.depth === 0 ? row.item.topic_id : row.item.parent;
+    if (!drawable(row.item.id)) continue;
+    const list = row.depth === 0 ? rootsByTopic : kidsByParent, key = row.depth === 0 ? row.item.topic_id : row.item.parent;
     if (key) list.set(key, [...list.get(key) ?? [], row]);
   }
-  type Entry = { readonly kind: 'item'; readonly row: SentenceRow } | { readonly kind: 'stub'; readonly stub: Omit<GraphStub, 'x' | 'y'> };
-  /** Visible siblings, then one stub for the hidden ones, then the hidden ones while the owner has the stub open. */
-  const entriesOf = (list: readonly SentenceRow[], topicId: string, parent: string | null): Entry[] => {
-    const item = (row: SentenceRow): Entry => ({ kind: 'item', row });
-    const hiddenSiblings = list.filter(row => explicit.has(row.item.id));
-    if (!hiddenSiblings.length) return list.map(item);
-    const key = hiddenGroupKey(topicId, parent), expanded = openGroups.has(key);
-    const below: Immutable<Item>[] = [];
-    const gather = (value: Immutable<Item>) => { below.push(value); (indexes.childrenByParent.get(value.id) ?? []).forEach(gather); };
-    hiddenSiblings.forEach(row => gather(row.item));
-    return [...list.filter(row => !explicit.has(row.item.id)).map(item),
-      { kind: 'stub', stub: { key, topicId, parent, count: hiddenSiblings.length, waiting: below.some(value => waitingOnOwner(session, value)), expanded } },
-      ...(expanded ? hiddenSiblings.map(item) : [])];
+  // What unfolding a folded node brings back: its drawable subtree. Hidden branches stay out unless on the route.
+  const { childrenByParent } = indexSession(session);
+  const insideOf = (id: string): { inside: number; waiting: number } => {
+    let inside = 0, waiting = 0;
+    const visit = (parent: string) => {
+      for (const child of childrenByParent.get(parent) ?? []) {
+        if (!drawable(child.id) || itemRemoved(session, child.id)) continue;
+        inside++; if (waitingOnOwner(session, child)) waiting++;
+        visit(child.id);
+      }
+    };
+    visit(id);
+    return { inside, waiting };
   };
-  // What expanding a node can draw below it; hidden branches are the stub's, not the node's.
-  const belowCache = new Map<string, { below: number; hidden: number }>();
-  const belowOf = (id: string): { below: number; hidden: number } => {
-    const known = belowCache.get(id);
-    if (known) return known;
-    let count = 0, hiddenCount = 0;
-    for (const child of indexes.childrenByParent.get(id) ?? []) {
-      if (explicit.has(child.id)) { hiddenCount++; continue; }
-      const inner = belowOf(child.id);
-      count += 1 + inner.below; hiddenCount += inner.hidden;
-    }
-    const value = { below: count, hidden: hiddenCount };
-    belowCache.set(id, value);
-    return value;
-  };
-  const children = new Map<string, string[]>(), kidEntries = new Map<string, number>(), stubs = new Map<string, GraphStub>();
-  const thread = new Set<string>();
-  for (let id: string | null | undefined = selectedId; id && session.items[id]; id = session.items[id]?.parent) thread.add(id);
-  const { pad, gap } = graphMetrics(tight);
-  const columnX = (depth: number) => pad + gap + (depth - 1) * (NODE_WIDTH + gap);
-  const allByTopic = new Map<string, Immutable<Item>[]>();
-  for (const item of activeItems(session)) allByTopic.set(item.topic_id, [...allByTopic.get(item.topic_id) ?? [], item]);
+  const path = new Set<string>();
+  for (let id: string | null | undefined = selectedId; id && session.items[id]; id = session.items[id]?.parent) path.add(id);
   const topics = Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic && rootsByTopic.has(topic.id))
     .sort((a, b) => a.order - b.order);
-  const order: string[] = [], nodes = new Map<string, GraphNode>();
-  const graphs = topics.map((topic): TopicGraph => {
-    const position = new Map<string, { x: number; y: number }>(), topicStubs: GraphStub[] = [], stubTop = new Map<string, number>();
-    let y = pad, deepest = 1;
-    /** Returns the entry's "card top": its centre is `top + NODE_HEIGHT / 2`, which is what edges and parents average. */
-    const place = (entry: Entry, depth: number): number => {
+  const order: string[] = [], children = new Map<string, string[]>();
+  const placed: { row: SentenceRow; topicId: string; x: number; y: number; branch: number; folded: boolean; canFold: boolean }[] = [];
+  let top = 0, deepest = 1;
+  const layouts = topics.map(topic => {
+    let lane = 0;
+    const position = new Map<string, Point>();
+    /** Leaves take the next lane; a parent sits on its first child's lane (SPEC 1.3). Returns the row's lane. */
+    const place = (row: SentenceRow, depth: number, branch: number): number => {
       deepest = Math.max(deepest, depth);
-      if (entry.kind === 'stub') {
-        order.push(entry.stub.key);
-        const stub: GraphStub = { ...entry.stub, x: columnX(depth), y };
-        topicStubs.push(stub); stubs.set(stub.key, stub);
-        const top = y + STUB_HEIGHT / 2 - NODE_HEIGHT / 2;
-        stubTop.set(stub.key, top); y += STUB_SLOT;
-        return top;
-      }
-      const { row } = entry;
       order.push(row.item.id);
-      const kids = entriesOf(rowsByParent.get(row.item.id) ?? [], topic.id, row.item.id);
-      kidEntries.set(row.item.id, kids.length);
-      const drawn = kids.flatMap(kid => kid.kind === 'item' ? [kid.row.item.id] : []);
-      if (drawn.length) children.set(row.item.id, drawn);
-      let top: number;
-      if (!kids.length) { top = y; y += ROW_HEIGHT; }
-      else { const ys = kids.map(kid => place(kid, depth + 1)); top = (ys[0] + ys[ys.length - 1]) / 2; }
-      position.set(row.item.id, { x: columnX(depth), y: top });
-      return top;
+      const index = placed.length;
+      placed.push({ row, topicId: topic.id, x: LEFT + (depth - 1) * column, y: 0, branch, folded: false, canFold: false });
+      const kids = row.expanded ? kidsByParent.get(row.item.id) ?? [] : [];
+      if (kids.length) children.set(row.item.id, kids.map(kid => kid.item.id));
+      const at = kids.length ? kids.map(kid => place(kid, depth + 1, branch))[0]! : lane++;
+      const y = FIRST_LANE + at * LANE;
+      placed[index] = { ...placed[index]!, y, folded: !kids.length && row.childCount > 0, canFold: kids.length > 0 };
+      position.set(row.item.id, { x: placed[index]!.x, y });
+      return at;
     };
-    const tops = entriesOf(rootsByTopic.get(topic.id)!, topic.id, null);
-    const ys = tops.map(entry => place(entry, 1));
-    const topicY = (ys[0] + ys[ys.length - 1]) / 2;
-    const edges: GraphEdge[] = tops.map(entry => {
-      const id = entry.kind === 'item' ? entry.row.item.id : entry.stub.key;
-      return { id: `topic:${id}`, on: entry.kind === 'item' && thread.has(id),
-        d: edgePath(2, topicY + NODE_HEIGHT / 2, columnX(1), (entry.kind === 'item' ? position.get(id)!.y : stubTop.get(id)!) + NODE_HEIGHT / 2) };
-    });
-    for (const stub of topicStubs) {
-      const parent = stub.parent ? position.get(stub.parent) : undefined;
-      if (parent) edges.push({ id: `parent:${stub.parent}:${stub.key}`, on: false,
-        d: edgePath(parent.x + NODE_WIDTH, parent.y + NODE_HEIGHT / 2, stub.x, stubTop.get(stub.key)! + NODE_HEIGHT / 2) });
-    }
-    const replacements: GraphReplacement[] = [];
-    const topicNodes = rows.filter(row => position.has(row.item.id)).map((row): GraphNode => {
-      const item = row.item, at = position.get(item.id)!;
-      const parent = item.parent ? position.get(item.parent) : undefined;
-      if (parent) edges.push({ id: `parent:${item.parent}:${item.id}`, on: thread.has(item.parent!) && thread.has(item.id),
-        d: edgePath(parent.x + NODE_WIDTH, parent.y + NODE_HEIGHT / 2, at.x, at.y + NODE_HEIGHT / 2) });
-      const target = item.replaced_by ? position.get(item.replaced_by) : undefined;
-      if (target) {
-        const x1 = at.x + NODE_WIDTH / 2, y1 = at.y + NODE_HEIGHT, x2 = target.x + NODE_WIDTH / 2, y2 = target.y + NODE_HEIGHT;
-        replacements.push({ id: `replacement:${item.id}:${item.replaced_by}`, labelX: (x1 + x2) / 2, labelY: Math.max(y1, y2) + 30,
-          d: `M${x1} ${y1 + 2} C${x1} ${y1 + 44} ${x2} ${y2 + 44} ${x2} ${y2 + 6}` });
-      }
-      // A node whose children are all hidden still has its stub to show: expanding it is what draws that stub.
-      const { below, hidden: hiddenBelow } = belowOf(item.id), shown = (kidEntries.get(item.id) ?? 0) > 0, anything = below + hiddenBelow > 0;
-      const collapsed = row.childCount > 0 && !shown, selected = selectedId === item.id;
-      const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: labels.get(item.id)!, x: at.x, y: at.y, below, hiddenBelow,
-        collapsed: collapsed && anything, canCollapse: !collapsed && anything, selected,
-        onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected,
-        hidden: hidden.has(item.id), ack: ackTarget(session, item) };
-      nodes.set(item.id, node);
-      return node;
-    });
-    return { topic, counts: topicCounts(allByTopic.get(topic.id) ?? [], session), width: columnX(deepest) + NODE_WIDTH + pad, height: y + 20,
-      nodes: topicNodes, stubs: topicStubs, edges, replacements, related: [] };
+    const roots = rootsByTopic.get(topic.id)!;
+    roots.forEach(row => place(row, 1, branchSlot(row.item.ordinal)));
+    const height = FIRST_LANE + lane * LANE;
+    const block = { topic, top, height, position, roots };
+    top += height + TOPIC_GAP;
+    return block;
   });
-  const crossTopicRelated: RelatedEdge[] = [];
-  const selected = selectedId ? nodes.get(selectedId) : undefined;
-  const linked = selected ? connectedItems(session, selected.item.id) : [];
-  const relatedByTopic = new Map<string, { id: string; d: string }[]>();
-  for (const item of linked) {
-    const target = nodes.get(item.id);
-    if (!selected || !target) continue;
-    const id = `related:${selected.item.id}:${target.item.id}`;
-    if (selected.item.topic_id !== target.item.topic_id) crossTopicRelated.push({ id, from: selected.item.id, to: target.item.id });
-    else {
-      const edges = relatedByTopic.get(item.topic_id) ?? [];
-      edges.push({ id, d: relatedEdgePath(selected, target) }); relatedByTopic.set(item.topic_id, edges);
-    }
+  const canvasWidth = LEFT + (deepest - 1) * column + width + 24;
+  const labels = itemLabels(placed.map(entry => entry.row.item), session.topics);
+  const nodes = new Map<string, GraphNode>();
+  const nodesByTopic = new Map<string, GraphNode[]>();
+  for (const entry of placed) {
+    const { row } = entry, item = row.item, selected = item.id === selectedId;
+    const { inside, waiting } = entry.folded ? insideOf(item.id) : { inside: 0, waiting: 0 };
+    const node: GraphNode = { item, topicId: entry.topicId, status: graphStatus(displayStatus(session, item)), short: labels.get(item.id)!,
+      x: entry.x, y: entry.y, depth: row.depth + 1, folded: entry.folded && inside > 0, canFold: entry.canFold, inside, waitingInside: waiting,
+      selected, onPath: path.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected,
+      hidden: hidden.has(item.id), branch: entry.branch };
+    nodes.set(item.id, node);
+    nodesByTopic.set(entry.topicId, [...nodesByTopic.get(entry.topicId) ?? [], node]);
   }
-  return { topics: graphs.map(topic => ({ ...topic, related: relatedByTopic.get(topic.topic.id) ?? [] })), order, nodes, stubs, children, filtering, crossTopicRelated };
+  const centre = (point: Point) => point.y + NODE_HEIGHT / 2;
+  const graphs = layouts.map(({ topic, top: blockTop, height, position, roots }): TopicGraph => {
+    const firstCentre = centre(position.get(roots[0]!.item.id)!), lastCentre = centre(position.get(roots[roots.length - 1]!.item.id)!);
+    const edges: GraphEdge[] = [{ id: `trunk:${topic.id}`, d: `M${TRUNK_X} ${Math.min(TRUNK_TOP, firstCentre)} V${lastCentre}` },
+      ...roots.map(row => ({ id: `topic:${row.item.id}`, d: `M${TRUNK_X} ${centre(position.get(row.item.id)!)} H${LEFT}` }))];
+    for (const [parent, kids] of children) {
+      const from = position.get(parent);
+      if (!from) continue;
+      // The first child gets the whole elbow; each later one only its stretch of the shared vertical, so a hundred
+      // children never stack a hundred antialiased copies of the same line.
+      let previous = centre(from);
+      kids.forEach((kid, index) => {
+        const to = position.get(kid)!, at = centre(to);
+        edges.push({ id: `parent:${parent}:${kid}`, d: index === 0 ? elbowPath(from.x + width, previous, to.x, at)
+          : `M${from.x + width + ELBOW} ${previous} V${at} H${to.x}` });
+        previous = at;
+      });
+    }
+    return { topic, top: blockTop, width: canvasWidth, height, nodes: nodesByTopic.get(topic.id) ?? [], edges };
+  });
+  // The selected path: down the trunk from its top into the first ancestor, then elbow by elbow to the selection.
+  let selectedPath: string | null = null;
+  const chosen = selectedId ? nodes.get(selectedId) : undefined;
+  if (chosen) {
+    const block = graphs.find(graph => graph.topic.id === chosen.topicId)!;
+    const chain: GraphNode[] = [];
+    for (let id: string | null | undefined = chosen.item.id; id; id = session.items[id]?.parent) {
+      const node = nodes.get(id);
+      if (!node) break;
+      chain.unshift(node);
+    }
+    const root = chain[0]!, y = (value: number) => block.top + value;
+    const parts = [`M${TRUNK_X} ${y(TRUNK_TOP)} V${y(centre(root))} H${LEFT}`];
+    for (let i = 1; i < chain.length; i++) {
+      const from = chain[i - 1]!, to = chain[i]!;
+      parts.push(elbowPath(from.x + width, y(centre(from)), to.x, y(centre(to))));
+    }
+    selectedPath = parts.join(' ');
+  }
+  return { topics: graphs, column, nodeWidth: width, width: canvasWidth, height: Math.max(0, top - TOPIC_GAP), order, nodes, children,
+    filtering, path: selectedPath };
 }
 
 export type ExpansionChange = { readonly kind: 'expand' | 'collapse'; readonly id: string };
@@ -303,10 +304,4 @@ export function applyChange<T extends Immutable<SessionPreferences>>(view: T, ch
   const same = selected === view.selected_item_id && expanded.size === view.expanded_item_ids.length
     && view.expanded_item_ids.every(id => expanded.has(id));
   return same ? view : { ...view, selected_item_id: selected, expanded_item_ids: [...expanded] };
-}
-
-/** The session chip of a topic card: the session's agent and day when it is not today ("codex · yesterday"). */
-export function sessionChip(agent: string | null, when: string): string | null {
-  if (!agent || when.startsWith('Today')) return null;
-  return `${agent} · ${when.toLowerCase()}`;
 }

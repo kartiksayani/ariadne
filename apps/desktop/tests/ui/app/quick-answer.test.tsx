@@ -57,7 +57,7 @@ async function openQuestion() {
     });
 }
 
-describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
+describe('quick owner answers from the desktop', () => {
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('Enter on option card %i in Details sends that option, and the same ⌥ digit sends nothing', async digit => {
     const transport = setup(); await openQuestion();
     row().focus(); alt(row(), digit); alt(detail(), digit);

@@ -14,6 +14,23 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// How long a test may wait for something that must happen. It is a hang guard, not a
+/// speed check: every wait returns the moment its condition holds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
+/// Doctor gives each provider check five wall-clock seconds, which a busy machine can use up
+/// just starting the stub `sh`. Tests stretch those budgets tenfold; this process and the
+/// `ariadne` binaries it starts both read the setting. Debug builds only.
+fn stretch_provider_budgets() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var(
+            ariadne_agent_protocol::deadline_scale::DEADLINE_SCALE_ENV,
+            "10",
+        );
+    });
+}
+
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012}")).unwrap()
 }
@@ -56,6 +73,7 @@ struct Profile {
 }
 impl Profile {
     fn new() -> Self {
+        stretch_provider_budgets();
         let home = tempfile::Builder::new()
             .prefix("ariadne-doctor-")
             .tempdir_in("/tmp")
@@ -311,6 +329,7 @@ fn previous_snapshot_health_reuses_canonical_validation_without_restore() {
 }
 
 fn executable(path: &Path, output: &str) {
+    stretch_provider_budgets();
     fs::write(path,format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 7\nprintf '%s\\n' '{output}'\n")).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }
@@ -397,7 +416,7 @@ fn doctor_reports_a_moved_recorded_codex_and_an_unsafe_providers_file() {
 
 fn accept_fixture(listener: &std::os::unix::net::UnixListener) -> std::os::unix::net::UnixStream {
     listener.set_nonblocking(true).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + HANG_GUARD;
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -493,12 +512,12 @@ fn public_provider_reads_preserve_deadlines_and_strict_parsing() {
     let codex_options =
         ariadne_adapter_codex::CodexOptions::new(codex.clone(), root.path().into()).unwrap();
     assert_eq!(
-        read_cli_version(&claude, Instant::now() + Duration::from_secs(5)).unwrap(),
+        read_cli_version(&claude, Instant::now() + HANG_GUARD).unwrap(),
         "2.1.287"
     );
     assert_eq!(
         codex_options
-            .read_host_version(Instant::now() + Duration::from_secs(5))
+            .read_host_version(Instant::now() + HANG_GUARD)
             .unwrap(),
         "0.160.0"
     );
@@ -507,7 +526,7 @@ fn public_provider_reads_preserve_deadlines_and_strict_parsing() {
     assert!(codex_options.read_host_version(expired).is_err());
     executable(&codex, "codex-cli 0.160.0 extra");
     assert!(codex_options
-        .read_host_version(Instant::now() + Duration::from_secs(5))
+        .read_host_version(Instant::now() + HANG_GUARD)
         .is_err());
 }
 
@@ -530,9 +549,9 @@ fn version_readers_reject_changed_executable_identity_and_reap_only_their_bounde
         .unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         let result = if output.contains("Claude") {
-            read_cli_version(&path, Instant::now() + Duration::from_secs(5))
+            read_cli_version(&path, Instant::now() + HANG_GUARD)
         } else {
-            codex.read_host_version(Instant::now() + Duration::from_secs(5))
+            codex.read_host_version(Instant::now() + HANG_GUARD)
         };
         assert!(result.is_err());
     }
@@ -563,7 +582,7 @@ fn busy_existing_lock_is_bounded_and_does_not_publish_an_unlocked_catalogue() {
             })
             .unwrap();
     });
-    entry.recv_timeout(Duration::from_secs(1)).unwrap();
+    entry.recv_timeout(HANG_GUARD).unwrap();
     let before = snapshot(profile.home.path());
     let start = Instant::now();
     let report = profile.report();
@@ -921,12 +940,8 @@ fn codex_doctor(thread_status: &str) -> CodexDoctorRun {
         let mut calls = Vec::new();
         for _ in 0..2 {
             let stream = accept_fixture(&listener);
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
+            stream.set_read_timeout(Some(HANG_GUARD)).unwrap();
+            stream.set_write_timeout(Some(HANG_GUARD)).unwrap();
             let mut socket = tungstenite::accept(stream).unwrap();
             while let Ok(tungstenite::Message::Text(text)) = socket.read() {
                 let request: Value = serde_json::from_str(text.as_str()).unwrap();

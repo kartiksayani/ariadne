@@ -508,7 +508,7 @@ fn binding_check(
         if let Some(executable) = &options.codex_bin {
             let thread = binding.external_session_id.as_str();
             let result = CodexOptions::from_environment(executable.clone()).and_then(|opts| {
-                let deadline = Instant::now() + Duration::from_secs(5);
+                let deadline = Instant::now() + provider_budget();
                 let mut reader =
                     CodexDaemonReader::open_before(opts, binding.endpoint.clone(), deadline)?;
                 if !reader.selected_thread_loaded(thread, deadline)? {
@@ -533,9 +533,14 @@ fn binding_check(
     }
 }
 
+/// Five seconds per provider check; a debug test run may stretch it (`deadline_scale`).
+fn provider_budget() -> Duration {
+    ariadne_agent_protocol::deadline_scale::scaled(Duration::from_secs(5))
+}
+
 fn providers(report: &mut Report, options: &Options) {
     if let Some(executable) = &options.claude_bin {
-        match read_cli_version(executable, Instant::now() + Duration::from_secs(5)) {
+        match read_cli_version(executable, Instant::now() + provider_budget()) {
             Ok(version) => {
                 let status = classify_host_version(SUPPORTED_HOST_VERSION, &version);
                 let message=match status {
@@ -568,7 +573,7 @@ fn providers(report: &mut Report, options: &Options) {
     if let Some(executable) = &options.codex_bin {
         match CodexOptions::from_environment(executable.clone()) {
             Ok(options)=>{
-                let deadline=Instant::now()+Duration::from_secs(5);
+                let deadline=Instant::now()+provider_budget();
                 match options.read_host_version(deadline) {
                     Ok(version)=>{
                         let status=classify_host_version(SUPPORTED_CODEX_VERSION,&version);

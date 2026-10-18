@@ -7,18 +7,16 @@ import { AppTransport, route } from './transport';
 afterEach(cleanup);
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 const saved = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
-const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} items? hidden`) });
-const filterButton = () => {
-  if (!screen.queryByRole('group', { name: 'Filter items' })) fireEvent.click(screen.getByRole('button', { name: 'Filter by status' }));
-  return within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
+const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} hidden`) });
+// The top bar's funnel opens the chip row (SPEC 6.10); the row's chips are toggle buttons named "<status> <count>".
+const filterRow = () => {
+  if (!screen.queryByRole('group', { name: 'Filter items' })) fireEvent.click(screen.getByRole('button', { name: /^Filter by status/ }));
+  return screen.getByRole('group', { name: 'Filter items' });
 };
-const chip = (name: string) => {
-  if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
-  return screen.getByRole(name === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${name === 'All' ? 'Show all' : name}`) });
-};
+const chip = (name: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${name} \\d+$`) });
 async function ready() {
   await waitFor(() => expect(screen.getByRole('button', { name: /^Switch session or project/ })).toBeTruthy());
-  await waitFor(() => expect(filterButton().hasAttribute('disabled')).toBe(false));
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Filter by status/ }).hasAttribute('disabled')).toBe(false));
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
       expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
@@ -36,7 +34,7 @@ async function hide(id: string) {
   await waitFor(() => expect(row(id)).toBeNull()); await ready();
 }
 
-describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
+describe('owner hide and unhide actions', () => {
   it.each([
     { selected: '1.1', hidden: ['1.1', '3'], parent: null },
     { selected: '1.1', hidden: ['1', '3'], parent: '1' },
@@ -176,7 +174,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).not.toBeNull();
-    expect(screen.queryByRole('treeitem', { name: /^1 item hidden/ })).toBeNull();
+    expect(screen.queryByRole('treeitem', { name: /^1 hidden/ })).toBeNull();
     expect(JSON.stringify(transport.sessions.get(route.session_id))).toBe(sessionBefore);
     expect(transport.mutations.every(request => request.command.command === 'preferences_patch')).toBe(true);
   });
@@ -185,7 +183,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     const { transport } = await mount(); await hide('1.1');
     expect(row('1')).not.toBeNull(); expect(group().getAttribute('aria-level')).toBe('3');
     await hide('1'); await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1', '1']));
-    expect(screen.getAllByRole('treeitem', { name: /^1 item hidden/ })).toHaveLength(1);
+    expect(screen.getAllByRole('treeitem', { name: /^1 hidden/ })).toHaveLength(1);
     fireEvent.click(group()); fireEvent.click(within(row('1')!).getByRole('button', { name: 'Unhide (h)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1'])); await ready();
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).toBeNull();
@@ -210,10 +208,10 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
   });
 
   it('keeps a hidden waiting question in the dock and reveals it dimmed when opened from its path', async () => {
-    const { transport } = await mount(); const waitingBefore = chip('Waiting on me').textContent;
+    const { transport } = await mount(); const waitingBefore = chip('Waiting on me').getAttribute('aria-label');
     await hide('2');
-    expect(chip('Waiting on me').textContent).toBe(waitingBefore);
-    expect(within(group()).getByText('waiting on you')).toBeTruthy();
+    expect(chip('Waiting on me').getAttribute('aria-label')).toBe(waitingBefore);
+    expect(within(group()).getByText('1 hidden · 1 waiting')).toBeTruthy();
     const dock = screen.getByRole('region', { name: 'Answer dock' }), current = () => dock.querySelector('.answer-dock-current [data-owner-input="2"]');
     fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
     await waitFor(() => expect(dock.querySelector('.answer-dock-current')).not.toBeNull());
@@ -241,26 +239,34 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(saved(transport).hidden_item_ids).toEqual(['1']);
   });
 
-  it('explains hidden search matches and adjusts the ordinary status chip counts', async () => {
+  it('names hidden search matches in the top bar and leaves the ordinary status chip counts alone', async () => {
     await mount(); await hide('1.1');
-    expect(chip('All').textContent).toContain('8'); expect(chip('Open').textContent).toContain('2');
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
     // The top bar's search box opens from its "Search the Map" button.
     fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
-    expect(await screen.findByText('Showing 1 of 8 items matching “receipt” (1 hidden)')).toBeTruthy();
-    expect(chip('All').textContent).toContain('1'); expect(chip('Open').textContent).toContain('0');
+    // "Implement receipt lookup" is in view; "Add the receipt lookup test" is hidden, and named in the note, not shown.
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
+    expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
+    expect(row('1.1')).toBeNull();
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
     fireEvent.click(chip('Open'));
-    expect(await screen.findByText('Showing 0 of 8 items matching “receipt” (1 hidden) in the statuses you picked')).toBeTruthy();
+    expect(await screen.findByText('Showing 2 of 8 items')).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches'));
+    expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
     expect(group()).toBeTruthy();
   });
 
   it('explains hidden matches for a status chip without search and clears that filter', async () => {
-    await mount(); await hide('1.1'); fireEvent.click(chip('Open'));
-    expect(await screen.findByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeTruthy();
-    expect(chip('Open').textContent).toContain('2');
-    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
-    await waitFor(() => expect(filterButton().hasAttribute('data-active')).toBe(false));
-    expect(screen.queryByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeNull();
+    const { transport } = await mount(); await hide('1.1'); fireEvent.click(chip('Open'));
+    expect(await screen.findByText('Showing 2 of 8 items')).toBeTruthy();
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    expect(group()).toBeTruthy();
+    fireEvent.click(within(filterRow()).getByRole('button', { name: 'Clear' }));
+    // Clear empties the saved chips and closes the row.
+    await waitFor(() => expect(saved(transport).filters.statuses).toEqual([]));
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Filter items' })).toBeNull());
+    expect(screen.queryByText('Showing 2 of 8 items')).toBeNull();
     expect(group()).toBeTruthy();
   });
 });

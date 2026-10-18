@@ -118,6 +118,14 @@ impl NativeActivation {
     pub fn routes(&self) -> ControlRoutes {
         self.routes.clone()
     }
+    /// A clone of the running supervisor's binding lease. It retains the OS lease
+    /// like any started call does, and grants no dispatch context. Tests only.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn held_lease(&self, binding_id: &UuidV4) -> Option<crate::leases::BindingLease> {
+        let state = self.state.lock().ok()?;
+        let active = state.active.get(binding_id)?;
+        Some(active.handle.control_binding().0)
+    }
     pub fn connect_callback(self: &Arc<Self>) -> Arc<NativeConnect> {
         let activation = self.clone();
         Arc::new(move |request, deadline| activation.bootstrap_before(request, deadline))
@@ -357,9 +365,16 @@ impl NativeActivation {
         self.current_async(scope.clone()).await?;
         let owner = self.owner.clone();
         let selected = scope.clone();
+        // A replaced activation's started call can still hold a clone of its
+        // lease; wait (bounded) for its release rather than refuse the binding.
         let lease = tokio::task::spawn_blocking(move || {
             within(deadline)?;
-            owner.binding_lease_shared(session, selected.binding_id, selected.generation)
+            owner.binding_lease_shared_before(
+                session,
+                selected.binding_id,
+                selected.generation,
+                deadline,
+            )
         })
         .await
         .map_err(|_| unavailable())??;

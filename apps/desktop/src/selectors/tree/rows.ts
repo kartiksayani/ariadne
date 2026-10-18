@@ -1,10 +1,8 @@
-import type { Item, ItemOwner, Session } from '../../generated/domain/models';
-import type { SessionPreferences } from '../../generated/core';
+import type { Item, Session } from '../../generated/domain/models';
+import { filterOf, filterSignature, sameOwner, type FilterScope } from './filter';
 import { indexSession, type Immutable } from '../../data';
 import { itemRemoved } from '../removed';
-import { hasStatusFilter, matchExpansion, matchesStatus } from './folds';
-import { displayStatus } from '../waiting/replied';
-import { waitingOnOwner } from '../sessionClosed';
+import { matchExpansion } from './folds';
 
 export interface SentenceRow {
   readonly item: Immutable<Item>;
@@ -21,13 +19,9 @@ export interface SentenceRows {
   readonly matchingTotal: number;
   readonly scopeTotal: number;
 }
-export function sameOwner(left: Immutable<ItemOwner>, right: Immutable<ItemOwner>): boolean {
-  return left.kind === right.kind && (left.kind === 'me' || (left.kind === 'agent' && right.kind === 'agent'
-    && left.binding_id === right.binding_id) || (left.kind === 'other' && right.kind === 'other' && left.name === right.name));
-}
-export const normalizeSearch = (text: string): string => text.normalize('NFKC').toLowerCase();
+export { sameOwner };
+export { normalizeSearch } from './search';
 const selectedBySession = new WeakMap<Immutable<Session>, { key: string; value: SentenceRows }>();
-const searchTextBySession = new WeakMap<Immutable<Session>, Map<string, string>>();
 
 // Initial expansion belongs to a new view only. Explicit persisted collapse
 // choices are never recomputed when a live snapshot changes.
@@ -39,16 +33,17 @@ export function initialExpansion(session: Immutable<Session>): readonly string[]
     .map(item => item.id));
 }
 
-export function sentenceRows(session: Immutable<Session>, view: Immutable<SessionPreferences>,
-  later: ReadonlySet<string>, temporaryAncestors: readonly string[] = [], revealedItemId: string | null = null,
+/** The Graph's rows. The one FilterScope decides them, and its signature keys the cache (D17). */
+export function sentenceRows(scope: FilterScope, temporaryAncestors: readonly string[] = [], revealedItemId: string | null = null,
   filterCollapsedItemIds: ReadonlySet<string> = new Set()): SentenceRows {
+  const { session, view, later } = scope, filters = view.filters;
   if (view.session.project_id !== session.project_id || view.session.session_id !== session.id) throw new Error('Tree view route differs from its registered session.');
-  const key = JSON.stringify([view.filters, view.expanded_item_ids, [...later].sort(), temporaryAncestors, revealedItemId, [...filterCollapsedItemIds].sort()]);
+  // The search highlights in place and never scopes rows (SPEC §6.9), so it is not part of the key either.
+  const key = JSON.stringify([filterSignature(scope), view.expanded_item_ids, [...later].sort(), temporaryAncestors, revealedItemId, [...filterCollapsedItemIds].sort()]);
   const known = selectedBySession.get(session);
   if (known?.key === key) return known.value;
-  const indexes = indexSession(session), filters = view.filters;
-  const tokens = normalizeSearch(filters.search).split(/\s+/u).filter(Boolean);
-  const filtering = tokens.length > 0 || hasStatusFilter(filters.statuses) || filters.owners.length > 0 || filters.hide_later;
+  const indexes = indexSession(session);
+  const filter = filterOf(scope), filtering = filter.active;
   const inScope = new Set(Object.values(session.items).filter((item): item is Immutable<Item> => !!item && !itemRemoved(session, item.id))
     .filter(item => {
       const topic = session.topics[item.topic_id];
@@ -56,26 +51,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
     }).map(item => item.id));
   const matching = new Set<string>();
   for (const id of inScope) {
-    const item = session.items[id]!;
-    if (hasStatusFilter(filters.statuses) && displayStatus(session, item) === 'waiting_on_me' && !waitingOnOwner(session, item)) continue;
-    if (!matchesStatus(filters.statuses, displayStatus(session, item))) continue;
-    if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) continue;
-    if (filters.hide_later && later.has(id)) continue;
-    if (tokens.length) {
-      let texts = searchTextBySession.get(session);
-      if (!texts) { texts = new Map(); searchTextBySession.set(session, texts); }
-      let text = texts.get(id);
-      if (text === undefined) {
-        // Immutable snapshot identity invalidates text when item, topic or
-        // canonical conversation changes; queries reuse it within that snapshot.
-        // The canonical index excludes activity and operation backlinks.
-        text = normalizeSearch([item.question, item.outcome, item.why, session.topics[item.topic_id]!.name,
-          ...(indexes.messagesByItem.get(id) ?? []).map(message => message.body)].filter(Boolean).join('\n'));
-        texts.set(id, text);
-      }
-      if (!tokens.every(token => text.includes(token))) continue;
-    }
-    matching.add(id);
+    if (filter.matches(session.items[id]!)) matching.add(id);
   }
   const included = new Set(matching), expanded = matchExpansion(view.expanded_item_ids, temporaryAncestors, [], filtering, filterCollapsedItemIds);
   const addAncestors = (id: string, open: boolean): void => {

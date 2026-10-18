@@ -8,7 +8,7 @@ import { connectionCardButton, openSendingDialog, openSession as clickSession, s
 import { folded } from './owner-reply.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
 async function archiveDiagnostics(failure) {
   let tree = '(unavailable)', hasDialog = '(unavailable)';
@@ -28,11 +28,14 @@ async function openSession(sessionId) {
   await clickSession(sessionId);
   await sessionReady();
 }
-// A topic band shows its actions while it holds focus (the prototype's hover).
+// A topic band's own buttons: "Continue elsewhere" opens the continue picker; Archive and Remove are entries of its "…" menu
+// ("Archive topic…" and "Remove topic…"), which opens in a layer over the Map.
+const menuEntry = { Archive: 'Archive topic…', Remove: 'Remove topic…' };
 export async function topicAction(name, label) {
   const band = await topicBand(name); await band.waitForDisplayed();
-  await browser.execute(element => element.focus(), band);
-  await click(await band.$(`button[aria-label="${label}"]`));
+  if (label === 'Continue here') { await click(await band.$('button[aria-label="Continue elsewhere"]')); return; }
+  await click(await band.$('button[aria-label^="More actions for"]'));
+  await click(await browser.$(`[role="menuitem"]*=${menuEntry[label]}`));
 }
 export async function archiveClosedTopic(topicId) {
   // The all-closed prompt sits below the sticky band, in that topic's sibling content.

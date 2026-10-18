@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { captureFrame, crop, type CaptureInput, type CompareResult, type Region } from './compare.mts';
+import { captureFrame, crop, sideBySide, type CaptureInput, type CompareResult, type Region } from './compare.mts';
 import { boardBrowserArgs, boardContext, boardFrame, labelHeight, launchBoardBrowser, openBoard, renderBoard, settle } from './final-board.mts';
 import { finalNow, finalStates, notYet, regionsFor, unhonoured, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
 import { cspReportPath, finalMembers, fontFile, fontPins, runtimeHashes } from './final-source.mts';
@@ -78,14 +78,24 @@ async function perform(page: Page, step: Step): Promise<void> {
     const named = (exact: boolean) => page.getByRole('button', { name: step.click, exact }).or(page.getByRole('tab', { name: step.click, exact })).or(page.getByRole('menuitem', { name: step.click, exact })).filter({ visible: true }).first();
     // A control named exactly so, if one is on screen; else the first whose name contains it. At the narrow width the top bar
     // folds Archive, text size, theme and Help into its "More" menu, whose own name contains "archive": open it first.
+    // Not while a dialog is open (What changed, Ack all): its controls are in the dialog, and the menu's Escape would close it.
     const more = page.getByRole('button', { name: /^More:/ });
-    if (!(await named(true).isVisible()) && await more.isVisible()) {
+    if (!(await named(true).isVisible()) && !(await page.getByRole('dialog').first().isVisible()) && await more.isVisible()) {
       await more.click();
       if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
     }
-    await ((await named(true).isVisible()) ? named(true) : named(false)).click();
+    // A control the app does not draw yet (a pending Map state) fails here in 20 s, not at the test's 240 s.
+    await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
   else if ('hover' in step) await page.locator(step.hover).first().hover();
+  else if ('scroll' in step) {
+    // The Map's scroller is the nearest ancestor of the item tree (or of the Graph's topic) that scrolls.
+    await page.locator('.graph-topic, [role="tree"][aria-label="Session items"]').first().evaluate(tree => {
+      let scroller = tree.parentElement;
+      while (scroller && scroller.scrollHeight <= scroller.clientHeight && scroller.scrollWidth <= scroller.clientWidth) scroller = scroller.parentElement;
+      if (scroller) { scroller.scrollTop = 0; scroller.scrollLeft = 0; }
+    });
+  }
   else await page.keyboard.type(step.type);
   await settle(page);
 }
@@ -124,13 +134,14 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
  * state's regions that apply to this size, each against its own threshold; the whole frame's ratio is written, never asserted.
  * `recordOnly` (a pending state) asserts nothing and still writes every ratio.
  */
-function scoring(state: Pick<FinalState, 'id' | 'regions'>, variant: Variant, recordOnly: boolean): Pick<CaptureInput, 'threshold' | 'regions' | 'regionThresholds'> & { report: (result: CompareResult) => object } {
+function scoring(state: Pick<FinalState, 'id' | 'regions'>, variant: Variant, recordOnly: boolean): Pick<CaptureInput, 'threshold' | 'regions' | 'regionThresholds' | 'shifts'> & { report: (result: CompareResult) => object } {
   const scored = regionsFor(state, variant);
   if (!scored.length) return { threshold: recordOnly ? null : threshold(state.id, variant), report: () => ({}) };
   const limits = scored.map(region => recordOnly ? null : region.threshold ?? 0);
   return {
     threshold: null, regionThresholds: limits,
     regions: scored.map(({ name, rect: [x, y, width, height] }) => ({ name, x, y, width, height })),
+    shifts: scored.flatMap(({ name, rect: [x, y, width, height], dy }) => dy ? [{ name, x, y, width, height, dy }] : []),
     report: result => ({ regions: scored.map((region, at) => ({ name: region.name, rect: region.rect, ratio: Number(result.regions[at]!.toFixed(4)), threshold: limits[at] })) })
   };
 }
@@ -158,6 +169,11 @@ for (const state of finalStates) for (const variant of variantNames) {
     const denied: string[] = [], context = await appContext(browser, origin, variant, denied);
     try {
       const app = await renderApp(await context.newPage(), origin, state, variant);
+      // A Map state also leaves the board and the app side by side, for the rows' looks the regions leave out (final-frames.ts, Map section).
+      if (state.app.map) {
+        mkdirSync(resolve(output, 'side-by-side'), { recursive: true });
+        writeFileSync(resolve(output, 'side-by-side', `${id}.png`), await sideBySide(canvas, design, app));
+      }
       const { report, ...score } = scoring(state, variant, state.pending);
       await captureFrame(canvas, { id, design, app, directory: output, masks: corners(width, height), ...score,
         report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured, ...report(result) }),

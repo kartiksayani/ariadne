@@ -27,6 +27,7 @@ import { peekNames } from '../../../src/ui/peek/names';
 import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
 import { removeSubject } from '../../../src/ui/remove/model';
 import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
+import { ACK_HOLD_MS } from '../../../src/ui/shared/ack';
 import { SessionRowAction } from '../../../src/ui/pages/SessionRowAction';
 import { dispatchIntent } from '../../../src/ui/intents';
 
@@ -46,6 +47,7 @@ afterEach(async () => {
   await disposeTrees();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  localStorage.clear();
   if (vi.isFakeTimers()) vi.clearAllTimers();
   vi.useRealTimers();
 });
@@ -83,15 +85,23 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
 }
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
+/** An entry of a topic band's "…" menu (Reply to topic, Open the bin, Archive topic…, Remove topic…). */
+const bandMenu = (band: HTMLElement, entry: RegExp) => {
+  fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: entry }));
+};
+/** The band's Focus / Unfocus button (D9): it acts on the selected item's root, like ⇧F. */
+const focusButton = () => screen.getAllByRole<HTMLButtonElement>('button', { name: /^(Focus|Unfocus “.*”)$/ })[0]!;
 const ids = () => [...document.querySelectorAll('[role="treeitem"][data-item-id]')].map(element => element.getAttribute('data-item-id'));
 const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
-const filterButton = () => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
-const chip = (label: string) => {
-  if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
-  return within(screen.getByRole('menu', { name: /^Filter/ })).getByRole(label === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${label === 'All' ? 'Show all' : label}`) });
-};
-const statusSelected = (label: string) => label === 'All' ? !filterButton().hasAttribute('data-active') : chip(label).getAttribute('aria-checked') === 'true';
+// The chip row (SPEC §6.10) sits above the Map: one toggle button per status, "<label> <count>", and a Clear while any is picked.
+const filterRow = () => screen.getByRole('group', { name: 'Filter items' });
+const chip = (label: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${label}\\s*\\d+$`) });
+const chipShown = (label: string) => within(filterRow()).queryByRole('button', { name: new RegExp(`^${label}\\s*\\d+$`) }) !== null;
+const chipPicked = (label: string) => chip(label).getAttribute('aria-pressed') === 'true';
+const chipCount = (label: string) => Number(chip(label).getAttribute('aria-label')!.replace(`${label} `, ''));
+const clearChips = () => fireEvent.click(within(filterRow()).getByRole('button', { name: 'Clear' }));
 // The tree has no session menu any more (SPEC §2.1): a session is renamed from its All sessions row, which mounts
 // SessionRowAction on the session's own actions. These tests mount that same action beside the tree.
 function RenameHost({ actions }: { readonly actions: ReturnType<SessionActionControllers['forSession']> }) {
@@ -105,6 +115,14 @@ function CloseHost({ actions }: { readonly actions: ReturnType<SessionActionCont
 // `.` (SPEC 6.1) is Back to the selected item; the key asks the Map for this intent. (⌘J, which also worked
 // inside text fields, is gone: single-letter keys never act while a text box has focus.)
 const backToSelected = () => { act(() => { dispatchIntent('map.backToSelected'); }); };
+// The Back-to pill (SPEC §5.8): "↑/↓ Back to “name” ." floats over the Map, by the edge the selected row went past.
+const BACK = /^Back to “/;
+const backPill = (edge: 'above' | 'below') => {
+  const pill = screen.getByRole('button', { name: BACK });
+  expect(pill.getAttribute('data-edge')).toBe(edge);
+  return pill;
+};
+const noBackPill = () => expect(screen.queryByRole('button', { name: BACK })).toBeNull();
 const startRename = (actions: ReturnType<SessionActionControllers['forSession']>) => render(<RenameHost actions={actions} />);
 const renameDialog = () => screen.getByRole('dialog', { name: 'Name this session' });
 // While it saves the button reads "Saving…" and is disabled, so a second press cannot send twice.
@@ -138,15 +156,6 @@ describe('session tree rows', () => {
       expect(viewOf(transport).focused_item_id).toBe('1');
       cleanup(); view.navigation.stop();
     }
-  });
-
-  it('keeps a sticky Focus exit before the cold session has loaded', async () => {
-    const view = await mount({ load: false, configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    expect(view.store.getSnapshot().snapshot).toBeNull();
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: 'Unfocus 1' }));
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
-    await act(async () => { await view.store.refresh(); });
-    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
   });
 
   it('preserves Focus through pending root removal and Undo', async () => {
@@ -205,7 +214,7 @@ describe('session tree rows', () => {
     act(() => { removal.undo(operation); });
   });
 
-  it('uses shared active-item names for Selected, breadcrumbs and Focus', async () => {
+  it('uses shared active-item names for Selected and Focus', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
       if (this === box) return new DOMRect(0, 0, 300, 400);
@@ -220,53 +229,28 @@ describe('session tree rows', () => {
     }, props: { selectedId: '1' } });
     const name = peekNames(view.store.getSnapshot().snapshot!.session).get('1')!;
     expect(name).toBe('Shared name');
-    fireEvent.click(within(row('1')).getByRole('button', { name: `Focus on ${name}` }));
-    // One place to leave: the focused item's own button, which has taken over from Focus. No banner.
+    fireEvent.click(focusButton());
+    // One place to leave: the band's button, which takes over from Focus. No banner, and no Focus button on any row.
     expect(screen.queryByText(/^Focused:/)).toBeNull();
-    expect(within(row('1')).getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
-    expect(within(row('1')).queryByRole('button', { name: /^Focus on / })).toBeNull();
+    expect(focusButton().getAttribute('aria-label')).toBe(`Unfocus “${name}”`);
+    expect(focusButton().textContent).toBe('Unfocus');
+    expect(screen.queryByRole('button', { name: /^Focus on / })).toBeNull();
     const box = document.querySelector<HTMLElement>('.tree-scroll')!; box.scrollTop = 100; fireEvent.scroll(box);
-    expect(screen.getByRole('button', { name: /^↑ Selected:/ }).textContent).toContain(name);
-    const crumbs = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(crumbs.getByRole('button', { name }).textContent).toBe(name);
-    // Scrolled under the sticky band, the focused item's sticky copy carries Unfocus too.
-    expect(crumbs.getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
+    expect(backPill('above').querySelector('.tree-back-label')!.textContent).toBe(`Back to “${name}”`);
+    expect(screen.queryByRole('navigation', { name: 'Map ancestors' })).toBeNull();
   });
 
-  it('keeps Focus discoverable without a tab stop on every top-level row', async () => {
-    await mount();
-    for (const button of screen.getAllByRole('button', { name: /^Focus on / })) expect(button.tabIndex).toBe(-1);
-    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
+  it('draws no Focus button on a row: Focus lives in the band, and there is nothing on a row to tab through', async () => {
+    await mount({ props: { selectedId: '1' } });
+    expect(screen.queryByRole('button', { name: /^Focus on / })).toBeNull();
+    expect(document.querySelector('.tree-item .tree-focus-action')).toBeNull();
+    expect(focusButton().textContent).toBe('Focus');
   });
 
-  it('updates Recent Changed only immediately while a seen save is still pending', async () => {
-    const view = await mount({ configure: transport => {
-      const session = transport.sessions.get(route.session_id)!;
-      const baseline = '2026-10-01T00:00:00.000Z';
-      session.items['1.1']!.created_at = '2026-10-13T00:00:00.000Z';
-      transport.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
-      viewOf(transport).recent_items = [{ item_id: '1.1', action: 'viewed', visited_at: '2026-10-13T01:00:00.000Z' }];
-    } });
-    let release!: () => void, entered = false;
-    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
-    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('command' in args.request && args.request.command.command === 'preferences_patch'
-        && args.request.command.params.entries.some(entry => entry.kind === 'mark_seen')) { entered = true; await gate; }
-      return invoke(name, args);
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
-    const dialog = screen.getByRole('dialog', { name: 'Recent items' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Changed only' }));
-    expect(within(dialog).getByRole('button', { name: / · viewed/ })).toBeTruthy();
-    act(() => { view.navigation.markItemSeen(route, '1.1'); });
-    expect(within(dialog).getByText('No changed items in your recent visits.')).toBeTruthy();
-    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
-    expect(view.transport.preferences.seen![0]!.items).toEqual([]);
-    await act(async () => { release(); await gate; });
-  });
-  it('enters Focus by visible action, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
-    const view = await mount();
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
+  it('enters Focus from the band button, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
+    const view = await mount({ props: { selectedId: '1' } });
+    expect(focusButton().textContent).toBe('Focus');
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
     const label = shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!);
@@ -274,25 +258,15 @@ describe('session tree rows', () => {
     expect(screen.queryByRole('button', { name: 'Leave Focus' })).toBeNull();
     cleanup(); await mount({ transport: view.transport });
     expect(ids()).toEqual(['1', '1.1']);
-    const leave = within(row('1')).getByRole('button', { name: `Unfocus ${label}` });
+    const leave = focusButton();
+    expect(leave.getAttribute('aria-label')).toBe(`Unfocus “${label}”`);
     expect(leave.textContent).toBe('Unfocus');
-    expect(leave.tabIndex).toBe(-1);
     fireEvent.click(leave);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(ids()).toContain('8');
-    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
   });
 
-  it('leaves Focus by double click on the focused item’s icon', async () => {
-    const view = await mount();
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
-    expect(ids()).toContain('8');
-  });
-
-  it.each(['row Unfocus button', 'disabled item icon', 'sticky Unfocus button'] as const)('ignores the %s while the view is busy', async control => {
+  it('keeps the band Focus button while the view is busy saving, then lets it act', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
@@ -303,18 +277,17 @@ describe('session tree rows', () => {
     let saving!: Promise<boolean>;
     act(() => { saving = view.navigation.saveSessionView(structuredClone(viewOf(view.transport)), view.transport.preferences.revision); });
     await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(true));
-    expect(view.navigation.isWritingRecent()).toBe(false);
-    const leave = control === 'sticky Unfocus button' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
-      : within(row('1')).getByRole('button', { name: /^Unfocus / });
-    expect((leave as HTMLButtonElement).disabled).toBe(true);
-    if (control === 'disabled item icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(view.navigation.isRecentPending()).toBe(false);
+    expect(focusButton().disabled).toBe(true);
+    fireEvent.click(focusButton());
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
     await act(async () => { release(); await saving; });
     expect(viewOf(view.transport).focused_item_id).toBe('1');
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
+    expect(focusButton().disabled).toBe(false);
   });
 
-  it.each(['row', 'icon', 'sticky'] as const)('allows %s Unfocus through a busy automatic Recent save', async control => {
+  it('allows the band Unfocus through a busy automatic Recent save', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
@@ -324,13 +297,12 @@ describe('session tree rows', () => {
     });
     let saving!: Promise<boolean>;
     act(() => { saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision); });
-    await waitFor(() => expect(view.navigation.isWritingRecent()).toBe(true));
+    await waitFor(() => expect(view.navigation.isRecentPending()).toBe(true));
     expect(view.navigation.getSnapshot().writing).toBe(true);
-    const leave = control === 'sticky' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
-      : within(row('1')).getByRole('button', { name: /^Unfocus / });
-    expect((leave as HTMLButtonElement).disabled).toBe(false);
-    if (control === 'icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
-    expect(within(row('1')).queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    expect(focusButton().disabled).toBe(false);
+    fireEvent.click(focusButton());
+    // Nothing is selected, so once Focus is off the band draws no Focus button.
+    expect(screen.queryByRole('button', { name: /Focus/ })).toBeNull();
     await act(async () => { release(); await saving; });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
@@ -346,32 +318,53 @@ describe('session tree rows', () => {
     expect(row('1')).toBeTruthy(); expect(row('8')).toBeTruthy();
   });
 
-  it.each(['search', 'filter', 'folded topic', 'pending removal'] as const)('keeps a sticky Focus exit when %s unmounts the row', async exclusion => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
-      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
-      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, 100, 60, 20);
-      return new DOMRect(0, 100, 300, 100);
-    });
+  it('keeps the focused row and the band Unfocus under a search that matches nothing, since a search unmounts no row', async () => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    view.rerender({ query: 'no matching item anywhere' });
+    expect(ids()).toEqual(['1', '1.1']);
+    fireEvent.click(focusButton());
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+  });
+
+  it.each(['filter', 'folded topic', 'pending removal'] as const)('keeps the band Unfocus reachable when %s unmounts the row', async exclusion => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     viewOf(transport).focused_item_id = '1';
     const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
-    const view = await mount({ transport, removal });
-    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
-    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
-    if (exclusion === 'search') view.rerender({ query: 'no matching item anywhere' });
-    else if (exclusion === 'filter') fireEvent.click(chip('In progress'));
+    await mount({ transport, removal });
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
+    if (exclusion === 'filter') fireEvent.click(chip('In progress'));
     else if (exclusion === 'folded topic') fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
     else {
       const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
       act(() => { removal.schedule(target, removeSubject(session, target)!); });
     }
     expect(row('1')).toBeNull();
-    const leave = band.getByRole('button', { name: /^Unfocus / });
-    await waitFor(() => expect((leave as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(leave);
+    await waitFor(() => expect(focusButton().disabled).toBe(false));
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(transport).focused_item_id).toBeUndefined());
+  });
+
+  it('offers Unfocus beside Clear filters when Focus and the filters leave nothing (the Map has no band then)', async () => {
+    const view = await mount({ configure: transport => {
+      viewOf(transport).focused_item_id = '1';
+      viewOf(transport).filters.statuses = ['in_progress'];
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
+    const empty = within(screen.getByText('Nothing in the focus matches these filters.').parentElement!);
+    expect(empty.getByRole('button', { name: 'Clear filters' })).toBeTruthy();
+    fireEvent.click(empty.getByRole('button', { name: 'Unfocus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(view.calls.cleared).toBe(0);
+  });
+  it('keeps the plain empty-filter words and only Clear filters when nothing is focused', async () => {
+    await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['in_progress'];
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
+    expect(screen.getByText('No items match these filters.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Unfocus' })).toBeNull();
   });
 
   it('ends Focus when hidden ids change for the focused top-level item', async () => {
@@ -379,7 +372,7 @@ describe('session tree rows', () => {
     const session = view.store.getSnapshot().snapshot!.session;
     expect(session.items['1']!.parent).toBeNull();
     expect(viewOf(view.transport).hidden_item_ids ?? []).not.toContain('1');
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
     await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(viewOf(view.transport).hidden_item_ids).toContain('1');
@@ -387,23 +380,6 @@ describe('session tree rows', () => {
     await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
     expect(viewOf(view.transport).focused_item_id).toBeUndefined();
     expect(row('1')).toBeTruthy();
-  });
-
-  it.each(['above', 'below'] as const)('keeps a sticky Focus exit when its button is %s the viewport', async edge => {
-    let buttonTop = 100;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
-      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
-      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, buttonTop, 60, 20);
-      return new DOMRect(0, 100, 300, 100);
-    });
-    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
-    buttonTop = edge === 'above' ? 40 : 450;
-    fireEvent.scroll(document.querySelector('.tree-scroll')!);
-    fireEvent.click(band.getByRole('button', { name: /^Unfocus / }));
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
 
   it.each(['removed', 'no longer top-level', 'reparented beneath a hidden ancestor'] as const)('ends invalid Focus when the item is %s', async invalid => {
@@ -422,9 +398,9 @@ describe('session tree rows', () => {
     }
   });
 
-  it('focuses a top-level bullet on double click and focuses the mounted target when an external reveal exits Focus', async () => {
-    const view = await mount();
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+  it('focuses the mounted target when an external reveal exits Focus', async () => {
+    const view = await mount({ props: { selectedId: '1' } });
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
     view.rerender({ selectedId: '8', reveal: target });
@@ -434,8 +410,8 @@ describe('session tree rows', () => {
   });
 
   it('expires a Go to focus request after a failed Focus exit and a different selection', async () => {
-    const view = await mount();
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    const view = await mount({ props: { selectedId: '1' } });
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     const exit = structuredClone(viewOf(view.transport));
     delete exit.focused_item_id;
@@ -462,24 +438,25 @@ describe('session tree rows', () => {
     const view = await mount();
     const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
     view.rerender({ selectedId: '8', reveal: target });
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
+    // Focus acts on the selected item's root, so enter it on item 1 the way the band does: through the saved view.
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), focused_item_id: '1' }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
-    expect(screen.getByRole('button', { name: /^↓ Selected:/ })).toBeTruthy();
+    expect(backPill('below')).toBeTruthy();
   });
 
   it('returns Selected keyboard focus after revealing a row outside Focus', async () => {
     const view = await mount({ props: { selectedId: '8' } });
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), focused_item_id: '1' }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
-    const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+    const tag = backPill('below');
     tag.focus(); await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '8' } }));
     await waitFor(() => expect(document.activeElement).toBe(row('8')));
     expect(viewOf(view.transport).focused_item_id).toBeUndefined();
   });
 
-  it.each(['row', 'Recent', 'Selected'] as const)('keeps a %s navigation request through a held automatic Recent save', async surface => {
+  it.each(['row', 'Selected'] as const)('keeps a %s navigation request through a held automatic Recent save', async surface => {
     const view = await mount({ props: { selectedId: '8' }, configure: transport => {
       if (surface === 'Selected') viewOf(transport).focused_item_id = '1';
       viewOf(transport).recent_items = [{ item_id: '2', action: 'viewed', visited_at: '2026-10-13T11:00:00.000Z' }];
@@ -497,13 +474,10 @@ describe('session tree rows', () => {
     const selectionsBefore = view.calls.selected.length;
     const saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision);
     await waitFor(() => expect(entered).toBe(true));
-    expect(view.navigation.isWritingRecent()).toBe(true);
+    expect(view.navigation.isRecentPending()).toBe(true);
     if (surface === 'row') fireEvent.click(row('3'));
-    else if (surface === 'Recent') {
-      fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
-      fireEvent.click(within(screen.getByRole('dialog', { name: 'Recent items' })).getByRole('button', { name: / · viewed/ }));
-    } else {
-      const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+    else {
+      const tag = backPill('below');
       tag.focus(); await userEvent.keyboard('{Enter}');
     }
     expect(view.calls.selected).toHaveLength(selectionsBefore);
@@ -511,7 +485,139 @@ describe('session tree rows', () => {
     if (surface === 'Selected') {
       await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
       await waitFor(() => expect(document.activeElement).toBe(row('8')));
-    } else await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: surface === 'row' ? '3' : '2' } }));
+    } else await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '3' } }));
+  });
+
+  describe('a Recent save never blocks opening a clicked row', () => {
+    const recentVisit = [{ item_id: '1', action: 'peeked' as const, visited_at: '2026-10-13T12:00:00.000Z' }];
+    const isRecentPatch = (args: { request: unknown }) => {
+      const request = args.request as { command?: { command?: string; params?: { entries?: { kind: string; preferences?: { recent_items?: { item_id: string }[] } }[] } } };
+      return request.command?.command === 'preferences_patch'
+        && !!request.command.params?.entries?.some(entry => entry.kind === 'set_session_view' && entry.preferences?.recent_items?.[0]?.item_id === '1');
+    };
+    /** The mount's own opening of the selected row finishes saving first, so the Recent save is the only writer. */
+    const settled = async (view: Awaited<ReturnType<typeof mount>>) => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      await waitFor(() => expect(view.navigation.getSnapshot().writing || view.navigation.getSnapshot().pendingOperationId !== null).toBe(false));
+    };
+    const opened = (view: Awaited<ReturnType<typeof mount>>, id: string) => view.calls.selected.some(result => result.kind === 'item' && result.route.item_id === id);
+
+    /** Leaves the Recent write unconfirmed (lost response). The returned `settle` lets the retry through and confirms it. */
+    const unconfirmedRecent = async (view: Awaited<ReturnType<typeof mount>>) => {
+      let lose = true;
+      const invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (lose && isRecentPatch(args)) throw new Error('Lost response');
+        return invoke(name, args);
+      });
+      await act(async () => { await view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision); });
+      expect(view.navigation.getSnapshot().writing).toBe(false);
+      expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+      expect(view.navigation.isRecentPending()).toBe(true);
+      return async () => {
+        lose = false;
+        await act(async () => { expect(await view.navigation.retryMutation()).toBe(true); });
+        expect(view.navigation.isRecentPending()).toBe(false);
+      };
+    };
+
+    it('opens the row while a failed Recent save is still unconfirmed, and saves the selection once it settles', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      const settle = await unconfirmedRecent(view);
+      fireEvent.click(row('3'));
+      await waitFor(() => expect(opened(view, '3')).toBe(true));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+      expect(viewOf(view.transport).selected_item_id).not.toBe('3');
+      await settle();
+      await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('3'));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
+    });
+
+    // Every owner view change goes through saveView; during an unconfirmed Recent write each one queues and lands once it settles.
+    const viewChanges: readonly { name: string; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>;
+      act: () => void; saved: (view: SessionPreferences) => boolean }[] = [
+      { name: 'Focus', props: { selectedId: '8' }, act: () => { fireEvent.click(focusButton()); }, saved: saved => saved.focused_item_id === '8' },
+      { name: 'Unfocus', configure: transport => { viewOf(transport).focused_item_id = '1'; }, act: () => { fireEvent.click(focusButton()); }, saved: saved => saved.focused_item_id === undefined },
+      { name: 'folding an item', act: () => { fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' })); }, saved: saved => !saved.expanded_item_ids.includes('1') },
+      { name: 'folding a topic', act: () => { fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' })); },
+        saved: saved => (saved.collapsed_topic_ids ?? []).length === 1 },
+    ];
+    it.each(viewChanges)('$name takes effect once an unconfirmed Recent save settles', async change => {
+      const view = await mount({ props: change.props, configure: change.configure });
+      await settled(view);
+      const settle = await unconfirmedRecent(view);
+      act(() => { change.act(); });
+      expect(change.saved(viewOf(view.transport))).toBe(false);
+      await settle();
+      await waitFor(() => expect(change.saved(viewOf(view.transport))).toBe(true));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
+    });
+
+    it('keeps the filter chips visibly disabled, never silently dropped, while a Recent save is unconfirmed', async () => {
+      const view = await mount({ configure: transport => { viewOf(transport).filters.statuses = ['open']; } });
+      await settled(view);
+      const settle = await unconfirmedRecent(view);
+      expect(chip('Open').hasAttribute('disabled')).toBe(true);
+      expect(within(filterRow()).getByRole('button', { name: 'Clear' }).hasAttribute('disabled')).toBe(true);
+      await settle();
+      await waitFor(() => expect(chip('Open').hasAttribute('disabled')).toBe(false));
+    });
+
+    it('still refuses an owner view change while the owner\'s own write is unconfirmed', async () => {
+      const view = await mount();
+      await settled(view);
+      let lose = true;
+      const invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (lose && name === 'preferences_patch') throw new Error('Lost response');
+        return invoke(name, args);
+      });
+      await act(async () => { await view.navigation.saveTheme('dark', view.transport.preferences.revision); });
+      lose = false;
+      expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+      expect(view.navigation.isRecentPending()).toBe(false);
+      fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      expect(viewOf(view.transport).expanded_item_ids).toContain('1');
+    });
+
+    it('opens the row when a held Recent save then fails', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      let fail!: () => void, entered = false;
+      const gate = new Promise<void>((_resolve, reject) => { fail = () => { reject(new Error('Lost response')); }; }), invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (isRecentPatch(args)) { entered = true; await gate; }
+        return invoke(name, args);
+      });
+      const saving = view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision);
+      await waitFor(() => expect(entered).toBe(true));
+      fireEvent.click(row('3'));
+      await act(async () => { fail(); await saving; });
+      await waitFor(() => expect(opened(view, '3')).toBe(true));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+    });
+
+    it('opens the row without waiting out a Recent save that does not finish', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      let release!: () => void, entered = false;
+      const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (isRecentPatch(args)) { entered = true; await gate; }
+        return invoke(name, args);
+      });
+      const saving = view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision);
+      await waitFor(() => expect(entered).toBe(true));
+      vi.useFakeTimers();
+      fireEvent.click(row('3'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(opened(view, '3')).toBe(true);
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+      vi.useRealTimers();
+      await act(async () => { release(); await saving; });
+    });
   });
 
   it('subscribes to font loading once for the whole Map, including after row rerenders', async () => {
@@ -534,15 +640,21 @@ describe('session tree rows', () => {
   });
 
   it('keeps closed questions in the tree with their status and a quiet chip, excluding waiting counts', async () => {
-    await mount({ configure: transport => { transport.sessions.get(route.session_id)!.state = 'closed'; } });
+    const closedSession = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.state = 'closed'; };
+    await mount({ configure: closedSession });
     const question = row('2');
     expect(within(question).getByText('Session closed').title).toBe(sessionClosedReason);
-    expect(within(question).getByText('Waiting on me')).toBeTruthy();
+    // The chip takes the status badge's slot (the cluster never widens); the row's status icon still says what it is.
+    expect(question.querySelector('.tree-end-badge')!.textContent).toBe('Session closed');
+    expect(within(question).queryByText('Waiting on me')).toBeNull();
     expect(screen.queryByText(/\d+ waiting on you/)).toBeNull();
-    fireEvent.click(filterButton());
-    expect(screen.getByRole('menuitemcheckbox', { name: /^Waiting on me/ }).textContent).not.toMatch(/[1-9]/);
-    fireEvent.click(chip('Waiting on me'));
-    await waitFor(() => expect(ids()).toEqual([]));
+    // Nothing counts as waiting once the session is closed, so the chip has no count to show.
+    expect(chipShown('Waiting on me')).toBe(false);
+    cleanup();
+    // A saved Waiting on me filter still shows its chip, at zero, and matches nothing.
+    await mount({ configure: transport => { closedSession(transport); viewOf(transport).filters.statuses = ['waiting_on_me']; } });
+    expect(chipCount('Waiting on me')).toBe(0);
+    expect(ids()).toEqual([]);
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
   });
   it('counts declarations and backlinks once, with a visible muted marker that keeps its reserved room when selected or hovered', async () => {
@@ -743,14 +855,19 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     const { release, session } = await staleTree(value);
     const ack = within(row('1.1')).getByRole('button', { name: 'Ack → Done' });
     expect(ack.hasAttribute('disabled')).toBe(false);
+    vi.useFakeTimers();
     if (method === 'click') fireEvent.click(ack);
     else { row('1.1').focus(); fireEvent.keyDown(row('1.1'), { key: 'a' }); }
+    // The Ack is held for its Undo first: the row says so at once, and nothing is written until the hold is up.
+    expect(within(row('1.1')).getByRole('status').textContent).toContain('Acked');
     expect(execute).not.toHaveBeenCalled();
-    expect(ack.hasAttribute('disabled')).toBe(true);
-    await act(async () => { release(); await value.store.refresh(); });
-    await waitFor(() => expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'ack', params: {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ACK_HOLD_MS); });
+    // The save then waits for the stale session to be read again.
+    expect(execute).not.toHaveBeenCalled();
+    await act(async () => { release(); await value.store.refresh(); await vi.advanceTimersByTimeAsync(0); });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'ack', params: {
       item_id: '1.1', expected_revision: session.items['1.1']!.revision,
-    } }), session.revision));
+    } }), session.revision);
   });
   it('selects only the latest clicked row after a stale refresh', async () => {
     const value = await mount(), { release } = await staleTree(value);
@@ -801,8 +918,8 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     // The session's name, run state, Pause and Close moved to the top bar and its connection card (SPEC 2.1, 5.12).
     expect(document.querySelector('.tree-session-title')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Session actions' })).toBeNull();
-    expect(chip('All').textContent).toContain('9'); expect(chip('Open').textContent).toContain('3');
-    expect(chip('Closed').textContent).toContain('4'); expect(statusSelected('All')).toBe(true);
+    expect(chipCount('Open')).toBe(3); expect(chipCount('Done') + chipCount('Decided') + chipCount('Replaced')).toBe(3);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
     expect(row('1').querySelector('.tree-outcome')).not.toBeNull();
     expect(within(topicRow('Continued context')).getByText(/^Continued from/)).toBeTruthy();
   });
@@ -827,7 +944,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
     await waitFor(() => expect(viewOf(transport).expanded_item_ids).not.toContain('1'));
     expect(ids()).not.toContain('1.1');
-    expect(row('1').querySelector('.tree-collapsed')?.textContent).toBe('1 open inside');
+    expect(row('1').querySelector('.tree-collapsed')?.textContent).toBe('1 inside');
     row('1').focus(); fireEvent.keyDown(row('1'), { key: 'ArrowRight' });
     await waitFor(() => expect(ids()).toContain('1.1'));
     expect(viewOf(transport).expanded_item_ids).toContain('1');
@@ -871,8 +988,11 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     } });
     const band = topicRow('Continued context');
     expect(band.querySelector('.tree-topic-line')).not.toBeNull();
-    expect(within(band).getByRole('button', { name: 'Remove' })).toBeTruthy();
-    expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
+    // Reply waits while the reply is on its way; Archive and Remove stay in the "…" menu.
+    fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+    expect(screen.getByRole('menuitem', { name: /^Remove topic/ })).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Archive topic/ }).disabled).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(true);
   });
   const text = 'Keep the retry limits as they are';
   // The first input on item 8's topic becomes a queued reply to the whole topic.
@@ -889,7 +1009,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     let id = '';
     const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
     const band = topicRow('Continued context');
-    expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
+    expect(within(band).getByRole('button', { name: /^More actions for/ })).toBeTruthy();
     await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Delete' })); });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
     await waitFor(() => expect(within(topicRow('Continued context').parentElement!).queryByRole('button', { name: 'Delete' })).toBeNull());
@@ -931,7 +1051,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     expect(cancels(transport)).toHaveLength(0);
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
-    const { calls, transport } = await mount();
+    const { calls } = await mount();
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Bring it up (b)' }));
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Later (z)' }));
     fireEvent.click(within(row('5')).getByRole('button', { name: 'Back to Open (o)' }));
@@ -939,16 +1059,33 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Remove (⌫)' }));
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
-    // A delivery on its way still permits owner-only Hide and Remove.
-    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual([`Focus on ${shortLabel(transport.sessions.get(route.session_id)!.items['3']!)}`, 'Hide (h)', 'Remove (⌫)']);
-    fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
+    // The hover bar always has six slots (D4). A delivery on its way greys the agent's four and says why; Hide and Remove stay.
+    // The slot that would apply says a message is on its way; the others say the status they are not for.
+    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['Add a note: a message is on its way', 'Bring it up: not for In progress items', 'Later: not for In progress items', 'Drop: not for In progress items', 'Hide (h)', 'Remove (⌫)']);
+    for (const name of [/^Add a note/, /^Bring it up/, /^Later/, /^Drop/]) expect((within(row('3')).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);    fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
+  });
+  it('titles every greyed slot of an open row "a message is on its way", and a parked row\'s Unpark too', async () => {
+    // Item 4 is open with a queued drop on its way.
+    await mount();
+    expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Later: a message is on its way', 'Drop: a message is on its way', 'Hide (h)', 'Remove (⌫)']);
+    cleanup();
+    await mount({ configure: transport => { transport.preferences.later = [{ ...route, item_id: '4' }]; } });
+    expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')).slice(0, 4))
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Unpark: a message is on its way', 'Drop: a message is on its way']);
   });
 });
 
 describe('session tree filters', () => {
   it('preserves graph folds and both status edits when the composed writers contend', async () => {
     const value = await mount(), { transport, navigation, store } = value;
-    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} tight={false} query="" onReveal={() => {}} /> });
+    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} onReveal={() => {}} /> });
+    // ← folds the selected node (the Graph has no fold button), so select item 1 first and let that write finish.
+    const parent = await waitFor(() => document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!);
+    fireEvent.click(parent);
+    await waitFor(() => expect(viewOf(transport).selected_item_id).toBe('1'));
+    await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const invoke = transport.invoke.bind(transport);
@@ -959,23 +1096,22 @@ describe('session tree filters', () => {
     try {
       const open = chip('Open'), progress = chip('In progress');
       act(() => {
-        const parent = document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!;
-        fireEvent.click(within(parent).getByRole('button', { name: 'Collapse branches' }));
+        fireEvent.keyDown(document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!, { key: 'ArrowLeft' });
         fireEvent.click(open); fireEvent.click(progress);
       });
       await waitFor(() => expect(navigation.getSnapshot().writing).toBe(true));
-      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(chipPicked('Open')).toBe(true); expect(chipPicked('In progress')).toBe(true);
       expect(chip('Open').hasAttribute('disabled')).toBe(false);
       await act(async () => { release(); });
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
       await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
       expect(viewOf(transport).expanded_item_ids).not.toContain('1');
-      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(chipPicked('Open')).toBe(true); expect(chipPicked('In progress')).toBe(true);
       expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
       expect(screen.queryByText('Ariadne isn’t sure that view change was saved. Try it again.')).toBeNull();
     } finally { release(); }
   });
-  it('queues rapid status toggles while keeping the menu enabled and focused during writes', async () => {
+  it('queues rapid status toggles while keeping the chips enabled and focused during writes', async () => {
     const { transport, navigation } = await mount();
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -989,36 +1125,40 @@ describe('session tree filters', () => {
     expect(chip('In progress').hasAttribute('disabled')).toBe(false);
     expect(document.activeElement).toBe(open);
     fireEvent.click(chip('In progress'));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
     await act(async () => { release(); });
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
     await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
     expect(patches(transport)).toHaveLength(2);
   });
+  // The search finds in place (SPEC §4): its count goes to the top bar through onSearchStatus, never to a Map banner.
+  const searchCount = (status: ReturnType<typeof vi.fn>) => (status.mock.calls.at(-1)?.[0] as { count: string } | null)?.count ?? null;
   it('counts the matches themselves, excluding context and forced selections', async () => {
-    const { rerender } = await mount({ props: { query: 'receipt', selectedId: '4' } });
-    expect(screen.getByText('Showing 2 of 9 items matching “receipt”')).toBeTruthy();
-    expect(ids()).toContain('1'); // parent kept as context
-    expect(ids()).toContain('4'); // selection kept despite not matching
-    rerender({ query: '' });
+    const status = vi.fn(), { rerender } = await mount({ props: { query: 'receipt', selectedId: '4', onSearchStatus: status } });
+    // "Implement receipt lookup" and "Add the receipt lookup test": not their parent 1, not the selected 4.
+    expect(searchCount(status)).toBe('1 of 2');
+    expect(ids()).toHaveLength(9);
     expect(screen.queryByText(/items matching/)).toBeNull();
+    rerender({ query: '' });
+    expect(status.mock.calls.at(-1)?.[0]).toBeNull();
     expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
   });
-  it('explains picked statuses and clears only search', async () => {
-    let currentQuery = 'receipt';
-    const clear = vi.fn();
+  it('explains picked statuses without the search, and leaves clearing the search to the top bar', async () => {
+    const status = vi.fn(), clear = vi.fn();
     const view = await mount({ configure: value => { viewOf(value).filters.statuses = ['open']; },
-      props: { query: currentQuery, onClearSearch: () => { clear(); currentQuery = ''; } } });
-    expect(screen.getByText('Showing 1 of 9 items matching “receipt” in the statuses you picked')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
-    view.rerender({ query: currentQuery });
-    expect(clear).toHaveBeenCalledOnce();
+      props: { query: 'receipt', onClearSearch: clear, onSearchStatus: status } });
+    expect(within(filterRow()).getByText('Showing 3 of 9 items')).toBeTruthy();
+    // Only the open "Add the receipt lookup test" counts; the in-progress match is outside the statuses.
+    expect(searchCount(status)).toBe('1 of 1');
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
+    view.rerender({ query: '' });
+    expect(clear).not.toHaveBeenCalled();
     expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
-    expect(statusSelected('Open')).toBe(true);
-    expect(screen.queryByText(/items matching/)).toBeNull();
+    expect(chipPicked('Open')).toBe(true);
+    expect(within(filterRow()).getByText('Showing 3 of 9 items')).toBeTruthy();
   });
   it('excludes archived sessions from Ack buttons and topic counts', async () => {
     await mount({ configure: transport => {
@@ -1030,35 +1170,35 @@ describe('session tree filters', () => {
     expect(screen.queryByText('Ack → Done')).toBeNull();
     expect(screen.queryByText(/to ack/)).toBeNull();
   });
-  it('counts only items in the current archive mode', async () => {
-    const view = await mount({ configure: value => {
+  it('counts only matches in the current archive mode', async () => {
+    const status = vi.fn(), view = await mount({ configure: value => {
       const session = value.sessions.get(route.session_id)!;
       session.topics[session.items['8']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
-    }, props: { query: 'receipt' } });
-    expect(screen.getByText('Showing 2 of 8 items matching “receipt”')).toBeTruthy();
+    }, props: { query: 'receipt', onSearchStatus: status } });
+    expect(searchCount(status)).toBe('1 of 2');
     viewOf(view.transport).filters.archived = true;
     await act(async () => { await view.navigation.refresh(); });
-    expect(screen.getByText('Showing 0 of 1 items matching “receipt”')).toBeTruthy();
+    expect(searchCount(status)).toBe('No matches');
   });
   it('reads a saved full status set, including duplicates, as All', async () => {
     const { transport } = await mount({ configure: value => {
       viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
     } });
-    expect(statusSelected('All')).toBe(true);
-    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
-      expect(statusSelected(label)).toBe(false);
-    }
+    // No chip is picked: the row asks for one, shows no summary and offers no Clear.
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Done']) expect(chipPicked(label)).toBe(false);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
+    expect(within(filterRow()).queryByRole('button', { name: 'Clear' })).toBeNull();
     expect(ids()).toHaveLength(9);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('All')).toBe(false);
+    expect(chipPicked('Open')).toBe(true);
+    expect(within(filterRow()).queryByText('Pick a status')).toBeNull();
     expect(ids()).toEqual(['1', '1.1', '4', '8']);
   });
-  it('keeps a saved partial Closed group narrow when another chip is added', async () => {
+  it('keeps a saved single Done chip narrow when another chip is added', async () => {
     const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['done']; } });
-    expect(statusSelected('Closed')).toBe(true);
-    expect(statusSelected('All')).toBe(false);
+    expect(chipPicked('Done')).toBe(true);
+    expect(chipPicked('Decided')).toBe(false);
     expect(ids()).toEqual(['1']);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'done']));
@@ -1066,7 +1206,7 @@ describe('session tree filters', () => {
   });
   it('toggles multiple chips, keeps counts independent, and restores the saved combination', async () => {
     const { transport, navigation, rerender } = await mount();
-    const labels = ['All', 'Waiting on me', 'Open', 'In progress', 'Closed'];
+    const labels = ['Waiting on me', 'Open', 'In progress', 'Done'];
     const counts = labels.map(label => chip(label).textContent);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
@@ -1074,82 +1214,105 @@ describe('session tree filters', () => {
     chip('In progress').focus();
     await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
-    expect(statusSelected('All')).toBe(false);
-    expect(statusSelected('Closed')).toBe(false);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
+    expect(chipPicked('Done')).toBe(false);
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     expect(labels.map(label => chip(label).textContent)).toEqual(counts);
+    // A search narrows neither the rows nor the chip counts.
     rerender({ query: 'receipt' });
-    expect(ids()).toEqual(['1', '1.1', '3']);
-    expect(chip('All').textContent).toContain('2');
-    expect(chip('Open').textContent).toContain('1');
-    expect(chip('In progress').textContent).toContain('1');
+    expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
+    expect(labels.map(label => chip(label).textContent)).toEqual(counts);
     cleanup(); navigation.stop();
     await mount({ transport });
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['in_progress']));
     expect(ids()).toEqual(['3']);
     fireEvent.click(chip('In progress'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(statusSelected('All')).toBe(true);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
     expect(ids()).toHaveLength(9);
   });
-  it('collapses every selected status to All and clears a combination with All', async () => {
-    const { transport } = await mount();
+  it('picks chips one by one, combines them, and Clear empties the saved and the local chips and closes the row', async () => {
+    const closeFilter = vi.fn(), { transport } = await mount({ props: { onCloseFilter: closeFilter },
+      configure: value => { value.sessions.get(route.session_id)!.items['1.1']!.ack_to = 'done'; } });
     for (const [label, expected] of [
       ['Waiting on me', ['waiting_on_me']], ['Open', ['waiting_on_me', 'open']],
-      ['In progress', ['waiting_on_me', 'open', 'in_progress']], ['Closed', []],
+      ['In progress', ['waiting_on_me', 'open', 'in_progress']], ['Done', ['waiting_on_me', 'open', 'in_progress', 'done']],
     ] as const) {
       fireEvent.click(chip(label));
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(expected));
     }
-    expect(statusSelected('All')).toBe(true);
-    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
-      expect(statusSelected(label)).toBe(false);
-    }
-    expect(ids()).toHaveLength(9);
-    fireEvent.click(chip('Closed'));
-    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['decided', 'done', 'dropped', 'replaced']));
-    fireEvent.click(chip('Open'));
-    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'decided', 'done', 'dropped', 'replaced']));
-    fireEvent.click(chip('All'));
+    // A local chip joins the saved ones; it lives in this browser, never in the saved view.
+    fireEvent.click(chip('To ack'));
+    await waitFor(() => expect(chipPicked('To ack')).toBe(true));
+    expect(JSON.parse(localStorage.getItem('ariadne.map.filter.v1')!)).toEqual({ [route.session_id]: ['toack'] });
+    expect(viewOf(transport).filters.statuses).toEqual(['waiting_on_me', 'open', 'in_progress', 'done']);
+    clearChips();
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(statusSelected('All')).toBe(true);
+    expect(localStorage.getItem('ariadne.map.filter.v1')).toBe('{}');
+    expect(closeFilter).toHaveBeenCalledTimes(1);
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Done', 'To ack']) if (chipShown(label)) expect(chipPicked(label)).toBe(false);
+    expect(ids()).toHaveLength(9);
   });
-  it('counts follow search and keeps the topic dropdown out of every layout', async () => {
+  it('Clear also empties the saved owners and hide-later (no chip stands for them), and leaves the search and the archive alone', async () => {
+    const { transport } = await mount({ configure: value => {
+      const filters = viewOf(value).filters;
+      filters.statuses = ['open']; filters.hide_later = true; filters.owners = [{ kind: 'me' }]; filters.search = 'receipt';
+    } });
+    clearChips();
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(viewOf(transport).filters.hide_later).toBe(false);
+    expect(viewOf(transport).filters.owners).toEqual([]);
+    expect(viewOf(transport).filters.search).toBe('receipt');
+    expect(viewOf(transport).filters.archived).toBe(false);
+  });
+  it.each<[string, (filters: ReturnType<typeof viewOf>['filters']) => void]>([
+    ['a leftover saved Dropped', filters => { filters.statuses = ['dropped']; }],
+    ['saved owners', filters => { filters.owners = [{ kind: 'me' }]; }],
+    ['hide-later', filters => { filters.hide_later = true; }],
+  ])('shows the summary and Clear when only %s filters the Map, and Clear lifts it', async (_name, set) => {
+    const { transport } = await mount({ configure: value => { set(viewOf(value).filters); } });
+    expect(within(filterRow()).queryByText('Pick a status')).toBeNull();
+    expect(within(filterRow()).getByRole('status').textContent).toMatch(/Showing \d+ of \d+ items/);
+    clearChips();
+    await waitFor(() => expect(viewOf(transport).filters).toMatchObject({ statuses: [], owners: [], hide_later: false }));
+    await waitFor(() => expect(within(filterRow()).getByText('Pick a status')).toBeTruthy());
+    expect(ids()).toHaveLength(9);
+  });
+  it('keeps chip counts under a search, marks its hits in place and keeps the topic dropdown out of every layout', async () => {
     const { transport, rerender } = await mount();
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
     expect(ids()).toEqual(['1', '1.1', '4', '8']);
+    const counts = ['Waiting on me', 'Open'].map(label => chip(label).textContent);
     rerender({ query: 'receipt' });
-    expect(chip('All').textContent).toContain('2'); expect(chip('Open').textContent).toContain('1');
+    expect(['Waiting on me', 'Open'].map(label => chip(label).textContent)).toEqual(counts);
+    expect(ids()).toEqual(['1', '1.1', '4', '8']);
     expect(row('1.1').querySelector('.tree-hit')?.textContent?.toLowerCase()).toBe('receipt');
     for (const props of [{}, { detailOpen: true }]) {
       rerender(props);
       expect(screen.queryByRole('combobox', { name: 'Topic' })).toBeNull();
     }
   });
-  it('shows a single filter icon and names its selected statuses with a dot', async () => {
+  it('names the picked statuses by pressed chips and a summary, and shows no menu', async () => {
     const { transport } = await mount();
-    expect(filterButton().getAttribute('aria-label')).toBe('Filter');
-    expect(filterButton().querySelector('.tree-filter-dot')).toBeNull();
     expect(screen.queryByRole('menu')).toBeNull();
+    expect(within(filterRow()).queryByText(/^Showing /)).toBeNull();
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
     fireEvent.click(chip('In progress'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
-    expect(filterButton().getAttribute('aria-label')).toBe('Filter: Open, In progress');
-    expect(filterButton().getAttribute('data-active')).toBe('true');
-    expect(filterButton().querySelector('.tree-filter-dot')).not.toBeNull();
+    expect(chipPicked('Open')).toBe(true); expect(chipPicked('In progress')).toBe(true);
+    expect(within(filterRow()).getByText('Showing 4 of 9 items')).toBeTruthy();
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
-    fireEvent.click(chip('All'));
+    clearChips();
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(filterButton().getAttribute('aria-label')).toBe('Filter');
-    expect(document.activeElement).toBe(filterButton());
+    expect(chipPicked('Open')).toBe(false);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
     expect(screen.queryByRole('menu')).toBeNull();
   });
   it.each(['status', 'search'] as const)('keeps item and topic folds shared with the normal view under %s filtering', async mode => {
@@ -1157,7 +1320,6 @@ describe('session tree filters', () => {
     if (mode === 'status') {
       fireEvent.click(chip('Open'));
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
-      fireEvent.keyDown(chip('Open'), { key: 'Escape' });
     } else rerender({ query: 'receipt' });
     expect(ids()).toContain('1.1');
     row('1').focus(); fireEvent.keyDown(row('1'), { key: 'ArrowLeft' });
@@ -1175,18 +1337,24 @@ describe('session tree filters', () => {
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
     await waitFor(() => expect(ids()).not.toContain('1'));
     if (mode === 'status') {
-      fireEvent.click(chip('All'));
+      clearChips();
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
     } else rerender({ query: '' });
     expect(ids()).not.toContain('1');
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
     await waitFor(() => expect(ids()).toContain('1.1'));
   });
-  it('offers one clear action when nothing matches', async () => {
-    const { calls, rerender } = await mount();
+  it('keeps the Map under a search that matches nothing, and offers one clear action when the filters match nothing', async () => {
+    const status = vi.fn(), { calls, rerender } = await mount({ props: { onSearchStatus: status } });
     rerender({ query: 'zzz' });
-    expect(screen.getByText('Nothing matches “zzz”.')).toBeTruthy(); expect(screen.queryByRole('tree')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear search and filters' })); expect(calls.cleared).toBe(1);
+    expect(searchCount(status)).toBe('No matches');
+    expect(screen.queryByText(/Nothing matches/)).toBeNull(); expect(screen.getByRole('tree')).toBeTruthy();
+    expect(ids()).toHaveLength(9);
+    cleanup();
+    const filtered = await mount({ configure: transport => { viewOf(transport).filters.statuses = ['in_progress']; transport.sessions.get(route.session_id)!.items['3']!.status = 'open'; } });
+    expect(screen.getByText('No items match these filters.')).toBeTruthy(); expect(screen.queryByRole('tree')).toBeNull();
+    fireEvent.click(within(document.querySelector<HTMLElement>('.tree-no-match')!).getByRole('button', { name: 'Clear filters' }));
+    expect(filtered.calls.cleared).toBe(1); expect(calls.cleared).toBe(0);
   });
   it('says so when a saved status combination matches nothing', async () => {
     await mount({ configure: transport => {
@@ -1195,8 +1363,8 @@ describe('session tree filters', () => {
       session.items['2']!.status = 'open'; session.items['3']!.status = 'open';
     } });
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
-    expect(statusSelected('Waiting on me')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Waiting on me')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
   });
   it('shows a reveal outside the filters, keeps its ancestry open and resumes the filtered view', async () => {
     const { transport, store, calls, rerender } = await mount({ configure: transport => {
@@ -1218,7 +1386,7 @@ describe('session tree filters', () => {
     const { transport } = await mount();
     transport.failNext = 'preferences_patch';
     fireEvent.click(chip('Open'));
-    await waitFor(() => expect((chip('All') as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect((chip('In progress') as HTMLButtonElement).disabled).toBe(true));
     expect(row('4').getAttribute('aria-disabled')).toBe('true');
   });
 });
@@ -1340,7 +1508,8 @@ describe('session tree lifecycle', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
     await waitFor(() => expect(screen.queryByText('Archived “Continued context”.')).toBeNull());
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
+    bandMenu(topicRow('Continued context'), /^Archive topic/);
+    await act(async () => {});
     fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
     expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
     expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
@@ -1352,7 +1521,8 @@ describe('session tree lifecycle', () => {
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
     render(<Notices />);
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
+    bandMenu(topicRow('Continued context'), /^Archive topic/);
+    await act(async () => {});
     await screen.findByText('Archived “Continued context”.');
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     view.rerender({ detailOpen: true });
@@ -1368,7 +1538,7 @@ describe('session tree lifecycle', () => {
     const statuses = Object.values(session.items).map(item => item!.status);
     expect(unsent.length).toBeGreaterThan(1);
     // Archive is offered on a topic with open items; it asks first and never refuses.
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
     const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
     expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
@@ -1381,7 +1551,7 @@ describe('session tree lifecycle', () => {
     const transport = new HistoryTransport(); await mount({ transport });
     transport.replies.push({ api_version: 1, ok: false,
       error: { code: 'invalid_argument', message: 'Refused archive.', hint: '', retryable: false, field_errors: [] } });
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
     const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     const alert = await screen.findByRole('alert');
@@ -1395,25 +1565,25 @@ describe('session tree lifecycle', () => {
     // SPEC 6.1 leaves e unbound: archiving is the band's own button.
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'e' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
     expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' })).toBeTruthy();
   });
-  it('offers Continue here on an earlier topic and asks which other session takes it', async () => {
+  it('offers Continue elsewhere on an earlier topic and asks which other session takes it', async () => {
     const { navigation, rerender } = await mount();
     rerender({ summaries: navigation.getSnapshot().sessions!.sessions.items });
-    expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue here' })).toBeNull();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue here' }));
+    expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue elsewhere' })).toBeNull();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' }));
     expect(dialog.getAllByRole('button').map(button => button.getAttribute('aria-labelledby') ? button.textContent : null).filter(Boolean))
       .toEqual([expect.stringMatching(/^Separate session/)]);
     fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
-  it('offers Continue here on a topic from a session created today', async () => {
+  it('offers Continue elsewhere on a topic from a session created today', async () => {
     const session = new AppTransport().sessions.get(route.session_id)!;
     await mount({ props: { now: () => Date.parse(session.created_at) } });
     expect(within(topicRow('Delivery decisions')).queryByText(/· (today|yesterday)/)).toBeNull();
-    expect(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue here' })).toBeTruthy();
+    expect(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' })).toBeTruthy();
   });
   it('keeps an uncertain session action for an exact reconcile from the column', async () => {
     const transport = new HistoryTransport();
@@ -1512,7 +1682,7 @@ describe('stopped deliveries in the tree', () => {
     await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
     await waitFor(() => expect(banner()).not.toBeNull());
     expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
-    fireEvent.click(chip('All'));
+    clearChips();
     await waitFor(() => expect(banner()).toBeNull());
   });
 });
@@ -1524,7 +1694,7 @@ describe('Reply to topic', () => {
       for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
     } });
     const band = topicRow('Delivery decisions'), group = band.parentElement!;
-    fireEvent.click(within(band).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(band, /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     expect(band.querySelector('.tree-prompt')).toBeNull();
     expect(band.contains(box())).toBe(false);
@@ -1533,7 +1703,7 @@ describe('Reply to topic', () => {
     expect(content.contains(box())).toBe(true);
     expect(content.querySelector('.tree-prompt')).not.toBeNull();
     expect(group.contains(row('1'))).toBe(true);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const css = ['tree.css', 'tree-band.css'].map(name => readFileSync(resolve(__dirname, '../../../src/ui/tree', name), 'utf8')).join('\n');
     expect(css).toMatch(/\.tree-topic-group\s*\{[^}]*position: relative/s);
     expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0/s);
     expect(css).toMatch(/\.tree-topic-status > span\s*\{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis/s);
@@ -1541,7 +1711,7 @@ describe('Reply to topic', () => {
   });
   it('opens a box on the topic band and sends a topic reply with no item', async () => {
     const { transport, drafts } = await mount();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
     const text = within(box()!).getByLabelText('Reply to this topic');
@@ -1558,18 +1728,18 @@ describe('Reply to topic', () => {
   });
   it('closes on Escape and keeps the draft for next time', async () => {
     await mount();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).disabled).toBe(false));
     const text = within(box()!).getByLabelText('Reply to this topic');
     fireEvent.change(text, { target: { value: 'Half a thought' } });
     fireEvent.keyDown(text, { key: 'Escape' });
     expect(box()).toBeNull(); expect(document.activeElement).toBe(topicRow('Delivery decisions'));
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe('Half a thought'));
   });
   it('keeps the words and the focus when typed while the session view refreshes, with no shortcut firing, and holds Send until it is fresh', async () => {
     const { transport, store, calls } = await mount(), user = userEvent.setup();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     const text = within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement;
     await waitFor(() => expect(text.disabled).toBe(false));
@@ -1597,7 +1767,8 @@ describe('Reply to topic', () => {
   });
   it('is not offered in a closed session', async () => {
     await mount({ configure: transport => { const session = transport.sessions.get(route.session_id)!; session.state = 'closed'; session.closed_at = session.updated_at; } });
-    expect(within(topicRow('Delivery decisions')).queryByRole('button', { name: 'Reply to topic' })).toBeNull();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: /^More actions for/ }));
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(true);
   });
 });
 
@@ -2043,11 +2214,11 @@ describe('item details in the tree', () => {
   const longOutcome = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['1']!.outcome = long; };
   const more = (id: string) => within(row(id)).queryByRole('button', { name: /^Show (more|less)$/ });
 
-  it('folds a long body to four lines with Show more and Show less, and none for short text', async () => {
+  it('folds a long body to three lines with Show more and Show less, and none for short text', async () => {
     measure();
     const { calls } = await mount({ configure: longOutcome });
-    const preview = row('1').querySelector<HTMLElement>('.tree-preview')!;
-    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('4');
+    const preview = row('1').querySelector<HTMLElement>('.tree-preview:not(.tree-question-block)')!;
+    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('3');
     expect(preview.hasAttribute('data-open')).toBe(false);
     // Short details and titles have no control.
     expect(more('5')).toBeNull(); expect(more('3')).toBeNull();
@@ -2066,23 +2237,47 @@ describe('item details in the tree', () => {
     expect(more('1')!.textContent).toBe('Show less');
     fireEvent.click(more('1')!);
     expect(more('1')!.textContent).toBe('Show more');
-    expect(row('1').querySelector('.tree-preview')!.hasAttribute('data-open')).toBe(false);
+    expect(row('1').querySelector('.tree-preview:not(.tree-question-block)')!.hasAttribute('data-open')).toBe(false);
   });
 
-  it('never clamps a title and keeps status beside it without item numbers', async () => {
+  it('unfolds a clamped row when a search step lands on it (D6), and only that row', async () => {
+    measure();
+    const status = vi.fn();
+    await mount({ configure: transport => {
+      longOutcome(transport);
+      transport.sessions.get(route.session_id)!.items['1']!.outcome = `${long}\nThe zebra is on the last line.`;
+    }, props: { query: 'zebra', onSearchStatus: status } });
+    expect(more('1')!.textContent).toBe('Show more');
+    const { onNext } = status.mock.calls.at(-1)![0] as { onNext: () => void };
+    act(() => { onNext(); });
+    expect(more('1')!.textContent).toBe('Show less');
+    expect(row('1').querySelector('.tree-preview:not(.tree-question-block)')!.hasAttribute('data-open')).toBe(true);
+    // Nothing is selected or opened by the step.
+    expect(row('1').getAttribute('aria-selected')).toBe('false');
+    // The unfold flag is saved per item; fold it again so the next test starts folded.
+    fireEvent.click(more('1')!);
+  });
+
+  it('folds a long title at three lines with its own Show more and keeps status beside it without item numbers', async () => {
     measure();
     await mount({ configure: transport => {
       const item = transport.sessions.get(route.session_id)!.items['4']!;
       item.question = 'A long title that needs more room. '.repeat(15); item.outcome = null;
     } });
-    expect(more('4')).toBeNull();
+    // A short title (row 3) has no control; a long one folds, and its one flag also governs the details.
+    expect(more('3')).toBeNull();
+    expect(more('4')!.textContent).toBe('Show more');
+    expect(row('4').querySelector('.tree-question-block')!.hasAttribute('data-clamped')).toBe(true);
     expect(row('4').querySelector('.tree-question.tree-clamp')).toBeNull();
-    expect(row('4').querySelector('.tree-heading .tree-row-status')).not.toBeNull();
+    // The status sits in the end cluster's reserved badge slot, beside the title's first line, not in the heading.
+    expect(row('4').querySelector('.tree-end > .tree-end-badge')?.textContent).toBe('Open');
+    expect(row('4').querySelector('.tree-question')?.textContent).toBe('A long title that needs more room. '.repeat(15));
+    expect(row('4').querySelector('.tree-heading')!.contains(row('4').querySelector('.tree-question'))).toBe(true);
     expect(document.querySelector('.tree-id')).toBeNull();
     expect(row('4').textContent).not.toMatch(/#4|^4/);
   });
 
-  it('lets Show more and Show less steer after a deliberate reveal instead of restoring its old anchor', async () => {
+  it('holds the reading row when Show more and Show less change what is above it, after a deliberate reveal, instead of restoring its old anchor', async () => {
     measure();
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -2114,32 +2309,35 @@ describe('item details in the tree', () => {
       const scroll = box.scrollTop;
       const deliver = () => act(() => observers.filter(observer => !observer.targets.has(box)
         && [...observer.targets].some(target => target.matches('.tree-rows'))).forEach(observer => observer.run()));
+      // Show more above the reading row grows what is above it; the reading row (4) keeps its place and the Map scrolls by the growth.
       fireEvent.click(more('3')!);
       deliver();
-      expect(box.scrollTop).toBe(scroll);
-      expect(row('4').getBoundingClientRect().top).toBe(240);
+      expect(box.scrollTop).toBe(scroll + 200);
+      expect(row('4').getBoundingClientRect().top).toBe(40);
+      // Show less out of view above the reading row folds what is above it: the reading row stays put (only a Show less on
+      // screen brings its own row's top into sight).
       fireEvent.click(more('3')!);
       deliver();
-      expect(row('3').getBoundingClientRect().top).toBe(20);
-      expect(row('4').getBoundingClientRect().top).toBe(120);
+      expect(row('4').getBoundingClientRect().top).toBe(40);
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it.each([4, 5, 6, 7, 8])('clamps %s body lines only if at least three would be hidden', async lines => {
-    measure(node => node.parentElement?.closest('[data-item-id="4"]') ? lines : 1);
+  it.each([2, 3, 4, 5, 8])('clamps %s body lines only if at least one would be hidden', async lines => {
+    measure(node => node.parentElement?.closest('[data-item-id="4"] .tree-outcome') ? lines : 1);
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['4']!.outcome = 'Body with a measured height.'; } });
-    expect(!!more('4')).toBe(lines >= 7);
-    expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(lines >= 7);
-    if (lines >= 7) {
+    const details = () => row('4').querySelector('.tree-preview:not(.tree-question-block)')!;
+    expect(!!more('4')).toBe(lines >= 4);
+    expect(details().hasAttribute('data-clamped')).toBe(lines >= 4);
+    if (lines >= 4) {
       fireEvent.click(more('4')!);
-      expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(false);
+      expect(details().hasAttribute('data-clamped')).toBe(false);
       fireEvent.click(more('4')!);
-      expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(true);
+      expect(details().hasAttribute('data-clamped')).toBe(true);
     }
   });
 
-  it('remeasures real lines and the complete fourth-line boundary after the clipped text resizes', async () => {
-    let line = 21, lines = 7;
+  it('remeasures real lines and the complete third-line boundary after the clipped text resizes', async () => {
+    let line = 21, lines = 4;
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       targets = new Set<Element>();
@@ -2147,14 +2345,14 @@ describe('item details in the tree', () => {
       observe(target: Element) { this.targets.add(target); }
       disconnect() { this.targets.clear(); }
     });
-    measure(node => node.parentElement?.closest('[data-item-id="4"]') ? lines : 1, () => line);
+    measure(node => node.parentElement?.closest('[data-item-id="4"] .tree-outcome') ? lines : 1, () => line);
     try {
       await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['4']!.outcome = 'Body with a measured height.'; } });
-      const excerpt = row('4').querySelector('.tree-clamp')!;
+      const excerpt = row('4').querySelector('.tree-outcome .tree-clamp')!;
       expect(more('4')).not.toBeNull();
-      lines = 6; line = 25.2; act(() => observers.find(observer => observer.targets.has(excerpt))!.run());
+      lines = 3; line = 25.2; act(() => observers.find(observer => observer.targets.has(excerpt))!.run());
       expect(more('4')).toBeNull();
-      expect(parseFloat(row('4').querySelector<HTMLElement>('.tree-preview')!.style.getPropertyValue('--tree-clamp-height'))).toBeCloseTo(100.8);
+      expect(parseFloat(row('4').querySelector<HTMLElement>('.tree-preview:not(.tree-question-block)')!.style.getPropertyValue('--tree-clamp-height'))).toBeCloseTo(75.6);
       const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
       expect(css).toContain('--tree-preview-line: calc(21px * var(--text-scale))');
       expect(css).toContain('max-height: var(--tree-clamp-height)');
@@ -2187,7 +2385,7 @@ describe('item details in the tree', () => {
     expect(more('1')!.textContent).toBe('Show less');
   });
 
-  it('tabs from a top-level row to its preview link and Show more while skipping the Focus action', async () => {
+  it('tabs from a top-level row to its preview link and Show more while skipping the hover bar', async () => {
     measure();
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1']!.outcome = `[Read the evidence](https://example.com)\n${long}`; } });
     const link = within(row('1')).getByRole('link', { name: 'Read the evidence' });
@@ -2200,9 +2398,11 @@ describe('item details in the tree', () => {
     await userEvent.tab();
     expect(document.activeElement).toBe(more('1'));
     await userEvent.tab();
-    const focus = within(row('1')).getByRole('button', { name: /^Focus on / });
-    expect(focus.tabIndex).toBe(-1);
-    expect(document.activeElement).not.toBe(focus);
+    // The hover bar's buttons are never tab stops (only Ack is).
+    expect(document.activeElement?.closest('.tree-actions')).toBeNull();
+    for (const button of row('1').querySelectorAll<HTMLButtonElement>('.tree-actions button')) expect(button.tabIndex).toBe(-1);
+    // Focus is not on the row at all (D9): the band carries it.
+    expect(within(row('1')).queryByRole('button', { name: /^Focus on / })).toBeNull();
   });
 
   it('preserves full Markdown structure and agent-written item links without selecting their row', async () => {
@@ -2230,11 +2430,14 @@ describe('item details in the tree', () => {
     expect(groups[1]!.lastElementChild).toBe(row('8'));
     expect(row('1').classList.contains('tree-item-root')).toBe(true);
     expect(row('1.1').classList.contains('tree-item-child')).toBe(true);
-    expect(row('1.1').querySelector('.tree-elbow')).not.toBeNull();
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    // Each row sits in one box slice per level: a child inside its top item's box and its own, the tint carried by the branch.
+    const slices = (id: string) => [...row(id).querySelectorAll<HTMLElement>('.tree-box')].map(box => `${box.dataset.step}${box.hasAttribute('data-first') ? 'f' : ''}`);
+    expect(slices('1')).toEqual(['1f']);
+    expect(slices('1.1')).toEqual(['1', '2f']);
+    expect(row('1.1').dataset.branch).toBe(row('1').dataset.branch);
+    expect(row('1.1').style.getPropertyValue('--depth')).toBe('2');
+    const css = ['tree.css', 'tree-band.css'].map(name => readFileSync(resolve(__dirname, '../../../src/ui/tree', name), 'utf8')).join('\n');
     expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--a-side\)/s);
-    expect(css).toMatch(/\.tree-item\s*\{[^}]*padding-top: 12px;[^}]*padding-bottom: 14px;[^}]*border-bottom: 1px solid var\(--color-divider\)/s);
-    expect(css).toMatch(/\.tree-item-root\s*\{[^}]*padding-top: 20px/s);
     expect(css).toMatch(/scroll-padding-top: var\(--tree-header-height, 0\)/);
   });
 
@@ -2258,47 +2461,41 @@ describe('item details in the tree', () => {
     expect(row('7').querySelector('.stuck-note')).not.toBeNull();
   });
 
-  it('keeps the space of the shortcut icons so the text never changes width on hover', async () => {
+  it('floats the shortcut icons over the row so the text never changes width on hover', async () => {
     await mount();
     const body = row('4').querySelector('.tree-body')!, before = row('4').innerHTML;
-    expect(row('4').querySelector('.tree-actions')).not.toBeNull();
+    expect(row('4').querySelector('.tree-end > .tree-actions')).not.toBeNull();
+    fireEvent.mouseEnter(row('4'));
     expect(row('4').innerHTML).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body);
-    // The icons are always laid out and only fade in: nothing in the stylesheet takes them out of the flow.
+    // The hover bar is absolute inside the end cluster (it takes no room) and only fades in; it is never display:none,
+    // so showing it lays nothing out again. The cluster's slots keep fixed widths (alpha.20 C4).
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-actions\b/.test(selector!));
     expect(rules.length).toBeGreaterThan(0);
-    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
-    expect(rules.some(([, , declarations]) => /visibility:\s*hidden/.test(declarations!) && /opacity:\s*0/.test(declarations!))).toBe(true);
+    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:/);
+    expect(rules.some(([, , declarations]) => /position:\s*absolute/.test(declarations!) && /visibility:\s*hidden/.test(declarations!)
+      && /opacity:\s*0/.test(declarations!))).toBe(true);
+    expect(css).toMatch(/\.tree-end\s*\{[^}]*position: relative/);
+    for (const slot of ['marker', 'related']) expect(css).toMatch(new RegExp(`\\.tree-end-${slot}\\s*\\{\\s*width: var\\(--tree-end-${slot}\\)`));
+    expect(css).toMatch(/\.tree-ack-slot\s*\{\s*width: var\(--tree-end-ack\)/);
   });
-  it('keeps the space of a topic band’s actions so the topic name never rewraps on hover or focus', async () => {
+  it('draws the band the same at rest, on hover and on focus: no hover icons, so the topic name never rewraps', async () => {
     await mount({ configure: transport => {
       const session = transport.sessions.get(route.session_id)!;
       for (const item of Object.values(session.items)) if (item) item.status = 'done';
     } });
     const band = topicRow('Delivery decisions'), before = band.innerHTML;
-    expect(band.querySelector('.tree-topic-actions')).not.toBeNull();
+    expect(band.querySelector('.tree-topic-actions')).toBeNull();
     fireEvent.mouseEnter(band); band.focus();
     expect(band.innerHTML).toBe(before);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
-    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-topic-actions\b/.test(selector!));
-    const hidden = rules.filter(([, , declarations]) => /visibility:\s*hidden/.test(declarations!));
-    const shown = rules.filter(([, , declarations]) => /visibility:\s*visible/.test(declarations!));
-    // Hidden by visibility and opacity only: no rule takes the actions out of the flow, at rest or on hover or focus.
-    expect(hidden).toHaveLength(1); expect(hidden[0]![2]).toMatch(/opacity:\s*0/);
-    expect(shown).toHaveLength(1); expect(shown[0]![1]).toMatch(/:hover[^,]*\.tree-topic-actions/); expect(shown[0]![1]).toMatch(/:focus-within/);
-    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
-    // The buttons stay out of the tab order while hidden, like the item shortcuts.
-    for (const button of band.querySelectorAll('.tree-topic-actions button')) expect((button as HTMLElement).tabIndex).toBe(-1);
-    // Icon-only like the item shortcuts, so the reserved room is small: each has its plain name and a distinct icon.
-    const buttons = [...band.querySelectorAll<HTMLElement>('.tree-topic-actions button')];
-    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Reply to topic', 'Continue here', 'Archive', 'Remove']);
-    for (const button of buttons) { expect(button.textContent).toBe(''); expect(button.title).not.toBe(''); }
-    expect(new Set(buttons.map(button => button.querySelector('i')!.className)).size).toBe(buttons.length);
+    // Reply, the bin, Archive and Remove are one "…" menu button, always in the band (D12).
+    expect(within(band).getByRole('button', { name: /^More actions for/ })).toBeTruthy();
+    for (const name of ['Reply to topic', 'Archive', 'Remove']) expect(within(band).queryByRole('button', { name })).toBeNull();
   });
 });
 
 describe('scrolling the tree', () => {
-  it('keeps a breadcrumb reveal below the pinned header when its chain shortens and an edge callback precedes reflow correction', async () => {
+  it('keeps a Back-to reveal below the pinned header when a late clamp shortens rows and an edge callback precedes reflow correction', async () => {
     let shrink = 0;
     const callbacks: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -2319,7 +2516,7 @@ describe('scrolling the tree', () => {
       return rectangle.call(this);
     });
     try {
-      const view = await mount({ configure: transport => {
+      await mount({ props: { selectedId: 'deep-1' }, configure: transport => {
         const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
         for (let level = 0; level < 5; level++) {
           const id = `deep-${level}`;
@@ -2327,21 +2524,18 @@ describe('scrolling the tree', () => {
           saved.expanded_item_ids.push(id);
         }
       } });
-      const box = scroller(), slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+      const box = scroller();
       box.scrollTop = ids().indexOf('deep-4') * 200 - 70; fireEvent.scroll(box);
-      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
-      fireEvent.click(within(slot).getByRole('button', { name: 'Level 1' }));
-      await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: 'deep-1' } }));
+      // The selected row went past the top: Back to it reveals it below the pinned header.
+      backToSelected();
       expect(row('deep-1').getBoundingClientRect().top).toBe(168);
-      expect(within(slot).getAllByRole('button')).toHaveLength(2);
-      // A late preview clamp runs after the breadcrumb changed; the edge observer
+      // A late preview clamp runs after the reveal; the edge observer
       // may see that new geometry before the observer that repairs the reading anchor.
       shrink = 108;
       act(() => callbacks.find(callback => callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
       act(() => callbacks.find(callback => !callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
       expect(row('deep-1').getBoundingClientRect().top).toBe(168);
       expect(row('deep-1').getBoundingClientRect().bottom).toBeLessThanOrEqual(box.getBoundingClientRect().bottom);
-      expect(within(slot).getAllByRole('button')).toHaveLength(2);
       // Back to the selected item, asked while the tree holds a reveal.
       backToSelected();
       shrink = 140;
@@ -2351,40 +2545,17 @@ describe('scrolling the tree', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('keeps ancestor names in a permanent slot outside rows and reveals the chosen ancestor', async () => {
-    layout();
-    const view = await mount({ configure: transport => {
-      const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
-      for (let level = 0; level < 5; level++) {
-        const id = `deep-${level}`;
-        session.items[id] = { ...session.items['1.1']!, id, ordinal: 100 + level, parent: level ? `deep-${level - 1}` : '1', question: `Level ${level}`, short: `Level ${level}` };
-        saved.expanded_item_ids.push(id);
-      }
-    } });
-    const slot = screen.getByRole('navigation', { name: 'Map ancestors' });
-    expect(document.querySelector('.tree-scroll')!.contains(slot)).toBe(false);
-    const box = scroller();
-    box.scrollTop = ids().indexOf('deep-4') * 100; fireEvent.scroll(box);
-    expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
-    expect(css).toMatch(/\.tree-breadcrumb\s*\{[^}]*height: 28px/);
-    fireEvent.click(within(slot).getByRole('button', { name: 'Level 2' }));
-    await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: 'deep-2' } }));
-    expect(screen.getByRole('navigation', { name: 'Map ancestors' })).toBe(slot);
-  });
-
   it('returns keyboard focus to the selected row when Enter activates its tag', async () => {
     await opened({ props: { selectedId: '8' } });
     fireEvent.scroll(scroller());
-    const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+    const tag = backPill('below');
     tag.focus(); await userEvent.keyboard('{Enter}');
     expect(document.activeElement).toBe(row('8'));
     expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(8);
   });
 
-  it('names ancestors of the first fully visible row below pinned chrome, skipping a clipped predecessor after reflow', async () => {
+  it('holds the first whole row below pinned chrome when its clipped predecessor grows after reflow', async () => {
     let predecessorGrowth = 0;
-    let viewportHeight = 400;
     const callbacks: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       targets = new Set<Element>();
@@ -2395,7 +2566,7 @@ describe('scrolling the tree', () => {
     const rectangle = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
-      if (this === box) return new DOMRect(0, 100, 300, viewportHeight);
+      if (this === box) return new DOMRect(0, 100, 300, 400);
       if (this.matches('.tree-topic')) return new DOMRect(0, 100, 300, 60);
       const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
       if (at >= 0 && this.getAttribute('role') === 'treeitem') {
@@ -2412,23 +2583,14 @@ describe('scrolling the tree', () => {
           saved.expanded_item_ids.push(id);
         }
       } });
-      const box = scroller(), slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+      const box = scroller();
       box.scrollTop = ids().indexOf('deep-4') * 100 - 68; fireEvent.scroll(box);
       expect(row('deep-3').getBoundingClientRect().bottom).toBe(168);
       expect(row('deep-4').getBoundingClientRect().top).toBe(168);
-      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
       predecessorGrowth = 20;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
-      expect(row('deep-4').getBoundingClientRect().top).toBe(188);
-      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
-      // An item hidden by the pinned topic is not the first fully visible row.
-      box.scrollTop += 40; fireEvent.scroll(box);
-      expect(within(slot).queryAllByRole('button').map(button => button.textContent)).not.toEqual(['Level 1', 'Level 2', 'Level 3']);
-      // Neither is a row whose bottom is outside the window.
-      box.scrollTop -= 40; fireEvent.scroll(box);
-      viewportHeight = 100;
-      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
-      expect(within(slot).queryAllByRole('button')).toHaveLength(0);
+      // D24: the first whole row is the reading row, so the clipped predecessor growing at its end moves nothing in view.
+      expect(row('deep-4').getBoundingClientRect().top).toBe(168);
     } finally { vi.unstubAllGlobals(); }
   });
   // A 400 px tree over rows 100 px apart that move with its scrollTop, scrolled 150 px down.
@@ -2456,28 +2618,27 @@ describe('scrolling the tree', () => {
     const view = await opened({ props: { selectedId: '8' } });
     const box = scroller();
     fireEvent.scroll(box);
-    expect(screen.getByRole('button', { name: /^↓ Selected:/ })).toBeTruthy();
+    expect(backPill('below')).toBeTruthy();
     view.rerender({ selectedId: '8', covered: true });
     const offset = box.scrollTop, selectedCalls = view.calls.selected.length;
     // The keys ask for intents; the Map answers `.` and `n` only while it is not covered, so neither is handled now.
-    // (Recent is the exception: its dialog is lifted above the bigger view, so ⌘E still answers; see the end.)
+    // (Recent is the App's, not the Map's: ⌘E answers over the bigger view too; see tests/ui/navigation/recentPopover.test.tsx.)
     for (const intent of ['map.backToSelected', 'map.nextUnseen'] as const) {
       let handled = true;
       act(() => { handled = dispatchIntent(intent); });
       expect(handled).toBe(false);
       expect(box.scrollTop).toBe(offset);
       expect(view.calls.selected).toHaveLength(selectedCalls);
-      expect(screen.queryByRole('dialog', { name: 'Recent items' })).toBeNull();
     }
     view.rerender({ selectedId: '8', covered: false });
     let handled = false;
     act(() => { handled = dispatchIntent('map.backToSelected'); });
     expect(handled).toBe(true);
     expect(box.scrollTop).not.toBe(offset);
-    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    noBackPill();
+    // The Map no longer answers Recent: the App owns it.
     act(() => { handled = dispatchIntent('recent.open'); });
-    expect(handled).toBe(true);
-    expect(screen.getByRole('dialog', { name: 'Recent items' })).toBeTruthy();
+    expect(handled).toBe(false);
   });
 
   it('holds a revealed ancestor below the sticky header when detail-width clamping shrinks its preceding row', async () => {
@@ -2511,17 +2672,19 @@ describe('scrolling the tree', () => {
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
       expect(row('8').getBoundingClientRect().top).toBe(68);
       const top = scroller().scrollTop;
+      // The owner's press releases the reveal; 8 is the selected row on screen, so it is the reading row (D24) and holds.
       fireEvent.pointerDown(row('8'));
       shrink = 90;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
-      expect(scroller().scrollTop).toBe(top);
-      expect(row('8').getBoundingClientRect().top).toBe(58);
+      expect(scroller().scrollTop).toBe(top - 10);
+      expect(row('8').getBoundingClientRect().top).toBe(68);
+      // Scrolled 20 px up, 8 is still on screen and still held, now at its new place.
       fireEvent.wheel(scroller());
       scroller().scrollTop -= 20; fireEvent.scroll(scroller());
       shrink = 95;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
-      expect(scroller().scrollTop).toBe(top - 20);
-      expect(row('8').getBoundingClientRect().top).toBe(73);
+      expect(scroller().scrollTop).toBe(top - 35);
+      expect(row('8').getBoundingClientRect().top).toBe(88);
     } finally { vi.unstubAllGlobals(); }
   });
 
@@ -2555,9 +2718,10 @@ describe('scrolling the tree', () => {
     try {
       await mount({ props: { selectedId: '2' } });
       scroller().scrollTop = 190; fireEvent.scroll(scroller());
-      expect(screen.queryByRole('button', { name: /^↑ Selected:/ })).toBeNull();
-      headerHeight = 60; act(() => callbacks.find(callback => callback.targets.has(scroller()))!.run());
-      expect(screen.getByRole('button', { name: /^↑ Selected:/ })).toBeTruthy();
+      noBackPill();
+      // The edge observer watches the scroller and the topic headers.
+      headerHeight = 60; act(() => callbacks.find(callback => callback.targets.has(scroller()) && [...callback.targets].some(target => target.matches('.tree-topic')))!.run());
+      expect(backPill('above')).toBeTruthy();
       expect(scroller().scrollTop).toBe(190);
     } finally { vi.unstubAllGlobals(); }
   });
@@ -2607,7 +2771,9 @@ describe('scrolling the tree', () => {
     await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('8'));
     const reveal = view.calls.selected[0];
     view.rerender({ reveal, selectedId: '8', detailOpen: true });
-    if (path === 'Resume filtered view') view.rerender({ reveal, selectedId: '8', detailOpen: true, query: 'missing' });
+    // A status filter that leaves the revealed item out (a search no longer filters the Map).
+    if (path === 'Resume filtered view') await act(async () => { const saved = structuredClone(viewOf(view.transport));
+      await view.navigation.saveSessionView({ ...saved, filters: { ...saved.filters, statuses: ['decided'] } }, view.transport.preferences.revision); });
     const readingPosition = path === 'collapse item' ? 0 : 150;
     scroller().scrollTop = readingPosition;
     fireEvent.scroll(scroller());
@@ -2619,18 +2785,22 @@ describe('scrolling the tree', () => {
         fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
         break;
       case 'status chip':
-        fireEvent.click(chip('All'));
+        fireEvent.click(chip('Open'));
         break;
       case 'Resume filtered view':
         fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
         break;
     }
     await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    // A chip removes rows above the reading row, and the Map's hold (D24) moves the scroll to keep that row in place; every
+    // other path leaves the scroll where the owner put it. Either way, dismissing the reveal moves nothing further.
+    const settledAt = scroller().scrollTop;
+    if (path !== 'status chip') expect(settledAt).toBe(readingPosition);
     // Dismissal can reach the workspace before a queued preference write changes selection.
-    view.rerender({ reveal: null, selectedId: '8', detailOpen: true, query: path === 'Resume filtered view' ? 'missing' : '' });
-    expect(scroller().scrollTop).toBe(readingPosition);
+    view.rerender({ reveal: null, selectedId: '8', detailOpen: true });
+    expect(scroller().scrollTop).toBe(settledAt);
     await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(false));
-    expect(scroller().scrollTop).toBe(readingPosition);
+    expect(scroller().scrollTop).toBe(settledAt);
   });
 
   it('reveals external selections only as far as needed', async () => {
@@ -2652,7 +2822,7 @@ describe('scrolling the tree', () => {
     const offscreen = link(view, '8');
     view.rerender({ reveal: offscreen, historyReveal: offscreen, selectedId: '8', detailOpen: true });
     expect(scroller().scrollTop).toBe(448);
-    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    noBackPill();
   });
 
   it.each([['4', 150], ['8', 448]] as const)('reveals preview link target %s only as far as needed', async (target, expectedScroll) => {
@@ -2707,36 +2877,33 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
-  it.each(['above', 'below'] as const)('keeps the %s selection tag in its reserved top-bar slot and reveals on click and on the back-to-selected key', async edge => {
+  it.each(['above', 'below'] as const)('floats the %s Back-to pill over the Map, outside the scroller and the top bars, and reveals on click and on the back-to-selected key', async edge => {
     await opened({ props: { selectedId: edge === 'above' ? '1' : '8' } });
     fireEvent.scroll(scroller());
-    const marker = () => screen.getByRole('button', { name: edge === 'above' ? /^↑ Selected:/ : /^↓ Selected:/ });
-    expect(marker().getAttribute('data-edge')).toBe(edge);
-    const slot = document.querySelector('.tree-path > .tree-selected-slot')!;
-    expect(slot.getAttribute('aria-label')).toBe('Selected item navigation');
-    expect(slot.closest('[aria-label="Filter items"]')).toBeNull();
-    expect(slot.contains(marker())).toBe(true);
-    // The tag shares the fixed path row with the ancestors; it is never inside the scroller.
-    expect(document.querySelector('.tree-scroll')!.contains(marker())).toBe(false);
-    expect(slot.previousElementSibling).toBe(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(marker().querySelector('.tree-selected-label')?.textContent).not.toBe('');
+    const marker = () => backPill(edge);
+    // The pill sits in the scroller's shell over the rows: it covers them rather than taking a row of space (SPEC §5.8).
+    expect(marker().parentElement).toBe(document.querySelector('.tree-scroll-shell'));
+    expect(scroller().contains(marker())).toBe(false);
+    expect(marker().closest('[aria-label="Filter items"]')).toBeNull();
+    expect(document.querySelector('.tree-selected-slot')).toBeNull();
+    expect(marker().querySelector('.tree-back-label')?.textContent).not.toBe('');
+    expect(marker().querySelector('.tree-back-arrow')?.textContent).toBe(edge === 'above' ? '↑' : '↓');
+    expect(marker().querySelector('.p-key')?.textContent).toBe('.');
     fireEvent.click(marker());
     expect(document.activeElement).toBe(row(edge === 'above' ? '1' : '8'));
-    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
-    expect(document.querySelector('.tree-selected-slot')).toBe(slot);
-    expect(slot.children).toHaveLength(0);
+    noBackPill();
     // The Back-to-selected key is `.` (SPEC 6.1) and asks the Map for map.backToSelected.
     scroller().scrollTop = 150; fireEvent.scroll(scroller());
     expect(marker()).toBeTruthy();
     backToSelected();
-    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    noBackPill();
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
-    const solid = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, selector]) => selector!.includes('.tree-selected-edge:active'))!;
-    for (const state of ['', ':hover', ':focus', ':active']) expect(solid[1]).toContain(`.tree-selected-edge${state}`);
+    const solid = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, selector]) => selector!.includes('.tree-back:active'))!;
+    for (const state of ['', ':hover', ':focus', ':active']) expect(solid[1]).toContain(`.tree-back${state}`);
     expect(solid[2]).toContain('background: var(--a-card)'); expect(solid[2]).not.toContain('transparent');
-    expect(solid[2]).not.toMatch(/position:\s*(absolute|fixed)|(?:left|right|top|bottom):/);
-    expect(solid[2]).toContain('max-width: min(100%, 34ch)');
-    expect(css).toMatch(/\.tree-selected-slot\s*\{[^}]*height: 28px/);
+    expect(solid[2]).toMatch(/position:\s*absolute/);
+    expect(solid[2]).toContain('height: 30px');
+    expect(css).toMatch(/\.tree-scroll-shell\s*\{[^}]*position: relative/);
   });
 
   it('uses the full selected question for accessibility and distinguishing words before tag truncation', async () => {
@@ -2747,13 +2914,13 @@ describe('scrolling the tree', () => {
       items['4']!.question = 'Count cache reads for Postgres';
     }, props: { selectedId: '1' } });
     fireEvent.scroll(scroller());
-    const first = screen.getByRole('button', { name: '↑ Selected: Count cache reads for Redis' });
-    expect(first.querySelector('.tree-selected-label')!.textContent).toBe('Redis · Count cache reads');
+    const first = screen.getByRole('button', { name: 'Back to “Count cache reads for Redis”' });
+    expect(first.querySelector('.tree-back-label')!.textContent).toBe('Back to “Redis · Count cache reads”');
     expect(first.title).toContain('Count cache reads for Redis');
     view.rerender({ selectedId: '4' });
     scroller().scrollTop = 600; fireEvent.scroll(scroller());
-    const second = screen.getByRole('button', { name: '↑ Selected: Count cache reads for Postgres' });
-    expect(second.querySelector('.tree-selected-label')!.textContent).toBe('Postgres · Count cache reads');
+    const second = screen.getByRole('button', { name: 'Back to “Count cache reads for Postgres”' });
+    expect(second.querySelector('.tree-back-label')!.textContent).toBe('Back to “Postgres · Count cache reads”');
   });
 
   it.each(['opening', 'navigation', 'tag', 'back-to-selected key'] as const)('lands %s reveals clear of the pinned bars and a tall sticky topic', async path => {
@@ -2773,31 +2940,30 @@ describe('scrolling the tree', () => {
       scroller().scrollTop = 750; fireEvent.scroll(scroller());
       expect(row('8').getBoundingClientRect().top).toBeLessThan(topicRow('Delivery decisions').getBoundingClientRect().bottom);
       if (path === 'navigation') view.rerender({ reveal: link(view, '8'), selectedId: '8' });
-      else if (path === 'tag') fireEvent.click(screen.getByRole('button', { name: /^↑ Selected:/ }));
+      else if (path === 'tag') fireEvent.click(backPill('above'));
       else backToSelected();
     }
     const target = row('8').getBoundingClientRect();
     expect(target.top).toBeGreaterThanOrEqual(topicRow('Delivery decisions').getBoundingClientRect().bottom + 8);
     expect(target.bottom).toBeLessThanOrEqual(scroller().getBoundingClientRect().bottom - 8);
-    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    noBackPill();
   });
 
-  it('keeps the selection tag in a reserved top bar when viewing archived topics', async () => {
+  it('keeps the Back-to pill over the Map when viewing archived topics', async () => {
     await opened({ configure: transport => {
       const session = transport.sessions.get(route.session_id)!;
       for (const topic of Object.values(session.topics)) if (topic) topic.archived_at = session.updated_at;
       viewOf(transport).filters.archived = true;
     }, props: { selectedId: '8' } });
     fireEvent.scroll(scroller());
-    const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
-    expect(tag.closest('.tree-path > .tree-selected-slot')).not.toBeNull();
+    expect(backPill('below').parentElement).toBe(document.querySelector('.tree-scroll-shell'));
     expect(screen.queryByRole('button', { name: /^Filter/ })).toBeNull();
   });
 
-  it('does not add a Map selection tag or slot to the graph', async () => {
+  it('does not add a Back-to pill to the graph', async () => {
     await mount({ props: { selectedId: '8', graph: <p>Graph content</p> } });
-    expect(document.querySelector('.tree-selected-slot')).toBeNull();
-    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    expect(document.querySelector('.tree-back')).toBeNull();
+    noBackPill();
   });
 
   it('temporarily reveals a folded selection with the back-to-selected key and scrolls only after its row mounts', async () => {
@@ -2835,7 +3001,7 @@ describe('scrolling the tree', () => {
       return rect.call(this);
     });
     const view = await mount();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
     scroller().scrollTop = 190;
     const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
@@ -2977,7 +3143,8 @@ describe('scrolling the tree', () => {
       expect(row(next).getBoundingClientRect().top).toBe(nextOffset);
     });
 
-    it('lets new rows show when the tree is at the very top, and never undoes the owner’s own scrolling', async () => {
+    // D24: the hold applies at the very top too. Here the first row is the reading row and the rows growing are below it.
+    it('at the very top holds the first row while rows below it grow, and never undoes the owner’s own scrolling', async () => {
       growing();
       const view = await mount();
       grow = 300; view.rerender({});

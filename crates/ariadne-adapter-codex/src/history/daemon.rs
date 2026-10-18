@@ -28,7 +28,7 @@ impl CodexDaemonReader {
         self.executable.path()
     }
     pub fn open(options: CodexOptions, endpoint: EndpointRef) -> Result<Self, AdapterError> {
-        Self::open_before(options, endpoint, Instant::now() + Duration::from_secs(10))
+        Self::open_before(options, endpoint, Instant::now() + budget(10))
     }
     /// Blocking native initialization under the caller's absolute admission deadline.
     /// Pass that same deadline to selected-thread qualification; run outside locks
@@ -131,7 +131,7 @@ impl CodexDaemonReader {
             request,
             instance_id,
             observed_at,
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + budget(10),
         )
     }
     pub(crate) fn bind_before(
@@ -187,7 +187,7 @@ impl CodexDaemonReader {
     /// One loaded page plus at most twenty metadata joins, under one ten-second deadline.
     /// Caller retains the cursor and schedules more pages while the connection UI is open.
     pub fn discover(&mut self, cursor: Option<String>) -> Result<DiscoveryPage, AdapterError> {
-        self.discover_before(cursor, Instant::now() + Duration::from_secs(10))
+        self.discover_before(cursor, Instant::now() + budget(10))
     }
     pub(crate) fn discover_before(
         &mut self,

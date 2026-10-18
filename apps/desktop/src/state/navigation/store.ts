@@ -23,6 +23,8 @@ type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: Mut
   retrySeen?: (preferences: PreferencesSnapshot) => Promise<PendingMutation | null>;
   prepare?: () => Promise<PendingMutation>;
   followupIntent?: number;
+  /** Written by the automatic Recent trail, never by an owner edit. */
+  recent?: boolean;
   attempted?: boolean;
   current?: () => boolean };
 type QueuedNavigation = { selection: NavigationSelection; reveal: RevealedItem | null; isCurrent: () => boolean;
@@ -118,7 +120,6 @@ export class NavigationStore {
   private pending: PendingMutation | null = null;
   private activeMutation: Promise<boolean> | null = null;
   private preparingRecent = false;
-  private recentFlight: Promise<boolean> | null = null;
   private textScaleTarget: { value: number; expectedRevision: number | null } | null = null;
   private textScaleFlight: Promise<boolean> | null = null;
   private readonly seenQueue = new Map<string, SeenPatch>();
@@ -151,7 +152,8 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
-  readonly isWritingRecent = () => this.state.writing && this.activeMutation !== null && this.activeMutation === this.recentFlight;
+  /** True while the unsettled preferences write (running or unconfirmed) is the automatic Recent trail. */
+  readonly isRecentPending = () => this.pending?.recent === true;
   readonly getRefreshCompletion = () => this.flight;
   readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   readonly subscribe = (receive: () => void): Unsubscribe => {
@@ -935,7 +937,7 @@ export class NavigationStore {
   }
   private async execute(mutation: PendingMutation): Promise<boolean> {
     if (this.stopped || this.pending) return false;
-    this.pending = { ...mutation, followupIntent: this.navigationIntent, request: structuredClone(mutation.request) };
+    this.pending = { ...mutation, recent: this.preparingRecent, followupIntent: this.navigationIntent, request: structuredClone(mutation.request) };
     return this.retryMutation();
   }
   retryMutation(): Promise<boolean> {
@@ -946,7 +948,6 @@ export class NavigationStore {
     const operation: Promise<boolean> = Promise.resolve().then(() => this.completeMutation(pending));
     this.activeMutation = operation;
     if (this.preparingRecent) {
-      this.recentFlight = operation;
       // A background visit can invalidate an in-flight catalogue capture.
       // Retain its requested refresh rather than waiting for the next poll.
       if (this.flight) this.requested = true;
@@ -967,8 +968,10 @@ export class NavigationStore {
     try {
       if (!pending.attempted && pending.current && !pending.current()) return this.discardNavigation();
       if (pending.prepare) {
+        const recent = pending.recent;
         pending = await pending.prepare();
         if (this.stopped) return false;
+        pending.recent = recent;
         this.pending = pending;
         this.publish({ pendingOperationId: pending.request.command.op_id });
       }
@@ -1022,6 +1025,7 @@ export class NavigationStore {
           if (this.onlySeenSince(command.params.expected_preferences_revision, fresh.revision)) {
             const next = await pending.retrySeen(fresh);
             if (next) {
+              next.recent = pending.recent;
               this.pending = next;
               this.publish({ pendingOperationId: next.request.command.op_id });
               return this.completeMutation(next);
@@ -1041,6 +1045,7 @@ export class NavigationStore {
             && this.onlySeenSince(command.params.expected_preferences_revision, current.revision)
             ? await pending.retrySeen(structuredClone(current) as PreferencesSnapshot) : await pending.retry?.();
           if (next) {
+            next.recent = pending.recent;
             this.pending = next;
             this.publish({ pendingOperationId: next.request.command.op_id });
             return this.completeMutation(next);

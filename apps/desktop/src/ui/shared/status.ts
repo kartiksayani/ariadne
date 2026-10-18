@@ -16,7 +16,7 @@ export const STATUS: Readonly<Record<StatusKey, { readonly label: string; readon
   decided: { label: 'Decided', icon: 'ph ph-check-circle' },
   done: { label: 'Done', icon: 'ph-fill ph-check-circle' },
   dropped: { label: 'Dropped', icon: 'ph ph-x-circle' },
-  replaced: { label: 'Replaced', icon: 'ph ph-arrow-circle-right' },
+  replaced: { label: 'Replaced', icon: 'ph ph-arrows-clockwise' },
 };
 
 export const statusColor = (status: StatusKey): string => `var(--st-${status === 'queued' ? 'open' : status})`;

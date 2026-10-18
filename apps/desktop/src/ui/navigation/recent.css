@@ -1,0 +1,190 @@
+/* The Recent popover under the top bar's clock button (SPEC 6.11). It sits below a peek card (z-index 20), so a name's card shows over it. */
+.recent-popover {
+  position: absolute;
+  top: 44px;
+  right: 138px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  box-sizing: border-box;
+  width: 340px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 56px);
+  padding: 0 0 14px;
+  overflow: auto;
+  border-radius: 9px;
+  background: var(--a-side);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.55; /* The board's body line height: a row is 12px of padding and one 15.5px line (at the board's 80% text size). */
+  color: var(--color-text);
+  outline: none;
+}
+
+/* The head, the groups and the rows are the board's (SPEC 8.3): head padding 10 8 4 14, a 26px close, groups 14 apart, rows 6px inside a -6px margin. */
+.recent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 4px 14px;
+}
+
+.recent-head > i {
+  flex: none;
+  font-size: calc(14px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.recent-head h2 {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+  line-height: inherit;
+  letter-spacing: normal; /* The shared heading rule's -0.015em is not the board's. */
+}
+
+/* The heading's text keeps its dot ("Recent · viewed and changed"); the board draws the two words apart without it. */
+.recent-dot {
+  display: none;
+}
+
+.recent-sub {
+  overflow: hidden;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-head .recent-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.recent-section {
+  padding: 0 14px;
+}
+
+.recent-head + .recent-section {
+  padding-top: 8px;
+}
+
+.recent-section + .recent-section {
+  padding-top: 14px;
+}
+
+.recent-section h3 {
+  margin: 0;
+  padding-bottom: 5px; /* The board's 4px, and the 1px between its label and its first row. */
+  font-size: calc(11px * var(--text-scale));
+  line-height: inherit;
+  font-weight: 500;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.recent-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.recent-list > li + li {
+  margin-top: 1px;
+}
+
+.recent-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 12px);
+  margin: 0 -6px;
+  padding: 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-item:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.recent-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.recent-item > .status-badge-icon {
+  flex: none;
+  align-self: center;
+}
+
+.recent-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--a-edge);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-item small {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  font-size: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "· viewed" is the usual case: the board draws no note for it, so it stays for assistive tech and goes from the page. Other actions show. */
+.recent-item small[data-quiet] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.recent-item time {
+  flex: none;
+  margin-left: auto;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-empty {
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+/* The board's narrow frame (900): the popover sits nearer the right edge and is 300 wide. */
+@media (width < 1100px) {
+  .recent-popover {
+    right: 34px;
+    width: 300px;
+  }
+}

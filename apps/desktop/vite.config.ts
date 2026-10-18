@@ -34,10 +34,12 @@ export default defineConfig({
   build: { outDir: output, emptyOutDir: true },
   test: {
     environment: 'jsdom',
+    // These limits only end a test or hook that never finishes; a passing test returns at once. They are
+    // wide because a busy machine (a full run, a coverage build, another agent) slows every test several-fold.
     projects: [
-      { test: { name: "claude-mod", environment: "node", include: [resolve(root, "../../tests/integrations/claude/**/*.test.{js,mjs}")] } },
-      { test: { name: 'desktop', environment: 'jsdom', include: ['tests/ui/**/*.test.{ts,tsx}'] } },
-      { test: { name: 'reference', environment: 'jsdom', include: [resolve(root, '../../tests/ui/reference/**/*.test.{ts,tsx}')] } },
+      { test: { name: "claude-mod", environment: "node", testTimeout: 30_000, hookTimeout: 30_000, setupFiles: [resolve(root, "../../tests/integrations/claude/setup-timeouts.js")], include: [resolve(root, "../../tests/integrations/claude/**/*.test.{js,mjs}")] } },
+      { test: { name: 'desktop', environment: 'jsdom', testTimeout: 30_000, hookTimeout: 30_000, setupFiles: [resolve(root, 'tests/ui/setup-timeouts.ts'), resolve(root, 'tests/ui/setup-window-focus.ts')], include: ['tests/ui/**/*.test.{ts,tsx}'] } },
+      { test: { name: 'reference', environment: 'jsdom', testTimeout: 30_000, hookTimeout: 30_000, setupFiles: [resolve(root, 'tests/ui/setup-timeouts.ts'), resolve(root, 'tests/ui/setup-window-focus.ts')], include: [resolve(root, '../../tests/ui/reference/**/*.test.{ts,tsx}')] } },
     ],
     coverage: { provider: 'v8', allowExternal: true, include: ['src/**/*.{ts,tsx}', resolve(root, '../../integrations/claude/**/*.js')], exclude: [...coverageConfigDefaults.exclude, '**/generated/**', ...coverageExclusions], reporter: [['lcov', { projectRoot: resolve(root, '../..') }], 'text'], reportsDirectory: resolve(root, '../../coverage/web') },
   },

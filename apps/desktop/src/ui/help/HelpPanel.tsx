@@ -4,6 +4,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Keycap, usePopover, useRestoreFocus } from '../parts/parts';
 import { BRANCH_HUES, KEY_GROUPS, STATUS_HELP } from './content';
+import { ChangeMarker } from '../changes/ChangeMarker';
 import './help.css';
 
 export type HelpTab = 'keys' | 'markers';
@@ -43,11 +44,11 @@ function MarkersTab() {
     <section className="hlp-sec" aria-label="Markers">
       <h3 className="p-label hlp-h">Markers</h3>
       <div className="hlp-markers">
-        <span className="hlp-pill hlp-new"><span className="hlp-diamond" aria-hidden="true" />New</span>
+        <ChangeMarker kind="new" />
         <span className="hlp-text">You haven’t seen it yet: a new question, task or finding.</span>
-        <span className="hlp-pill hlp-changed"><span className="hlp-diamond hlp-diamond-line" aria-hidden="true" />Changed</span>
+        <ChangeMarker kind="changed" />
         <span className="hlp-text">You’ve seen it, and since then its status, outcome, options or conversation changed. A rewording alone doesn’t count.</span>
-        <span className="hlp-diamonds" aria-hidden="true"><span className="hlp-dm hlp-dm-solid" /><span className="hlp-dm hlp-dm-line" /></span>
+        <span className="hlp-diamonds" aria-hidden="true"><ChangeMarker kind="new" form="diamond" /><ChangeMarker kind="changed" form="diamond" /></span>
         <span className="hlp-text">On Graph cards and in tight spots the diamond stands alone: solid for New, outlined for Changed.</span>
       </div>
       <Info>Both clear after about a second in Details or in the open answer dock. Peeking and scrolling past leave them, and so does n, which only outlines the next one.</Info>

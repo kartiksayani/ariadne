@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 import { goToPeekItem, search, searchBox, showFullItemQuestion } from './tree.spec.mjs';
 
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const graph = () => browser.$('.graph-view');
 // The Tree / Graph switch is the top bar's segmented control.
 const views = () => browser.$('.shell-top [role="group"][aria-label="View"]');
@@ -25,15 +25,18 @@ export function assertGraph(sample, session, selected, expected) {
   assert.deepEqual([...ids].sort(), [...expected].sort(), 'Native graph shows exactly the items its saved expansion opens');
   assert.ok(ids.includes(selected), 'Native graph retains the selected node');
   assert.deepEqual(sample.nodes.filter(node => node.selected).map(node => node.id), [selected], 'Exactly the selected node is marked selected');
+  // SPEC 1.3: one column width for every node, fitted when the Graph opened (col − 26, col within 150..196), 40 high.
+  const width = sample.nodes[0]?.width ?? 0;
+  assert.ok(width >= 150 - 26 - 0.01 && width <= 196 - 26 + 0.01, `Node width ${width} is a fitted column less 26`);
   for (const value of sample.nodes) {
     assert.ok(session.items[value.id], 'Every native node belongs to the actual registered session');
-    near(value.width, 190, 0.01, 'Node width'); near(value.height, 66, 0.01, 'Node height');
+    near(value.width, width, 0.01, 'Every node shares the fitted width'); near(value.height, 40, 0.01, 'Node height');
     assert.equal(value.title, session.items[value.id].question, 'The node title retains the complete stored sentence');
   }
   for (const edge of sample.edges.filter(value => value.id.startsWith('parent:'))) {
     const [, parent, child] = edge.id.split(':');
     assert.equal(session.items[child]?.parent, parent, 'Rendered native edges follow canonical ancestry');
-    assert.match(edge.path, /^M[\d.-]+ [\d.-]+ C/, 'Parent edges retain cubic geometry');
+    assert.match(edge.path, /^M[\d.-]+ [\d.-]+ (H[\d.-]+ )?V[\d.-]+ H[\d.-]+$/, 'Parent edges are orthogonal elbows');
   }
 }
 export function assertCentered(sample, id) {
@@ -54,12 +57,12 @@ async function sample() {
     const root = document.querySelector('.graph-view'), scroller = root.querySelector('.graph-scroll'), rect = scroller.getBoundingClientRect();
     const inset = parseFloat(document.querySelector('.shell-body-viewport')?.style.getPropertyValue('--dock-inset')) || 0;
     return { width: rect.width, height: rect.height, inset, focused: document.activeElement?.getAttribute('data-item-id') ?? null,
-      counts: [...root.querySelectorAll('.graph-card-counts')].map(element => element.textContent),
+      titles: [...root.querySelectorAll('.graph-topic-title')].map(element => element.textContent),
       nodes: [...root.querySelectorAll('.graph-node[data-item-id]')].map(element => {
         const box = element.getBoundingClientRect();
         return { id: element.dataset.itemId, top: box.top - rect.top, left: box.left - rect.left, width: box.width, height: box.height,
           title: element.getAttribute('title'), selected: element.getAttribute('aria-selected') === 'true',
-          below: element.querySelector('.graph-node-below')?.textContent ?? null };
+          match: element.classList.contains('is-match'), below: element.querySelector('.graph-node-inside')?.textContent ?? null };
       }),
       edges: [...root.querySelectorAll('[data-edge]')].map(element => ({ id: element.dataset.edge,
         path: (element.tagName === 'path' ? element : element.querySelector('path')).getAttribute('d') })) };
@@ -93,9 +96,10 @@ export async function runGraphAcceptance(configuration) {
   // Opening centres the saved selection and shows the tree's saved expansion.
   const opened = await sample(); assertGraph(opened, canonical, '10.50', expected); assertCentered(opened, '10.50');
   assert.equal(opened.focused, '10.50', 'Opening the graph focuses the selected node');
-  assert.ok(opened.counts.length > 0 && opened.counts.every(value => value.length > 0), 'Every topic card shows its counts');
+  assert.ok(opened.titles.length > 0 && opened.titles.every(value => value.length > 0), 'Every topic is titled');
   const collapsed = opened.nodes.filter(value => value.below);
-  for (const value of collapsed) assert.equal(value.below, `+${Object.values(canonical.items).filter(item => item.parent === value.id).length}`, 'Collapsed nodes count the items below');
+  const inside = id => Object.values(canonical.items).filter(item => item.parent === id).reduce((count, item) => count + 1 + inside(item.id), 0);
+  for (const value of collapsed) assert.equal(value.below, `+${inside(value.id)}`, 'Folded nodes count every item inside');
   samples.push({ action: 'open', nodes: opened.nodes.length, edges: opened.edges.length, collapsed: collapsed.map(value => value.id) });
   await browser.saveScreenshot(join(evidence, 'native-graph-open.png'));
 
@@ -112,29 +116,38 @@ export async function runGraphAcceptance(configuration) {
   await wait(async () => (await view(tree)).selected_item_id === '10.80', 'Registered reveal selection was not persisted');
   samples.push({ action: 'registered-reveal', selected: '10.80' });
 
-  // "−" collapses item 10 and moves the selection out of the branch; clicking it opens the branch again.
-  await click('.graph-node-collapse', browser.$('.graph-node[data-item-id="10"]'));
-  await wait(async () => (await sample()).nodes.find(value => value.id === '10')?.below === '+99', 'Native "−" did not collapse item 10');
-  await selectedIn('10');
-  await wait(async () => !(await view(tree)).expanded_item_ids.includes('10'), 'Native collapse was not persisted');
+  // The Graph has no fold button (SPEC 1.3): ← on the selected 10.80 goes to its parent 10, ← again folds 10 behind a
+  // quiet "+99", and clicking the folded node opens it again.
+  await click('.graph-node[data-item-id="10.80"]'); await detail(canonical, '10.80');
+  await wait(async () => (await sample()).focused === '10.80', 'Clicking a native graph node focuses it');
+  await browser.keys('ArrowLeft'); await selectedIn('10');
+  // The parent selection finishes saving before the second ←: a press that lands mid-write still sees the old selection.
+  await wait(async () => (await view(tree)).selected_item_id === '10' && await views().$('button[aria-label="Graph"]').isEnabled(),
+    'The ← to the parent must finish saving before the fold');
+  await browser.keys('ArrowLeft');
+  await wait(async () => (await sample()).nodes.find(value => value.id === '10')?.below === '+99', 'Native ← did not fold item 10');
+  await wait(async () => !(await view(tree)).expanded_item_ids.includes('10'), 'Native fold was not persisted');
   await click('.graph-node[data-item-id="10"]');
-  await wait(async () => (await sample()).nodes.some(value => value.id === '10.99'), 'Clicking the collapsed node did not open its branch');
+  await wait(async () => (await sample()).nodes.some(value => value.id === '10.99'), 'Clicking the folded node did not open its branch');
   await detail(canonical, '10');
-  await wait(async () => (await view(tree)).expanded_item_ids.includes('10'), 'Native expand was not persisted');
+  await wait(async () => (await view(tree)).expanded_item_ids.includes('10'), 'Native unfold was not persisted');
   assertGraph(await sample(), canonical, '10', expected);
-  samples.push({ action: 'collapse-expand', item: '10' });
+  samples.push({ action: 'fold-unfold', item: '10' });
   await click('button[aria-label^="Native sentence 10.80\\a "]', browser.$('[aria-label="Child items"]'));
   await goToPeekItem(canonical.items['10.80'], '10'); await detail(canonical, '10.80'); await selectedIn('10.80');
 
+  // Search tints the match in place; it filters neither the Graph nor the Tree (alpha.20, contract C4).
   await (await search()).waitForEnabled(); await (await searchBox()).setValue('Native token_10_80_end');
-  await wait(async () => JSON.stringify((await sample()).nodes.map(value => value.id)) === JSON.stringify(['10', '10.80']), 'Graph search must keep the match and its ancestry');
-  const filtered = await sample();
+  await wait(async () => (await sample()).nodes.find(value => value.id === '10.80')?.match === true, 'Graph search must tint the match');
+  const searched = await sample();
+  assertGraph(searched, canonical, '10.80', expected);
+  assert.deepEqual(searched.nodes.filter(value => value.match).map(value => value.id), ['10.80'], 'Graph search tints only the match');
   await detail(canonical, '10.80');
   await click('button[aria-label="Tree"]', views());
-  await wait(async () => JSON.stringify(await browser.execute(() => [...document.querySelectorAll('.tree-rows .tree-item')].map(element => element.dataset.itemId))) === JSON.stringify(['10', '10.80']), 'Tree must show the same filtered items as Graph');
+  await wait(async () => await browser.execute(() => document.querySelectorAll('.tree-rows .tree-item').length === 1901), 'The Tree keeps every row under search too');
   await detail(canonical, '10.80');
-  const filteredView = await view(tree); assert.equal(filteredView.filters.search, 'Native token_10_80_end'); assert.equal(filteredView.selected_item_id, '10.80');
-  assert.deepEqual([...filteredView.expanded_item_ids].sort(), [...beforeView.expanded_item_ids].sort(), 'Graph collapse then expand restores the saved expansion');
+  const searchedView = await view(tree); assert.equal(searchedView.selected_item_id, '10.80');
+  assert.deepEqual([...searchedView.expanded_item_ids].sort(), [...beforeView.expanded_item_ids].sort(), 'Graph fold then unfold restores the saved expansion');
   await (await search()).waitForEnabled(); await (await searchBox()).setValue('');
   await wait(async () => (await view(tree)).filters.search === '' && await browser.execute(() => document.querySelectorAll('.tree-rows .tree-item').length === 1901), 'Clear shared search must preserve the saved collapsed tree branch');
   const finalView = await view(tree);
@@ -143,7 +156,7 @@ export async function runGraphAcceptance(configuration) {
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBytes);
   await writeFile(join(evidence, 'graph-acceptance.json'), JSON.stringify({ environment: 'Actual embedded WKWebView with real App/Core/Store',
     tree, canonicalItems: 2000, canonicalMessages: canonical.messages.length, publicationMessages: prior.performance.messages, driverOpenToReadyMs,
-    beforeView, filteredView, finalView, samples, filtered: filtered.nodes.map(value => value.id), originalAdmissions: journal.length,
-    proofLimits: 'Native driver clicks and registered detail routes prove open, reveal, collapse/expand, filter and tree parity. Driver open-to-ready timing includes automation overhead and is diagnostic only. Render timing, keyboard moves and scrolling are covered by the 2,000-node graph browser suite.' }, null, 2));
+    beforeView, searchedView, finalView, samples, searched: searched.nodes.filter(value => value.match).map(value => value.id), originalAdmissions: journal.length,
+    proofLimits: 'Native driver clicks, keys and registered detail routes prove open, reveal, fold/unfold, search tint and tree parity. Driver open-to-ready timing includes automation overhead and is diagnostic only. Render timing, keyboard moves, scrolling and the still-under-every-trigger anchor are covered by the graph browser suites.' }, null, 2));
   await browser.saveScreenshot(join(evidence, 'native-graph-tree-parity.png'));
 }

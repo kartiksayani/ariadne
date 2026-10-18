@@ -8,7 +8,7 @@ import type { BindingSummary, Input, Item, ItemOption, ItemStatus, PresenceObser
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import type { SupervisorHealth } from '../../data/service';
-import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
+import { hitSegments, holdsTerms, searchTerms, type MatchField, type Segment } from '../../selectors/tree/search';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentReceived, stoppedAttempt, stuckInput, type Stuck } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
@@ -18,10 +18,11 @@ import { displayStatus, type DisplayStatus } from '../../selectors/waiting/repli
 import { closedSessionQuestion, sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 import { continuedLabel } from '../shared/continued';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
+import { columnX, COLUMN_STEP, withBoxes, type Box } from './boxes';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
-import { FILTER_STATUSES, hasStatusFilter, matchExpansion } from '../../selectors/tree/folds';
+import { matchExpansion } from '../../selectors/tree/folds';
 import { changeTreeOrder, type SeenState } from '../../selectors/changes/seen';
 
 export type ChangeMarker = 'new' | 'changed';
@@ -63,55 +64,24 @@ const items = (session: Immutable<Session>) => activeItems(session);
 const topicList = (session: Immutable<Session>) => [...activeTopics(session)]
   .sort((a, b) => a.order - b.order);
 
-// ---------------------------------------------------------------- chips
-
-export type Chip = 'all' | 'waiting' | 'open' | 'progress' | 'closed';
-export const CHIPS: readonly { readonly chip: Chip; readonly label: string; readonly icon: string; readonly iconColor: string; readonly statuses: readonly ItemStatus[] }[] = [
-  { chip: 'all', label: 'All', icon: 'ph ph-list', iconColor: 'inherit', statuses: [] },
-  { chip: 'waiting', label: 'Waiting on me', icon: STATUS.waiting.icon, iconColor: 'var(--st-waiting)', statuses: ['waiting_on_me'] },
-  { chip: 'open', label: 'Open', icon: STATUS.open.icon, iconColor: 'var(--st-open)', statuses: ['open'] },
-  { chip: 'progress', label: 'In progress', icon: STATUS.progress.icon, iconColor: 'var(--st-progress)', statuses: ['in_progress'] },
-  { chip: 'closed', label: 'Closed', icon: STATUS.decided.icon, iconColor: 'var(--st-decided)', statuses: ['decided', 'done', 'dropped', 'replaced'] },
-];
-const fullStatusFilter = (statuses: readonly ItemStatus[]) => statuses.length > 0 && !hasStatusFilter(statuses);
-/** The selected chips represented by the saved status set; empty and full sets mean All. */
-export function chipsOf(statuses: readonly ItemStatus[]): ReadonlySet<Chip> {
-  return new Set(statuses.length && !fullStatusFilter(statuses)
-    ? CHIPS.filter(value => value.statuses.some(status => statuses.includes(status))).map(value => value.chip) : ['all']);
-}
-/** Toggle a group of statuses without changing the persisted preference shape. */
-export function toggleChip(statuses: readonly ItemStatus[], chip: Chip): ItemStatus[] {
-  if (chip === 'all') return [];
-  const group = CHIPS.find(value => value.chip === chip)!.statuses, next = new Set(fullStatusFilter(statuses) ? [] : statuses);
-  if (group.some(status => next.has(status))) group.forEach(status => next.delete(status));
-  else group.forEach(status => next.add(status));
-  const ordered = FILTER_STATUSES.filter(status => next.has(status));
-  return ordered.length === FILTER_STATUSES.length ? [] : ordered;
-}
-/** Local reply delivery stays under the persisted In progress filter. */
-export const statusIn = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
-  status === 'sent' || status === 'queued' ? statuses.includes('in_progress') : statuses.includes(status);
-const inChip = (chip: Chip, status: DisplayStatus) => chip === 'all' || statusIn(CHIPS.find(value => value.chip === chip)!.statuses, status);
-
 // ---------------------------------------------------------------- search
 
-export interface Segment { readonly text: string; readonly hit: boolean }
-const words = (query: string) => normalizeSearch(query).split(/\s+/u).filter(Boolean);
+// Search highlights in place and never decides rows (SPEC §6.9): the rows below are the same with or without it.
+export type { Segment } from '../../selectors/tree/search';
 /** The question split into search hits and the rest (Ariadne.dc.html:1044). */
-export function segments(text: string, query: string): readonly Segment[] {
-  const terms = words(query);
-  if (!terms.length) return [{ text, hit: false }];
-  const lower = normalizeSearch(text), hit = new Array<boolean>(text.length).fill(false);
-  // NFKC can change length; highlight only when it does not.
-  if (lower.length !== text.length) return [{ text, hit: false }];
-  for (const term of terms) for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) hit.fill(true, at, at + term.length);
-  const out: { text: string; hit: boolean }[] = [];
-  for (let index = 0; index < text.length; index++) {
-    const last = out.at(-1);
-    if (last && last.hit === hit[index]) last.text += text[index]; else out.push({ text: text[index], hit: hit[index] });
-  }
-  return out;
+export const segments = (text: string, query: string): readonly Segment[] => hitSegments(text, searchTerms(query));
+
+/** Whether the row shows the item's outcome under its title (ItemRow's preview order): search counts only what shows. */
+export function outcomeShown(item: Immutable<Item>, later: boolean, replacedBy: Immutable<Item> | null): boolean {
+  if (later || !item.outcome) return false;
+  if (item.status === 'waiting_on_me' && item.ask) return false;
+  if (item.status === 'replaced' && replacedBy) return false;
+  return closed(item.status) || item.status === 'open' || item.status === 'in_progress';
 }
+
+/** What "Show them" opens for this search, in memory only: ancestors to expand, topics to unfold, hidden groups to show. */
+export interface SearchReveal { readonly items: readonly string[]; readonly topics: readonly string[]; readonly groups: readonly string[] }
+export const NO_REVEAL: SearchReveal = { items: [], topics: [], groups: [] };
 
 // ---------------------------------------------------------------- delivery
 
@@ -240,33 +210,65 @@ export interface ItemRow {
   readonly later: boolean;
   readonly hidden: boolean;
   readonly segments: readonly Segment[];
+  /** The fields on this row that hold every word of the search, question first; none without a search. */
+  readonly matches: readonly MatchField[];
   readonly replacedBy: Immutable<Item> | null;
-  readonly rounds: number;
   readonly relatedCount: number;
-  readonly collapsed: { readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number } | null;
+  readonly collapsed: { readonly inside: number; readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number } | null;
   readonly delivery: Delivery | null;
   readonly badge: string;
-  readonly hue?: number;
+  /** The branch's hue slot (0-4): its top item's ordinal round the five hues. Children inherit it. */
+  readonly branch: number;
+  /** This row's slice of every box around it (the box pass). */
+  readonly boxes: readonly Box[];
 }
-export interface HiddenRow {
-  readonly kind: 'hidden';
+/** Why a run of siblings is left out of the Map: outside the focus, not matching the filter, or hidden by the owner. */
+export type StripReason = 'hidden' | 'filter' | 'focus';
+/**
+ * The Map's one strip row: a run of consecutive omitted siblings. Its reason is the first that applies, focus then
+ * filter then hidden. Only a hidden strip opens (per parent, as `hiddenGroupKey`); the others are undone by Clear and Unfocus.
+ */
+export interface StripRow {
+  readonly kind: 'strip';
+  /** `${topicId}/${parent ?? 'top'}/${reason}/${firstOmittedItemKey}` */
   readonly key: string;
+  readonly reason: StripReason;
   readonly topicId: string;
   readonly parent: string | null;
   readonly depth: number;
+  /** The siblings in the run. */
   readonly count: number;
-  readonly waiting: boolean;
+  /** Questions waiting on the owner among the run and everything below it. */
+  readonly waiting: number;
   readonly expanded: boolean;
   readonly guides: readonly Guide[];
+  /** The boxes of the ancestors this strip sits in (none for a top-level strip). */
+  readonly boxes: readonly Box[];
+  /** The branch's hue slot, or null for a top-level strip, which sits in no branch. */
+  readonly branch: number | null;
   readonly delivery: null;
 }
-export type Row = TopicRow | ItemRow | HiddenRow;
+export type Row = TopicRow | ItemRow | StripRow;
+
+/** Which items the Map's filters keep. `active` is false when nothing scopes the rows. */
+export interface TreeFilter { readonly active: boolean; matches(item: Immutable<Item>): boolean }
+
+export const stripKey = (topicId: string, parent: string | null, reason: StripReason, firstOmitted: string) =>
+  `${topicId}/${parent ?? 'top'}/${reason}/${firstOmitted}`;
 
 export interface TreeInput {
   readonly session: Immutable<Session>;
   readonly view: Immutable<SessionPreferences>;
-  /** The header search as typed, which can run ahead of the saved filter. */
+  /** The filters that scope the rows (owners, Later and the picked chips: `filterOf` in selectors/tree/filter). */
+  readonly filter: TreeFilter;
+  /** The walk keeps only this top item (and its topic); the other top items of its topic become one 'focus' strip. */
+  readonly focusRootId?: string | null;
+  /** Items whose single Ack is held for its 6 s Undo. The band's "N to ack" leaves them out: they are as good as acked. */
+  readonly ackHeld?: ReadonlySet<string>;
+  /** The header search as typed, which can run ahead of the saved filter. It highlights; it never decides rows. */
   readonly search: string;
+  /** What "Show them" opened for the search (in memory, never saved). */
+  readonly searchShown?: SearchReveal | null;
   readonly later: ReadonlySet<string>;
   readonly expandedHiddenGroups?: ReadonlySet<string>;
   readonly collapsedTopics: ReadonlySet<string>;
@@ -287,17 +289,15 @@ export interface TreeInput {
 }
 export interface TreeModel {
   readonly rows: readonly Row[];
+  /** A status, owner or Later filter scopes the rows. A search never does. */
   readonly filtering: boolean;
-  readonly searchCount: number;
-  readonly hiddenCount: number;
-  readonly itemCount: number;
   /** "Showing an item outside your current filters." */
   readonly outside: boolean;
   readonly noMatch: boolean;
   /** The session has no items at all. */
   readonly empty: boolean;
-  readonly chips: ReadonlySet<Chip>;
-  readonly counts: Readonly<Record<Chip, number>>;
+  /** Matching items the rows do not show: in hidden items, and inside folded items or topics; and what shows them. */
+  readonly search: { readonly hidden: number; readonly collapsed: number; readonly outsideFocus: number; readonly reveal: SearchReveal };
 }
 
 function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summaries: readonly Immutable<SessionSummary>[], now: number) {
@@ -324,11 +324,10 @@ export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0, en
   ].filter((value): value is Count => !!value);
 }
 
-/** "1 waiting · 2 open · 5 closed inside" for folded descendants. */
+/** The folded descendants' chip (D7, SPEC 3.3): "4 closed inside" when every one is closed; else "5 inside", plus " · 1 waiting" when questions wait. */
 export function collapsedNote(collapsed: NonNullable<ItemRow['collapsed']>): string {
-  const parts = [collapsed.waiting && `${collapsed.waiting} waiting`, collapsed.open && `${collapsed.open} open`,
-    collapsed.progress && `${collapsed.progress} in progress`, collapsed.closed && `${collapsed.closed} closed`].filter(Boolean);
-  return `${parts.join(' · ')} inside`;
+  if (collapsed.inside > 0 && collapsed.closed === collapsed.inside) return `${collapsed.inside} closed inside`;
+  return `${collapsed.inside} inside${collapsed.waiting ? ` · ${collapsed.waiting} waiting` : ''}`;
 }
 
 export function badgeLabel(item: Immutable<Item>, later: boolean, status: DisplayStatus = item.status): string {
@@ -338,34 +337,28 @@ export function badgeLabel(item: Immutable<Item>, later: boolean, status: Displa
 }
 
 export function treeModel(input: TreeInput): TreeModel {
-  const { session, view, later, selectedId, revealId } = input, filters = view.filters;
+  const { session, view, later, selectedId, revealId, filter } = input, filters = view.filters;
   const revealIds = [revealId, input.attentionRevealId].filter((id): id is string => !!id);
   const indexes = indexSession(session), all = items(session);
   const explicitHidden = new Set(view.hidden_item_ids ?? []);
   const hidden = hiddenItems(session, explicitHidden);
   const hiddenGroups = new Set(input.expandedHiddenGroups ?? []);
   revealIds.forEach(id => hiddenGroupsFor(session, explicitHidden, id).forEach(key => hiddenGroups.add(key)));
-  const terms = words(input.search);
-  const chips = chipsOf(filters.statuses);
+  const shownBySearch = input.searchShown ?? NO_REVEAL;
+  shownBySearch.groups.forEach(key => hiddenGroups.add(key));
+  const terms = searchTerms(input.search);
   const attentionTopic = input.attentionRevealId ? session.items[input.attentionRevealId]?.topic_id : null;
-  const topics = topicList(session).filter(topic => topic.id === attentionTopic || (filters.archived ? topic.archived_at !== null : topic.archived_at === null));
-  const shown = new Set(topics.map(topic => topic.id));
+  // Focus keeps one top item and its topic; a stale or non-top id focuses nothing.
+  const focusItem = input.focusRootId ? session.items[input.focusRootId] : undefined;
+  const focusRootId = focusItem && !focusItem.parent && !itemRemoved(session, focusItem.id) ? focusItem.id : null;
+  // The topics in scope, whether or not a focus leaves them out of the walk: counts, matches and the search tally read all of them.
+  const scopeTopics = topicList(session).filter(topic => topic.id === attentionTopic || (filters.archived ? topic.archived_at !== null : topic.archived_at === null));
+  const topics = focusRootId ? scopeTopics.filter(topic => topic.id === focusItem!.topic_id) : scopeTopics;
+  const shown = new Set(scopeTopics.map(topic => topic.id));
   const live = all.filter(item => shown.has(item.topic_id));
-  const base = (item: Immutable<Item>) => {
-    if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) return false;
-    if (filters.hide_later && later.has(item.id)) return false;
-    if (!terms.length) return true;
-    const text = normalizeSearch(`${item.question} ${item.outcome ?? ''}`);
-    return terms.every(term => text.includes(term));
-  };
   const shows = new Map(all.map(item => [item.id, displayStatus(session, item)]));
   const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
-  const statusFiltered = !chips.has('all');
-  const statusMatch = (item: Immutable<Item>) => !statusFiltered || (display(item) !== 'waiting_on_me' || waitingOnOwner(session, item))
-    && statusIn(filters.statuses, display(item));
-  const filtering = terms.length > 0 || statusFiltered || filters.owners.length > 0 || filters.hide_later;
-  const scoped = live.filter(item => base(item));
-  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && (key !== 'waiting' || waitingOnOwner(session, item)) && inChip(key, display(item))).length])) as Record<Chip, number>;
+  const filtering = filter.active;
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
@@ -373,7 +366,7 @@ export function treeModel(input: TreeInput): TreeModel {
   if (filtering) {
     for (const id of [...revealIds, selectedId]) if (id && session.items[id] && !itemRemoved(session, id)) forced.add(id);
     for (const item of live) {
-      const match = base(item) && statusMatch(item);
+      const match = filter.matches(item);
       if (match) matched.add(item.id);
       if (match || forced.has(item.id)) { include.add(item.id); ancestors(item.id).forEach(id => include.add(id)); }
     }
@@ -382,10 +375,12 @@ export function treeModel(input: TreeInput): TreeModel {
     [...include].flatMap(ancestors), filtering, input.filterCollapsedItemIds);
   const revealTopics = new Set(revealIds.map(id => session.items[id]?.topic_id));
   revealIds.forEach(id => ancestors(id).forEach(id => expanded.add(id)));
+  shownBySearch.items.forEach(id => expanded.add(id));
+  shownBySearch.topics.forEach(id => revealTopics.add(id));
   const kids = (id: string | null) => indexes.childrenByParent.get(id) ?? [];
   const rootsOf = (topicId: string) => kids(null).filter(item => item.topic_id === topicId);
 
-  const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides'> | Omit<HiddenRow, 'guides'>)[] = [];
+  const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides' | 'boxes' | 'branch'> | Omit<StripRow, 'guides' | 'boxes' | 'branch'>)[] = [];
   for (const topic of topics) {
     const roots = rootsOf(topic.id);
     // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
@@ -395,26 +390,23 @@ export function treeModel(input: TreeInput): TreeModel {
     const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
-    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item)).length, sessionEnded(session)),
+    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item) && !input.ackHeld?.has(item.id)).length, sessionEnded(session)),
       earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(closed), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {
-      const eligible = list.filter(item => !filtering || include.has(item.id));
-      const visibleSiblings = eligible.filter(item => !explicitHidden.has(item.id));
-      const hiddenSiblings = eligible.filter(item => explicitHidden.has(item.id));
-      const firstHidden = hiddenSiblings[0];
-      const groupKey = hiddenGroupKey(topic.id, list[0]?.parent ?? null);
-      const groupOpen = hiddenGroups.has(groupKey);
-      for (const item of [...visibleSiblings, ...hiddenSiblings]) {
-        if (item === firstHidden) {
-          const below: Immutable<Item>[] = [];
-          const gather = (value: Immutable<Item>) => { below.push(value); kids(value.id).forEach(gather); };
-          hiddenSiblings.forEach(gather);
-          built.push({ kind: 'hidden', key: groupKey, topicId: topic.id, parent: item.parent, depth,
-            count: hiddenSiblings.length, waiting: below.some(value => waitingOnOwner(session, value)),
-            expanded: groupOpen, delivery: null });
-        }
-        if (explicitHidden.has(item.id) && !groupOpen) continue;
+      const parent = list[0]?.parent ?? null;
+      const groupOpen = hiddenGroups.has(hiddenGroupKey(topic.id, parent));
+      // Why an item is left out of the walk, focus first; null when the Map shows it.
+      const omitted = (item: Immutable<Item>): StripReason | null =>
+        depth === 1 && focusRootId && item.id !== focusRootId ? 'focus' : filtering && !include.has(item.id) ? 'filter' : null;
+      const strip = (run: readonly Immutable<Item>[], reason: StripReason, expanded: boolean) => {
+        const below: Immutable<Item>[] = [];
+        const gather = (value: Immutable<Item>) => { below.push(value); kids(value.id).forEach(gather); };
+        run.forEach(gather);
+        built.push({ kind: 'strip', key: stripKey(topic.id, parent, reason, run[0]!.id), reason, topicId: topic.id, parent, depth,
+          count: run.length, waiting: below.filter(value => waitingOnOwner(session, value)).length, expanded, delivery: null });
+      };
+      const emit = (item: Immutable<Item>) => {
         const children = kids(item.id);
         const open = children.length > 0 && expanded.has(item.id);
         let collapsed: ItemRow['collapsed'] = null;
@@ -422,16 +414,44 @@ export function treeModel(input: TreeInput): TreeModel {
           const below: Immutable<Item>[] = [];
           const gather = (id: string) => kids(id).forEach(child => { below.push(child); gather(child.id); });
           gather(item.id);
-          collapsed = { waiting: below.filter(value => waitingOnOwner(session, value)).length, open: below.filter(value => value.status === 'open').length,
+          collapsed = { inside: below.length, waiting: below.filter(value => waitingOnOwner(session, value)).length, open: below.filter(value => value.status === 'open').length,
             progress: below.filter(value => value.status === 'in_progress' || display(value) === 'sent' || display(value) === 'queued').length, closed: below.filter(value => closed(value.status)).length };
         }
         const parked = item.status === 'open' && later.has(item.id);
+        const replacedBy = item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null;
+        const matches: MatchField[] = [];
+        if (holdsTerms(item.question, terms)) matches.push('question');
+        if (outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms)) matches.push('outcome');
         built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
-          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
-          replacedBy: item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
+          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked,
+          segments: matches.includes('question') ? hitSegments(item.question, terms) : [{ text: item.question, hit: false }], matches,
+          replacedBy,
           relatedCount: connectedItems(session, item.id).length,
           collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
         if (open) walk(children, depth + 1);
+      };
+      // Each run of consecutive omitted siblings with the same reason is one strip, in place; hidden siblings follow the
+      // others as one group. A focused root the filter excludes is its own "not matching" strip, not part of "outside the focus".
+      let run: Immutable<Item>[] = [], runReason: StripReason = 'filter';
+      const flush = () => {
+        if (run.length) strip(run, runReason, false);
+        run = [];
+      };
+      const hiddenSiblings: Immutable<Item>[] = [];
+      for (const item of list) {
+        const reason = omitted(item);
+        if (reason) {
+          if (run.length && reason !== runReason) flush();
+          runReason = reason;
+          run.push(item);
+        }
+        else if (explicitHidden.has(item.id)) hiddenSiblings.push(item);
+        else { flush(); emit(item); }
+      }
+      flush();
+      if (hiddenSiblings.length) {
+        strip(hiddenSiblings, 'hidden', groupOpen);
+        if (groupOpen) hiddenSiblings.forEach(emit);
       }
     };
     walk(roots, 1);
@@ -452,40 +472,58 @@ export function treeModel(input: TreeInput): TreeModel {
     if (parent !== undefined) lastChild.set(parent, at);
     stack[row.depth] = at;
   });
-  // Stable per-root decorative hue; selection and status also have shape/text cues.
-  const hue = (key: string) => [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0) * 139 % 360;
-  const rows = built.map((row, at): Row => {
+  const withGuides = built.map((row, at): Row => {
     const guides: Guide[] = [];
     for (const parentAt of [...parents[at], at]) {
       const parent = built[parentAt], end = lastChild.get(parentAt);
       if (end === undefined || at > end) continue;
-      const x = 20 + parent.depth * 24;
-      guides.push({ kind: 'line', x, on: false, width: 24, fromBullet: at === parentAt, toBullet: at === end });
+      const x = columnX(parent.depth), width = COLUMN_STEP;
+      // Only the on guides (the accent thread to the selection) are drawn: the tinted boxes carry the rest of the structure.
+      guides.push({ kind: 'line', x, on: false, width, fromBullet: at === parentAt, toBullet: at === end });
       const child = at !== parentAt && row.depth === parent.depth + 1;
-      if (child) guides.push({ kind: 'elbow', x, on: false, width: 24 });
+      if (child) guides.push({ kind: 'elbow', x, on: false, width });
       const chainIndex = chainAt.indexOf(parentAt), next = chainAt[chainIndex + 1];
       if (threaded && chainIndex >= 0 && next !== undefined && at <= next) {
-        guides.push({ kind: 'line', x, on: true, width: 24, fromBullet: at === parentAt, toBullet: at === next });
-        if (at === next) guides.push({ kind: 'elbow', x, on: true, width: 24 });
+        guides.push({ kind: 'line', x, on: true, width, fromBullet: at === parentAt, toBullet: at === next });
+        if (at === next) guides.push({ kind: 'elbow', x, on: true, width });
       }
     }
-    return { ...row, guides, ...(row.kind === 'item' && row.depth === 1 ? { hue: hue(row.key) } : {}) } as Row;
+    return { ...row, guides } as Row;
   });
+  // The box pass is the last step: each row's branch slot and its slice of every box around it.
+  const rows = withBoxes(withGuides);
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && revealIds.some(id => forced.has(id) && !matched.has(id));
-  return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at), chips, counts };
+  // Matches the rows do not show (SPEC §6.9): not counted, but named in the note, and "Show them" opens their way.
+  // An item the filters leave out is neither: the filters chose not to show it.
+  // A match the focus leaves out is counted apart ("N outside the focus"); "Show them" then leaves the focus too.
+  let hiddenMatches = 0, collapsedMatches = 0, outsideFocus = 0;
+  const reveal = { items: new Set<string>(), topics: new Set<string>(), groups: new Set<string>() };
+  if (terms.length) {
+    const shownIds = new Set(rows.flatMap(row => row.kind === 'item' ? [row.key] : []));
+    const rootOf = (id: string) => { const chain = ancestors(id); return chain.at(-1) ?? id; };
+    for (const item of live) {
+      if (shownIds.has(item.id) || filtering && !include.has(item.id)) continue;
+      // The same gate as the rows: an outcome counts only where the row would show it.
+      const parked = item.status === 'open' && later.has(item.id);
+      const replacedBy = item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null;
+      if (!holdsTerms(item.question, terms) && !(outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms))) continue;
+      if (focusRootId && rootOf(item.id) !== focusRootId) outsideFocus++;
+      else if (hidden.has(item.id)) hiddenMatches++;
+      else collapsedMatches++;
+      if (hidden.has(item.id)) hiddenGroupsFor(session, explicitHidden, item.id).forEach(key => reveal.groups.add(key));
+      ancestors(item.id).forEach(id => reveal.items.add(id));
+      reveal.topics.add(item.topic_id);
+    }
+  }
+  return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at),
+    search: { hidden: hiddenMatches, collapsed: collapsedMatches, outsideFocus, reveal: { items: [...reveal.items], topics: [...reveal.topics], groups: [...reveal.groups] } } };
 }
 
 /** The row ← moves to: the parent item, or the topic of a root item. */
 export function parentKey(row: Row): string | null {
   if (row.kind === 'topic') return null;
-  if (row.kind === 'hidden') return row.parent ?? row.topicId;
+  if (row.kind === 'strip') return row.parent ?? row.topicId;
   return row.item.parent ?? row.item.topic_id;
-}
-
-/** The oldest item waiting on the owner in this session; one the owner already replied to waits on the agent. */
-export function oldestWaiting(session: Immutable<Session>): Immutable<Item> | null {
-  return items(session).filter(item => waitingOnOwner(session, item) && session.topics[item.topic_id]?.archived_at === null)
-    .sort((a, b) => (a.waiting_since ?? a.created_at).localeCompare(b.waiting_since ?? b.created_at))[0] ?? null;
 }

@@ -12,11 +12,12 @@ import { OpenSessions, type Immutable } from '../../../src/data/session-store';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
 import { activeItems, activeTopics, heldInputs, itemRemoved, removedRoots, removedSubtree } from '../../../src/selectors/removed';
 import { ackTarget } from '../../../src/selectors/ack';
-import { sentenceRows } from '../../../src/selectors/tree/rows';
+import { sentenceRows } from '../tree/scope';
+import { chipCounts } from '../../../src/selectors/tree/filter';
 import { relatedItems } from '../../../src/selectors/related';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
-import { treeModel } from '../../../src/ui/tree/model';
+import { shimTree } from '../tree/shimTree';
 import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
@@ -156,17 +157,13 @@ describe('removed work projections', () => {
       item.ack_to = choice; item.ask = null; item.options = [];
       session.items['2']!.ack_to = 'done'; session.items['2']!.ask = null;
       const counts = (snapshot: Immutable<Session>) => {
-        const tree = treeModel({ session: snapshot, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null,
+        const tree = shimTree({ session: snapshot, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null,
           revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(snapshot.updated_at) });
-        const graph = sessionGraph({ session: snapshot, view, later: new Set(), selectedId: null, tight: false });
-        return {
-          tree: tree.rows.flatMap(row => row.kind === 'topic' ? row.counts.map(count => count.text) : []),
-          graph: graph.topics.map(topic => topic.counts).join(' · '),
-        };
+        // The Graph carries no counts (SPEC 1.3: a topic title only).
+        return { tree: tree.rows.flatMap(row => row.kind === 'topic' ? row.counts.map(count => count.text) : []) };
       };
       expect(ackTarget(session, item)).toBe(choice);
       expect(counts(session).tree).toContain('2 to ack');
-      expect(counts(session).graph).toContain('2 to ack');
       const itemId = removal === 'item' ? item.id : removal === 'ancestor' ? item.parent! : null;
       if (itemId) session.items[itemId]!.removed_at = session.updated_at;
       else session.topics[topicA]!.removed_at = session.updated_at;
@@ -175,21 +172,14 @@ describe('removed work projections', () => {
       expect(ackTarget(binned, binned.items[item.id]!)).toBeNull();
       const removedCounts = counts(binned);
       expect(removedCounts.tree).not.toContain('2 to ack');
-      expect(removedCounts.graph).not.toContain('2 to ack');
-      if (removal === 'topic') {
-        expect(removedCounts.tree.some(count => count.includes('to ack'))).toBe(false);
-        expect(removedCounts.graph).not.toContain('to ack');
-      } else {
-        expect(removedCounts.tree).toContain('1 to ack');
-        expect(removedCounts.graph).toContain('1 to ack');
-      }
+      if (removal === 'topic') expect(removedCounts.tree.some(count => count.includes('to ack'))).toBe(false);
+      else expect(removedCounts.tree).toContain('1 to ack');
       expect(await restoreRemoved(value.actions, topicA, itemId)).toBeNull();
       const restored = value.store.getSnapshot().snapshot!.session;
       expect(restored.items[item.id]!.ack_to).toBe(choice);
       expect(ackTarget(restored, restored.items[item.id]!)).toBe(choice);
       const restoredCounts = counts(restored);
       expect(restoredCounts.tree).toContain('2 to ack');
-      expect(restoredCounts.graph).toContain('2 to ack');
     }
   });
 
@@ -209,13 +199,18 @@ describe('removed work projections', () => {
   it('excludes removed work from tree, search, forced reveals and active descendant counts', () => {
     const session = removedSession(), view = preferences();
     expect(ids(sentenceRows(session, view, new Set()).rows.map(row => row.item))).toEqual(['2', '3']);
+    // A search narrows no rows (SPEC §4), and it finds nothing in removed work: no row matches, none counts as out of view.
     const search = { ...view, filters: { ...view.filters, search: 'morning or evening' } };
-    expect(sentenceRows(session, search, new Set(), ['1', '1.1'], '1.1.1')).toMatchObject({ rows: [], matchingTotal: 0, scopeTotal: 2 });
+    expect(ids(sentenceRows(session, search, new Set(), ['1', '1.1'], '1.1.1').rows.map(row => row.item))).toEqual(['2', '3']);
+    const searched = shimTree({ session, view, search: 'morning or evening', later: new Set(), collapsedTopics: new Set(), selectedId: null,
+      revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
+    expect(searched.rows.filter(row => row.kind === 'item' && row.matches.length > 0)).toEqual([]);
+    expect(searched.search).toMatchObject({ hidden: 0, collapsed: 0 });
     expect(indexSession(session).activeDescendants.get('1')).toBe(0);
     expect(revealAncestors.bind(null, session, { ...route, item_id: '1.1.1' })).toThrow('unavailable');
-    const model = treeModel({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
+    const model = shimTree({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
       revealId: '1.1.1', temporaryExpanded: ['1', '1.1'], presence: null, summaries: [], now: Date.parse(session.updated_at) });
-    expect(model.itemCount).toBe(2); expect(model.counts.waiting).toBe(0);
+    expect(chipCounts({ session, view, later: new Set(), local: [] }).waiting).toBe(0);
     expect(model.rows.filter(row => row.kind === 'topic').map(row => row.topic.id)).toEqual([topicA]);
     expect(model.rows.filter(row => row.kind === 'item').map(row => row.item.id)).toEqual(['2', '3']);
   });
@@ -223,17 +218,16 @@ describe('removed work projections', () => {
   it('excludes removed nodes, links, topics and waiting counts from the graph and related navigation', () => {
     const session = removedSession();
     session.items['2']!.related = ['1.1.1', '8']; session.items['1']!.related = ['2'];
-    const graph = sessionGraph({ session, view: preferences(), later: new Set(), selectedId: '2', tight: false });
+    const graph = sessionGraph({ session, view: preferences(), later: new Set(), selectedId: '2' });
     expect(graph.order).toEqual(['2', '3']);
     expect(graph.topics.map(topic => topic.topic.id)).toEqual([topicA]);
-    expect(graph.topics[0].counts).toBe('1 open · 1 closed');
-    expect(graph.topics[0].related).toEqual([]); expect(graph.crossTopicRelated).toEqual([]);
+    expect(graph.topics[0].edges.map(edge => edge.id)).toEqual([`trunk:${topicA}`, 'topic:2', 'topic:3']);
     expect(relatedItems(session, '2')).toEqual([]); expect(relatedItems(session, '1')).toEqual([]);
   });
 
   it('hides a removed replacement reference and restores it when that work becomes active again', () => {
     const session = removedSession(); session.items['3']!.replaced_by = '1';
-    const view = preferences(), tree = (snapshot: Session) => treeModel({ session: snapshot, view, search: '', later: new Set(),
+    const view = preferences(), tree = (snapshot: Session) => shimTree({ session: snapshot, view, search: '', later: new Set(),
       collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(snapshot.updated_at) });
     const removed = tree(session).rows.find(row => row.kind === 'item' && row.item.id === '3');
     expect(removed?.kind === 'item' && removed.replacedBy).toBeNull();
@@ -455,6 +449,24 @@ describe('agent removal bin', () => {
     act(() => { binView.reveal({ ...route, session_id: 'another-session' }, topicB); });
   });
 
+  it('scrolls the bin into view when it is asked for, folded or already open, and only then', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const value = await setup(); render(<LiveBin actions={value.actions} />);
+    expect(scroll).not.toHaveBeenCalled();                       // mounting the bin does not move the Map
+    act(() => { binView.reveal(route, topicA); });
+    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(screen.getByRole('button', { name: 'Removed by agent · 4' }).parentElement);
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });  // nothing moves when it is already in view
+    act(() => { binView.reveal(route, topicA); });
+    expect(scroll).toHaveBeenCalledTimes(2);                     // asked again while open: scrolls again, stays open
+    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
+    act(() => { binView.reveal(route, topicB); });
+    expect(scroll).toHaveBeenCalledTimes(2);                     // another topic's bin is not this one
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
   it('waits for a stale item refresh, then restores once against the fresh item revision', async () => {
     const value = await setup(); render(<LiveBin actions={value.actions} />);
     fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
@@ -649,20 +661,23 @@ describe('agent removal receipts in the composed app', () => {
     expect(bin.getByRole('button', { name: 'Delete forever' })).toBeTruthy();
   });
 
-  it('resumes the matching tree rows and preserved search after an outside reveal', async () => {
+  it('resumes the filtered tree rows and preserved search after an outside reveal', async () => {
     const session = graphSession(); session.items['1.1']!.question = 'Matching child'; session.items['1.2']!.question = 'Other child';
-    const transport = new BinTransport(session); transport.preferences.sessions[0]!.filters.search = 'Matching';
+    // The status filter leaves the in-progress 1.2 out; the search only marks "Matching child" (it filters nothing).
+    const transport = new BinTransport(session), filters = transport.preferences.sessions[0]!.filters;
+    filters.search = 'Matching'; filters.statuses = ['open'];
     await openApp(transport);
-    const rows = () => [...screen.getByRole('tree', { name: 'Session items' }).querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')]
-      .map(row => row.dataset.itemId);
-    await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
+    const tree = () => screen.getByRole('tree', { name: 'Session items' });
+    const rows = () => [...tree().querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')].map(row => row.dataset.itemId);
+    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '2', '8']));
+    expect(tree().querySelector('[data-item-id="1.1"] .tree-hit')?.textContent).toBe('Matching');
     await waitFor(() => expect(transport.listeners.get('ariadne://route')?.size).toBe(1));
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.2' }); });
     const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.2"]' });
     expect(within(detail).getByRole('heading', { name: 'Other child' })).toBeTruthy();
-    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2']));
+    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2', '2', '8']));
     fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
-    await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
+    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '2', '8']));
     expect(screen.queryByRole('button', { name: 'Resume filtered view' })).toBeNull();
     expect(searchValue()).toBe('Matching');
   });
@@ -887,7 +902,8 @@ describe('agent removal receipts in the composed app', () => {
     fireEvent.click(within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'View' }));
     expect(await screen.findByText('The bin could not be opened. Try View again.')).toBeTruthy();
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters.search).toBe('keep the current search');
-    expect(screen.queryByRole('button', { name: 'Removed by agent · 4' })).toBeNull();
+    // A search hides no row, so the bin's fold stays in the Map (SPEC §4); the refused View leaves it folded.
+    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('false');
   });
 });
 

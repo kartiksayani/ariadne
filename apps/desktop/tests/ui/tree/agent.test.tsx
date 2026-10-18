@@ -3,7 +3,9 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionPreferences } from '../../../src/generated/core';
 import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { oldestWaiting, treeModel, type ItemRow, type TopicRow } from '../../../src/ui/tree/model';
+import type { ItemRow, TopicRow } from '../../../src/ui/tree/model';
+import { shimTree } from './shimTree';
+import { chipCounts, savedChips } from '../../../src/selectors/tree/filter';
 import { sessionGraph } from '../../../src/ui/graph/model';
 import { graphSession, preferences } from '../graph/fixture';
 
@@ -19,44 +21,44 @@ function replied(): Session {
   input.target = { ...input.target, item_id: '2' }; input.kind = 'reply';
   return session;
 }
-const model = (session: Session, statuses: ItemStatus[] = []) => treeModel({ session: immutable(session), view: view(session, statuses),
+const model = (session: Session, statuses: ItemStatus[] = []) => shimTree({ session: immutable(session), view: view(session, statuses),
   search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null,
   summaries: [], now: Date.parse(session.created_at) });
+const counts = (session: Session, statuses: ItemStatus[] = []) => chipCounts({ session: immutable(session), view: view(session, statuses), later: new Set(), local: [] });
 const row = (tree: ReturnType<typeof model>, itemId: string) => tree.rows.find((value): value is ItemRow => value.kind === 'item' && value.item.id === itemId);
 const topic = (tree: ReturnType<typeof model>) => tree.rows.find((value): value is TopicRow => value.kind === 'topic' && value.topic.id === id('10'))!;
 
 describe('an archived topic in the tree counts', () => {
   it('keeps a saved full status set equivalent to All, including collapsed descendants and topics', () => {
     const session = structuredClone(demo) as Session;
-    const project = (statuses: ItemStatus[]) => treeModel({ session: immutable(session), view: view(session, statuses),
+    const project = (statuses: ItemStatus[]) => shimTree({ session: immutable(session), view: view(session, statuses),
       search: '', later: new Set(), collapsedTopics: new Set([session.items['8']!.topic_id]), selectedId: null, revealId: null,
       temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.created_at) });
     const all = project([]), full = project(['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open']);
     expect(full.filtering).toBe(false);
-    expect([...full.chips]).toEqual(['all']);
+    expect(savedChips(['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open'])).toEqual([]);
     expect(full.rows).toEqual(all.rows);
     expect(row(full, '1.1')).toBeUndefined();
     expect(row(full, '8')).toBeUndefined();
   });
   it('leaves Waiting on me while archived and comes back on restore; its items keep their status', () => {
     const session = structuredClone(demo) as Session, waitingTopic = session.topics[session.items['2']!.topic_id]!;
-    const before = model(session);
-    expect(before.counts.waiting).toBeGreaterThan(0); expect(oldestWaiting(immutable(session))?.id).toBe('2');
+    const before = counts(session);
+    expect(before.waiting).toBeGreaterThan(0);
     waitingTopic.archived_at = session.updated_at;
-    const archived = model(session);
-    expect(archived.counts.waiting).toBe(0); expect(oldestWaiting(immutable(session))).toBeNull();
+    expect(counts(session).waiting).toBe(0);
     expect(session.items['2']!.status).toBe('waiting_on_me');
     waitingTopic.archived_at = null;
-    expect(model(session).counts).toEqual(before.counts); expect(oldestWaiting(immutable(session))?.id).toBe('2');
+    expect(counts(session)).toEqual(before);
   });
 });
 
 describe('reply delivery in the tree and graph', () => {
   it('badges an unattempted reply Queued and moves it out of the Waiting on me counts', () => {
-    const before = model(structuredClone(demo) as Session), after = model(replied());
+    const original = structuredClone(demo) as Session, queued = replied(), before = model(original), after = model(queued);
     expect(row(before, '2')!.badge).toBe('Waiting on me');
     expect(row(after, '2')).toMatchObject({ status: 'queued', badge: 'Queued' });
-    expect(after.counts.waiting).toBe(before.counts.waiting - 1);
+    expect(counts(queued).waiting).toBe(counts(original).waiting - 1);
     expect(topic(before).counts.map(count => count.text)).toContain('1 waiting on you');
     const texts = topic(after).counts.map(count => count.text);
     expect(texts).toContain('1 queued'); expect(texts.some(text => text.includes('waiting on you'))).toBe(false);
@@ -65,11 +67,10 @@ describe('reply delivery in the tree and graph', () => {
     expect(row(model(replied(), ['waiting_on_me']), '2')).toBeUndefined();
     expect(row(model(replied(), ['in_progress']), '2')?.status).toBe('queued');
   });
-  it('shows the graph node as Queued with its topic count', () => {
+  it('shows the graph node as Queued', () => {
     const session = graphSession(), input = session.inputs[id('76')]!;
     input.target = { ...input.target, item_id: '1.1.1' }; input.kind = 'reply';
-    const graph = sessionGraph({ session: immutable(session), view: preferences({ expanded_item_ids: ['1', '1.1'] }), later: new Set(), selectedId: null, tight: false });
+    const graph = sessionGraph({ session: immutable(session), view: preferences({ expanded_item_ids: ['1', '1.1'] }), later: new Set(), selectedId: null });
     expect(graph.nodes.get('1.1.1')!.status).toBe('queued');
-    expect(graph.topics[0].counts).toBe('1 queued · 2 open · 1 in progress · 2 closed');
   });
 });

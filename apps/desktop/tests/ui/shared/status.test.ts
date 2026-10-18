@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STATUS, statusColor, statusKey } from '../../../src/ui/shared/status';
 import { graphStatus, statusVisual } from '../../../src/ui/graph/model';
-import { matchesStatus } from '../../../src/selectors/tree/folds';
-import { statusIn, topicCounts } from '../../../src/ui/tree/model';
+import { topicCounts } from '../../../src/ui/tree/model';
 
 describe('delivery status visuals', () => {
   it('shows Sent with a paper plane and Queued with the open color and hourglass', () => {
@@ -12,12 +11,6 @@ describe('delivery status visuals', () => {
     expect(statusColor(statusKey.queued)).toBe('var(--st-open)');
     expect(statusVisual[graphStatus('sent')]).toEqual(STATUS.agent);
     expect(statusVisual[graphStatus('queued')]).toEqual(STATUS.queued);
-  });
-  it.each(['sent', 'queued'] as const)('keeps %s under the existing In progress filter', status => {
-    expect(matchesStatus(['in_progress'], status)).toBe(true);
-    expect(statusIn(['in_progress'], status)).toBe(true);
-    expect(matchesStatus(['waiting_on_me'], status)).toBe(false);
-    expect(statusIn(['waiting_on_me'], status)).toBe(false);
   });
   it('counts sent and queued independently before acknowledgment and canonical statuses', () => {
     expect(topicCounts(['sent', 'queued', 'waiting_on_me', 'open', 'in_progress', 'done'], 1).map(count => count.text))

@@ -1,7 +1,8 @@
-/* Graph view, ported from the Ariadne.dc.html graph template (lines 164-199) with the same values. */
+/* Graph view (SPEC §5.1 state 1.3): sizes in px come from ui/graph/model.ts (NODE_HEIGHT, LANE, LEFT, TRUNK_X). */
 
-/* The graph renders in the tree column under the session bar (ui/tree/TreeView.tsx), which lays it out like the tree's scroller. */
+/* The graph renders in the tree column under the top bar (ui/tree/TreeView.tsx), which lays it out like the tree's scroller. */
 .graph-view {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -9,253 +10,80 @@
   min-height: 0;
 }
 
-.graph-error {
-  margin: 0 16px 8px;
-  font-size: calc(12.5px * var(--text-scale));
-  color: var(--a-warn);
-}
-
-.graph-node-ack {
-  flex: none;
-  padding: 1px 4px;
-  border: 1px solid var(--color-divider);
-  border-radius: 4px;
-  font-size: calc(10px * var(--text-scale));
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--color-text) 70%, transparent);
-}
-
+/* The Graph adds the dock height to its canvas height, plus room for the legend card that hangs above the dock:
+   GraphView measures the card (it wraps with the width) into --graph-legend-inset, its height plus its 12px lift. */
 .graph-scroll {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding-bottom: calc(40px + var(--dock-inset, 0px));
+  padding-bottom: calc(max(40px, var(--graph-legend-inset, 0px)) + var(--dock-inset, 0px));
   overflow: auto;
   outline: none;
-}
-
-/* — legend — */
-.graph-legend {
-  position: sticky;
-  top: 0;
-  left: 0;
-  z-index: 5;
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 6px 18px;
-  padding: 6px 16px 8px 20px;
-  border-bottom: 1px solid var(--color-divider);
-  background: var(--a-bg);
-  font-size: calc(12px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-.graph-legend-key {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-}
-
-.graph-legend-key > :first-child {
-  flex-shrink: 0;
-}
-
-.graph-legend-label,
-.graph-legend-note {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.graph-legend-note {
-  flex-shrink: 3;
-}
-
-.graph-legend-thread {
-  width: 18px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--color-accent);
-}
-
-.graph-legend-related {
-  width: 22px;
-  height: 6px;
-  overflow: visible;
-}
-
-.graph-legend-replaced {
-  width: 18px;
-  height: 0;
-  border-top: 1.5px dashed var(--st-replaced);
-}
-
-.graph-legend-waiting,
-.graph-legend-closed {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-}
-
-.graph-legend-waiting {
-  box-shadow: 0 0 0 1px var(--color-accent), 0 0 10px color-mix(in srgb, var(--color-accent) 40%, transparent);
-}
-
-.graph-legend-closed {
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-
-/* Reveal selected and the filter control end the legend row together. */
-.graph-legend-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-/* The funnel is no taller than Reveal selected, so seating it here keeps the legend row's height. */
-.graph-legend .tree-filter-button {
-  width: 22px;
-  height: 22px;
-}
-
-.graph-legend-bare {
-  justify-content: flex-end;
-}
-
-.graph-reveal {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  font-size: calc(12.5px * var(--text-scale));
-  white-space: nowrap;
-}
-
-.graph-reveal > i {
-  font-size: calc(13px * var(--text-scale));
-}
-
-/* — topic cards — */
-.graph-cards {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 4px 16px 0;
-}
-
-.graph-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  box-sizing: border-box;
-  width: max-content;
-  min-width: 100%;
-  border-radius: var(--radius-md);
-  background: var(--a-bg);
-  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
-}
-
-.graph-card-head {
-  position: sticky;
-  z-index: 3;
-  left: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  max-width: 820px;
-  padding: 12px 14px 0;
-}
-
-.graph-card-name {
-  font-size: calc(14.5px * var(--text-scale));
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.graph-card-session {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-  font-size: calc(11.5px * var(--text-scale));
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-}
-
-.graph-card-session > i {
-  font-size: calc(12px * var(--text-scale));
-}
-
-.graph-card-counts {
-  font-size: calc(12px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .graph-canvas {
   position: relative;
 }
 
-/* — edges — */
-.graph-edges {
+/* One block per topic, stacked down the canvas at the model's `top`. */
+.graph-topic {
   position: absolute;
-  z-index: 2;
+  left: 0;
+}
+
+.graph-topic-title {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  overflow: hidden;
+  font-size: calc(14px * var(--text-scale));
+  font-weight: 500;
+  line-height: calc(18px * var(--text-scale));
+  letter-spacing: normal; /* The shared heading rule's -0.015em is not the board's. */
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--a-acc-text);
+}
+
+/* — lines — */
+.graph-edges,
+.graph-lines {
+  position: absolute;
   top: 0;
   left: 0;
   overflow: visible;
   pointer-events: none;
 }
 
-.graph-cross-related {
-  position: absolute;
+.graph-edges {
   z-index: 1;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
 }
 
-.graph-related {
-  fill: none;
-  stroke: color-mix(in srgb, var(--color-text) 36%, transparent);
-  stroke-width: 1.25;
-  stroke-dasharray: 6 5;
+/* The selected path and related lines go over the grey edges and under the nodes. */
+.graph-lines {
+  z-index: 2;
 }
 
 .graph-edge {
   fill: none;
   stroke: var(--a-edge);
-  stroke-width: 1.25;
+  stroke-width: 1.5;
 }
 
-.graph-edge.is-on {
+.graph-path {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.graph-related {
+  fill: none;
   stroke: var(--color-accent);
   stroke-width: 1.75;
-}
-
-.graph-replaced {
-  fill: none;
-  stroke: var(--st-replaced);
-  stroke-width: 1.25;
-  stroke-dasharray: 4 4;
-}
-
-.graph-arrow,
-.graph-replaced-label {
-  fill: var(--st-replaced);
-}
-
-.graph-replaced-label {
-  font-family: var(--font-body);
-  font-size: calc(11px * var(--text-scale));
+  stroke-dasharray: 5 4;
 }
 
 /* — nodes — */
@@ -263,112 +91,26 @@
   position: absolute;
   z-index: 3;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 7px;
   box-sizing: border-box;
-  width: 190px;
-  height: 66px;
-  padding: 8px 10px;
-  overflow: hidden;
-  border-radius: var(--radius-md);
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 7px;
   outline: none;
   background: var(--a-card);
-  box-shadow: 0 0 0 1px var(--color-divider), var(--a-lift);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
   cursor: pointer;
+}
+
+.graph-node:hover {
+  background: color-mix(in srgb, var(--color-text) 4%, var(--a-card));
 }
 
 /* Focus follows the selection, whose ring already marks it; this outranks `.product-app :focus-visible`. */
 .product-app .graph-node:focus-visible,
 .product-app .graph-scroll:focus-visible {
   outline: none;
-}
-
-.graph-node.is-waiting {
-  box-shadow: 0 0 0 1px var(--color-accent), 0 0 22px color-mix(in srgb, var(--color-accent) 30%, transparent), var(--a-lift);
-}
-
-.graph-node.is-thread {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 70%, transparent), var(--a-lift);
-}
-
-.graph-node.is-closed {
-  background: transparent;
-}
-
-.graph-node.is-closed:hover {
-  background: color-mix(in srgb, var(--color-text) 5%, transparent);
-}
-
-.graph-node.is-selected,
-.graph-node.is-selected:hover {
-  background: color-mix(in srgb, var(--color-text) 8%, var(--a-bg));
-  box-shadow: 0 0 0 1.5px var(--color-accent), var(--a-lift);
-}
-
-.graph-node.is-hidden {
-  opacity: 0.45;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-/* The hidden siblings' stub: one small pill where the cards would be (sizes from STUB_* in model.ts). */
-.graph-stub {
-  position: absolute;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px dashed color-mix(in srgb, var(--color-text) 30%, transparent);
-  border-radius: 999px;
-  font: inherit;
-  font-size: calc(11.5px * var(--text-scale));
-  white-space: nowrap;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 66%, transparent);
-  background: var(--a-bg);
-}
-
-.graph-stub:hover,
-.graph-stub:focus-visible {
-  color: var(--color-text);
-  background: color-mix(in srgb, var(--color-text) 8%, var(--a-bg));
-}
-
-.graph-stub:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.graph-stub[aria-expanded="true"] {
-  border-style: solid;
-}
-
-.graph-stub > i {
-  flex: none;
-  font-size: calc(11px * var(--text-scale));
-}
-
-.graph-stub-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.graph-stub-waiting {
-  margin-left: auto;
-  color: var(--st-waiting);
-}
-
-.graph-node.is-dimmed {
-  opacity: 0.4;
-}
-
-.graph-node-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
 }
 
 .graph-node-icon {
@@ -378,76 +120,125 @@
   line-height: 1;
 }
 
-.graph-node-title {
+.graph-node-name {
+  display: -webkit-box;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-size: calc(12.5px * var(--text-scale));
-  font-weight: 500;
-  line-height: calc(16px * var(--text-scale));
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.3; /* The board's: two lines are 15.6px apart. */
+  overflow-wrap: anywhere;
   color: var(--color-text);
-}
-
-.graph-node.is-closed .graph-node-title {
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-}
-
-.graph-node-below {
-  flex: none;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--color-accent) 15%, var(--a-card));
-  font-size: calc(10.5px * var(--text-scale));
-  font-weight: 500;
-  line-height: calc(15px * var(--text-scale));
-  color: var(--a-acc-text);
-}
-
-.graph-node.is-hidden .graph-node-below {
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
-}
-
-.graph-node-collapse {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 20px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-  cursor: pointer;
-}
-
-.graph-node-collapse:hover {
-  background: color-mix(in srgb, var(--color-text) 15%, transparent);
-  color: var(--color-text);
-}
-
-.graph-node-collapse > i {
-  font-size: calc(11px * var(--text-scale));
-}
-
-.graph-node-question {
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: calc(11.5px * var(--text-scale));
-  line-height: calc(15px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 74%, transparent);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.graph-node.is-closed .graph-node-question {
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+.graph-node.is-closed .graph-node-name {
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
 }
 
-.graph-node.is-hidden .graph-node-title,
-.graph-node.is-hidden .graph-node-question {
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+/* Search tints every match it can see and rings the current one, as the Tree does; nothing is filtered. */
+.graph-node.is-match {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--a-card));
+}
+
+.graph-node.is-current-match {
+  background: color-mix(in srgb, var(--color-accent) 34%, var(--a-card));
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+.graph-node.is-related {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.graph-node.is-selected,
+.graph-node.is-selected:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--a-card));
+  box-shadow: inset 0 0 0 1.5px var(--color-accent), var(--shadow-sm);
+}
+
+/* Hidden, and drawn only because the selected or revealed route runs through it. */
+.graph-node.is-hidden {
+  opacity: 0.45;
+}
+
+/* Filter context; hidden context is at least as faded, so this comes after. */
+.graph-node.is-dimmed {
+  opacity: 0.4;
+}
+
+/* A folded node's quiet "+N": its children are inside, never gone unseen. */
+.graph-node-inside {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  font-size: calc(11px * var(--text-scale));
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.graph-node-waiting {
+  font-size: calc(11px * var(--text-scale));
+  color: var(--st-waiting);
+}
+
+/* The diamond alone on a Graph node is the shared ChangeMarker (ui/changes/ChangeMarker.tsx). */
+.graph-node > .change-marker {
+  margin-right: 2px;
+}
+
+/* — legend — hangs 12px above the dock, left 12 (SPEC §2) — */
+.graph-legend {
+  position: absolute;
+  z-index: 4;
+  bottom: calc(var(--dock-inset, 0px) + 12px);
+  left: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  box-sizing: border-box;
+  max-width: calc(100% - 24px);
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--color-divider); /* The ring sits outside the card, as the board's does. */
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+}
+
+.graph-legend-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.graph-legend-branch,
+.graph-legend-path {
+  flex: none;
+  width: 20px;
+  border-radius: 1px;
+}
+
+.graph-legend-branch {
+  height: 1.5px;
+  background: var(--a-edge-strong);
+}
+
+.graph-legend-path {
+  height: 2.5px;
+  background: var(--color-accent);
+}
+
+.graph-legend-related {
+  flex: none;
+  width: 20px;
+  height: 6px;
+  overflow: visible;
+}
+
+.graph-legend-related .graph-related {
+  stroke-width: 1.5;
 }

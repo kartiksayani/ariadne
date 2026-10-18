@@ -31,15 +31,18 @@ async function reachable(control: Locator) {
 }
 
 async function checkFilters(page: Page) {
-  const trigger = page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /^Filter/ });
-  await reachable(trigger);
-  await trigger.click();
-  const option = page.getByRole('menuitemcheckbox', { name: /^Open \d+$/ });
+  // The chip row is in flow: every chip is a toggle button, and a picked one brings Clear.
+  const row = page.getByRole('group', { name: 'Filter items' });
+  const option = row.getByRole('button', { name: /^Open \d+$/ });
   await reachable(option);
-  await expect(option).toHaveAttribute('aria-checked', 'false');
-  await page.keyboard.press('Escape');
-  await expect(trigger).toBeFocused();
-  await expect(option).toHaveCount(0);
+  await expect(option).toHaveAttribute('aria-pressed', 'false');
+  await expect(row.getByRole('button', { name: 'Clear' })).toHaveCount(0);
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'true');
+  await reachable(row.getByRole('button', { name: 'Clear' }));
+  await option.click();
+  await expect(option).toHaveAttribute('aria-pressed', 'false');
+  await expect(row.getByRole('button', { name: 'Clear' })).toHaveCount(0);
 }
 
 const usefulRows = 64;

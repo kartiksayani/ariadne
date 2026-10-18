@@ -90,7 +90,7 @@ export type KeyScope = 'workspace' | 'row' | 'editor';
 export type IntentHandler<T extends Element> = (intent: WorkspaceIntent, event: KeyboardEvent<T>) => boolean | void;
 export type WorkspaceHandlers<T extends Element = HTMLElement> = Partial<Record<IntentKind, IntentHandler<T>>>;
 
-const editableSelector = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
+export const editableSelector = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
 /**
  * Open overlays own their keys even when focus is still on an underlying row. The peek (a hover card, also
  * role="dialog") is not one of them: the Map keeps its keys while a peek is showing (SPEC §6.13).

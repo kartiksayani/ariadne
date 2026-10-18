@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { immutable } from '../../../src/data/session-store';
@@ -88,7 +88,7 @@ function inTree(id: string) {
   expect(rectangle.bottom).toBeLessThanOrEqual(400);
 }
 
-describe('composed item navigation', { timeout: 10_000 }, () => {
+describe('composed item navigation', () => {
   it('opens and focuses the owner answer behind a change, then consumes the jump', async () => {
     const value = changesFixture(), transport = new AppTransport();
     transport.sessions.set(value.session.id, value.session);
@@ -138,16 +138,17 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime('2026-10-10T02:00:00Z');
     await setup(transport); await openSession();
     vi.useFakeTimers(); vi.setSystemTime('2026-10-10T02:00:00Z');
-    await click(screen.getByRole('button', { name: /Since you were here ·/ }));
-    await click(screen.getByRole('button', { name: 'Mark all caught up' }));
+    await click(screen.getByRole('button', { name: /2 changed/ }));
+    await click(screen.getByRole('button', { name: /Mark all caught up/ }));
     expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
     await pick('updated-0');
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
     await click(screen.getByRole('button', { name: 'Undo' }));
-    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed since you read it' })).toBeNull();
-    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
+    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed' })).toBeNull();
+    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /1 changed/ })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(transport.preferences.seen![0].items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
     expect(transport.preferences.seen![0].topics).toEqual([]);
@@ -258,6 +259,25 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await keyDown(document.body, ']', true); await selected('2');
   });
 
+  it('peek footer: "Go to" selects the item and leaves a closed Details closed, "Open details" opens it', async () => {
+    const transport = await setup(); await openSession(); await pick('1');
+    await click(screen.getByRole('button', { name: 'Close detail' }));
+    expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
+    const peekOn = async (id: string) => { await keyDown(treeRow(id), ' '); return screen.findByRole('button', { name: 'Go to' }); };
+    await click(await peekOn('1.1'));
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
+    expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Go to' })).toBeNull();
+    await peekOn('1');
+    await click(screen.getByRole('button', { name: 'Open details' }));
+    await waitFor(() => selected('1'));
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    // Details already open: "Go to" follows the selection in it, as the Map does.
+    await peekOn('1.1');
+    await click(screen.getByRole('button', { name: 'Go to' }));
+    await waitFor(() => selected('1.1'));
+  });
+
   it('keeps history isolated between session views and retains it when returning to an existing session', async () => {
     const transport = await setup(); await openSession(); await pick('1'); await pick('4');
     await openSession(secondId);
@@ -269,8 +289,8 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
   });
 });
 
-describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
-  it.each(['search', 'status', 'no matching topics', 'collapsed ancestor'] as const)('reveals an undrawn Graph selection through its registered route after %s, preserving the saved view', async cause => {
+describe('composed map reveal scrolling', () => {
+  it.each(['search over a collapsed ancestor', 'status', 'search matching nothing', 'collapsed ancestor'] as const)('reveals an undrawn Graph selection through its registered route after %s, preserving the saved view', async cause => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = this.closest<HTMLElement>('.graph-scroll');
       if (this.matches('.graph-scroll')) return new DOMRect(0, 0, 400, 300);
@@ -281,25 +301,28 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     view.selected_item_id = '1.1';
     view.expanded_item_ids = ['2', '3'];
     view.hidden_item_ids = ['6'];
-    if (cause === 'search') view.filters.search = 'delivery window';
+    if (cause === 'search over a collapsed ancestor') view.filters.search = 'delivery window';
     if (cause === 'status') view.filters.statuses = ['waiting_on_me'];
-    if (cause === 'no matching topics') view.filters.search = 'no matching question';
+    if (cause === 'search matching nothing') view.filters.search = 'no matching question';
     const saved = structuredClone(view);
     await setup(transport); await openSession();
     await click(screen.getByRole('button', { name: 'Close detail' }));
-    // Opening the session reveals its saved selection. An owner search edit
-    // dismisses that temporary reveal; restore the query before asking Graph to reveal it again.
+    // Opening the session reveals its saved selection. A search edit keeps that temporary reveal (a search hides no
+    // row, SPEC §4), so a fold dismisses it here: the hidden group opened and closed, which saves nothing.
     const search = await searchBox();
     await act(async () => { fireEvent.change(search, { target: { value: `${saved.filters.search} ` } }); });
     await act(async () => { fireEvent.change(search, { target: { value: saved.filters.search } }); });
+    if (cause !== 'status') for (let toggle = 0; toggle < 2; toggle++) {
+      await click(screen.getByRole('treeitem', { name: /^1 hidden/ }));
+    }
     await click(control('Graph'));
     const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');
     expect(target()).toBeNull();
     expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
     const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
-    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal selected' });
-    expect(reveal.disabled).toBe(false);
-    await click(reveal);
+    // The Graph has no Reveal selected button (SPEC 1.3); an outside route (a link, the dock, a native route) reveals it.
+    await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
+    await waitFor(() => expect(target()).not.toBeNull());
     expect(transport.queries.filter(query => query.request.command === 'reveal_item').slice(before)).toEqual([
       expect.objectContaining({ session: route, request: { command: 'reveal_item', params: { item_id: '1.1' } } }),
     ]);
@@ -311,14 +334,16 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(rectangle.left + rectangle.width / 2).toBe(200);
     expect(rectangle.top + rectangle.height / 2).toBe(130);
     expect(document.querySelector('.graph-node[data-item-id="1"]')!.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.queryByLabelText('Item detail')).toBeNull();
+    // A route goes to the item: Details opens on it.
+    expect(document.querySelector('[data-detail-item-id="1.1"]')).not.toBeNull();
     const current = transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
     expect(current.filters).toEqual(saved.filters);
     expect(current.expanded_item_ids).toEqual(saved.expanded_item_ids);
     expect(current.hidden_item_ids).toEqual(saved.hidden_item_ids);
     expect(current.selected_item_id).toBe('1.1');
     expect((await searchBox()).value).toBe(saved.filters.search);
-    if (cause !== 'collapsed ancestor') {
+    // Only a status filter puts the item outside the filters; a search, matching or not, filters nothing.
+    if (cause === 'status') {
       expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
       await click(screen.getByRole('button', { name: 'Resume filtered view' }));
       expect(target()).toBeNull();
@@ -432,9 +457,10 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
   it('reveals Back and Forward targets while preserving the current search', async () => {
     treeGeometry(); const transport = await setup(); await openSession(); await pick('2'); await pick('8');
     await act(async () => { fireEvent.change(await searchBox(), { target: { value: 'receipt' } }); });
-    await readAt(600); outsideTree('8');
+    // The search keeps every row, so 8 is the ninth row: reading at 1200 puts both targets out of view.
+    await readAt(1200); outsideTree('8');
     await click(control('Back')); selected('2'); inTree('2');
-    await readAt(600);
+    await readAt(1200); outsideTree('8');
     await click(control('Forward')); selected('8'); inTree('8');
     expect((await searchBox()).value).toBe('receipt');
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.selected_item_id).toBe('8');
@@ -443,7 +469,8 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
   it('keeps a clicked search-result tree row stationary through the composed controls', async () => {
     treeGeometry(); await setup(); await openSession();
     await act(async () => { fireEvent.change(await searchBox(), { target: { value: 'receipt' } }); });
-    expect(screen.getByText(/items matching “receipt”/)).toBeTruthy();
+    // The search finds in place: the top bar counts it and the Map keeps every row.
+    expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 2');
     await readAt(600); outsideTree('1.1');
     await pick('1.1');
     expect(treeScroll().scrollTop).toBe(600);
@@ -497,10 +524,10 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
   });
 
   // ⌘J is gone (SPEC 7 "Removed"); the . key (Back to the selected item, SPEC 6.1) replaces it.
-  it.each(['.', 'edge marker'] as const)('reveals the offscreen selection through %s', async entry => {
+  it.each(['.', 'Back-to pill'] as const)('reveals the offscreen selection through %s', async entry => {
     treeGeometry(); await setup(); await openSession(); await pick('8'); await readAt(150); outsideTree('8');
     if (entry === '.') await keyDown(document.body, '.');
-    else await click(screen.getByRole('button', { name: /^↓ Selected:/ }));
+    else await click(screen.getByRole('button', { name: /^Back to “/ }));
     selected('8'); inTree('8');
     expect(treeScroll().scrollTop).toBeGreaterThan(150);
   });

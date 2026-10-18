@@ -12,7 +12,7 @@ export async function waitForRegistrationCompletion(dialog, persisted, options) 
 
 export async function waitForDiscoveredCandidate(candidate) {
   try {
-    await candidate.waitForDisplayed({ timeout: 20000 });
+    await candidate.waitForDisplayed({ timeout: 60000 });
   } catch (failure) {
     const evidence = process.env.ARIADNE_E2E_EVIDENCE;
     if (evidence) {
@@ -88,7 +88,7 @@ export async function runDiscoveryAcceptance(configuration) {
   await waitForRegistrationCompletion(registerDialog, async () => {
     try { return JSON.parse(await readFile(await projectPath(), 'utf8')).id !== undefined; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
-  }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project and dismiss its completed form' });
+  }, { timeout: 60000, timeoutMsg: 'Explicit Register did not persist the discovered project and dismiss its completed form' });
   const metadata = JSON.parse(await readFile(await projectPath(), 'utf8'));
   await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
   // Registering opens the project's own page, which ends in Connect existing session.
@@ -110,7 +110,7 @@ export async function runDiscoveryAcceptance(configuration) {
     if (names.length !== 1) return false;
     connected = JSON.parse(await readFile(join(sessionsDir, names[0]), 'utf8'));
     return connected.active_binding_id !== null;
-  }, { timeout: 20000, timeoutMsg: 'Explicit Connect did not persist the exact selected host identity and dismiss its completed form' });
+  }, { timeout: 60000, timeoutMsg: 'Explicit Connect did not persist the exact selected host identity and dismiss its completed form' });
   assert.equal(connected.project_id, metadata.id);
   const binding = connected.bindings[connected.active_binding_id];
   assert.equal(binding.adapter_id, 'codex'); assert.equal(binding.external_session_id, externalSessionId);

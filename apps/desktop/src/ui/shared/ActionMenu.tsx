@@ -3,10 +3,14 @@ import { createPortal } from 'react-dom';
 import './menu.css';
 
 /** Pointer clicks stay in place; keyboard opening moves focus into the menu. */
-export function ActionMenu({ label, title = label, icon, active, disabled, dismissKey, align = 'end', className = '', buttonClassName = 'btn btn-ghost', children }: {
+export function ActionMenu({ label, title = label, icon, active, disabled, dismissKey, align = 'end', gap = 4, className = '', buttonClassName = 'btn btn-ghost', panelClassName = '', children }: {
   readonly label: string; readonly title?: string; readonly icon: ReactNode; readonly active?: boolean; readonly disabled?: boolean;
   readonly dismissKey?: string; readonly className?: string; readonly buttonClassName?: string;
   readonly align?: 'start' | 'end';
+  /** Pixels between the button and the panel. */
+  readonly gap?: number;
+  /** Extra class on the panel (portaled out of the host). */
+  readonly panelClassName?: string;
   readonly children: (close: (restoreFocus?: boolean) => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -21,7 +25,7 @@ export function ActionMenu({ label, title = label, icon, active, disabled, dismi
     const place = () => {
       const anchor = button.current, panel = menu.current;
       if (!anchor || !panel) return;
-      const bounds = anchor.getBoundingClientRect(), gap = 4, edge = 8;
+      const bounds = anchor.getBoundingClientRect(), edge = 8;
       const width = document.documentElement.clientWidth || window.innerWidth;
       const height = document.documentElement.clientHeight || window.innerHeight;
       panel.style.maxWidth = `${Math.max(0, width - edge * 2)}px`;
@@ -41,7 +45,7 @@ export function ActionMenu({ label, title = label, icon, active, disabled, dismi
     if (root.current?.parentElement) observer?.observe(root.current.parentElement);
     if (menu.current) observer?.observe(menu.current);
     return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); observer?.disconnect(); };
-  }, [open, align]);
+  }, [open, align, gap]);
   useEffect(() => {
     if (!open) return;
     menu.current?.querySelectorAll<HTMLButtonElement>('button').forEach(option => { option.tabIndex = -1; });
@@ -90,6 +94,6 @@ export function ActionMenu({ label, title = label, icon, active, disabled, dismi
         initialFocus.current = keyboard.current && !open ? 'first' : null;
         setOpen(value => !value);
       }}>{icon}</button>
-    {open && createPortal(<div ref={menu} id={id} role="menu" aria-label={label} className="action-menu-options">{children(close)}</div>, root.current?.closest('.product-app') ?? document.body)}
+    {open && createPortal(<div ref={menu} id={id} role="menu" aria-label={label} className={`action-menu-options ${panelClassName}`.trim()}>{children(close)}</div>, root.current?.closest('.product-app') ?? document.body)}
   </div>;
 }

@@ -1,0 +1,351 @@
+/* Item rows (the Map look piece owns this file). Rules that tests read from tree.css (.tree-item, .tree-item-root,
+   .tree-question, .tree-line, the clamp rules, .tree-collapsed, .tree-related) stay there until their tests move. The end
+   cluster's slots, the floating hover bar and the search hits are the Tree core's layout contract, in tree.css. */
+
+/* Hover and selection are paint behind the row's content: a row's height never depends on them. */
+.tree-item:hover::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 2px calc(12px + (var(--depth) - 1) * 6px) 2px calc(var(--tree-x) - 12px);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  pointer-events: none;
+}
+
+/* The selected row's inner box (SPEC 3.4): a 10% accent wash, a 1.5px ring and a small shadow. */
+.tree-selected-box {
+  position: absolute;
+  z-index: -1;
+  inset: 3px calc(12px + (var(--depth) - 1) * 6px) 3px calc(var(--tree-x) - 10px);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--a-card));
+  box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-sm);
+  pointer-events: none;
+}
+
+.tree-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.tree-icon {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 22px;
+}
+
+.tree-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tree-heading > .tree-question-block {
+  flex: 1 1 12ch;
+  min-width: 0;
+}
+
+
+.tree-line-tight {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.tree-line > i {
+  font-size: calc(14px * var(--text-scale));
+}
+
+.tree-line > i.tree-line-small {
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-ask {
+  display: block;
+  font-size: calc(14px * var(--text-scale));
+  color: var(--a-acc-text);
+}
+
+.tree-outcome {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  font-size: calc(14px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+}
+
+.tree-outcome > i {
+  flex: none;
+  margin-top: 4px;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-outcome > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* Three lines remain visible when folding hides at least one more; the question and the details fold alike. */
+.tree-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.tree-preview > .tree-line {
+  align-self: stretch;
+}
+
+/* Preserve Markdown structure; only eligible bodies have a height limit. */
+.tree-clamp {
+  display: block;
+  min-width: 0;
+
+  /* Markdown supplies <br> for each line break and a newline for copied text.
+     Collapse that newline so it does not create a second visual line. */
+  white-space: normal;
+}
+.tree-line > .tree-clamp { flex: 1; }
+
+.tree-clamp-content { display: block; }
+
+.tree-more {
+  margin-left: 21px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: calc(18px * var(--text-scale));
+  cursor: pointer;
+  color: var(--a-acc-text);
+  background: transparent;
+}
+
+.tree-more:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.tree-ask + .tree-more,
+.tree-question-block > .tree-more {
+  margin-left: 0;
+}
+
+/* The owner's message on its way: a small line under the details, never in their place. */
+.tree-delivery {
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+.tree-jump {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--a-acc-text);
+  background: transparent;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  text-underline-offset: 3px;
+}
+
+/* Narrow Map (D5): the marker slot is 16px and the New / Changed pill gives way to its diamond. */
+@container tree-map (max-width: 559px) {
+  .tree-end { --tree-end-marker: 16px; }
+
+  .tree-end-marker .change-marker[data-form="pill"] {
+    height: auto;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--attention);
+  }
+
+  .tree-end-marker .change-marker[data-form="pill"] > span { display: none; }
+
+  .tree-end-marker .change-marker[data-form="pill"] > i {
+    width: 7px;
+    height: 7px;
+    margin-right: 3px;
+    border-radius: 1.5px;
+  }
+}
+
+/* The next unseen target (n): a dashed 1.5px outline, kept after its arrival pulse. */
+.tree-item[data-next-unseen] {
+  outline: 1.5px dashed var(--attention);
+  outline-offset: -2px;
+}
+
+.tree-item[data-next-unseen-pulse] {
+  animation: tree-unseen-arrival .9s ease-out;
+}
+
+@keyframes tree-unseen-arrival {
+  0%, 45% { background: color-mix(in srgb, var(--attention) 18%, var(--a-bg)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-item[data-next-unseen-pulse] { animation: none; }
+}
+
+.tree-unseen-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tree-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  background: transparent;
+}
+
+.tree-action i {
+  font-size: calc(14px * var(--text-scale));
+}
+
+.tree-action-ack {
+  border: 1px solid var(--color-divider);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-hidden-group {
+  --tree-bullet-y: 20px;
+
+  isolation: isolate;
+  padding: 5px calc(18px + (var(--depth) - 1) * 6px) 5px calc(var(--tree-x) - 9px);
+  display: flex;
+  align-items: center;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  cursor: pointer;
+}
+
+/* The one strip style (D8): a dashed 20px pill with an icon and a count. Only a hidden strip opens; the others are
+   undone by Clear and Unfocus, so they are not clickable. */
+.tree-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 34%, transparent);
+  border-radius: 5px;
+  font-size: calc(11.5px * var(--text-scale));
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tree-strip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-strip > i {
+  flex: none;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-hidden-group[data-strip="filter"],
+.tree-hidden-group[data-strip="focus"] {
+  cursor: default;
+}
+
+.tree-hidden-group[data-strip="hidden"]:hover .tree-strip {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+/* The Map's status badge (D22): 18px high, 11.5px text, radius 4. The shared badge is unchanged. */
+.tree-end-badge .status-badge {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: calc(11.5px * var(--text-scale));
+}
+
+/* A closed session's chip sits in the badge's slot and never widens it. */
+.tree-end-badge .session-closed-chip {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ack is 22 x 20 (D22), outside the hover bar. */
+.tree-action.tree-action-ack {
+  width: 22px;
+  height: 20px;
+}
+
+/* A held single Ack (D11): drawn over the cluster's area left of the Ack slot, so the row never rewraps. */
+.tree-acked {
+  position: absolute;
+  z-index: 1;
+  inset: 0 calc(var(--tree-end-ack) + 6px) 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: var(--a-acc-text);
+  background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.tree-acked-undo {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  color: var(--a-acc-text);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* A slot that does not apply is greyed (D4). */
+.tree-action:disabled:not(.tree-action-ack) {
+  opacity: .3;
+  cursor: default;
+  pointer-events: none; /* the .tree-action-off wrapper takes the pointer: its click selects the row instead of dying on the button */
+}
+
+.tree-action-off {
+  display: flex;
+  cursor: default;
+}
+
+.tree-action:disabled:not(.tree-action-ack):hover {
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  background: transparent;
+}
+
+.tree-item-hidden {
+  opacity: .58;
+}

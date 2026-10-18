@@ -37,7 +37,7 @@ impl QualifiedCodexThread {
             request,
             instance_id,
             observed_at,
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + budget(10),
         )
     }
     pub(crate) fn executable_identity(&self) -> ExecutableIdentity {
@@ -103,7 +103,7 @@ impl CodexDaemonReader {
         expected_root: &Path,
         deadline: Instant,
     ) -> Result<QualifiedCodexThread, AdapterError> {
-        let deadline = deadline.min(Instant::now() + Duration::from_secs(10));
+        let deadline = deadline.min(Instant::now() + budget(10));
         if thread_id.trim().is_empty()
             || thread_id.contains('\0')
             || thread_id.len() > 4096

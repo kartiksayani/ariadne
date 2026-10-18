@@ -13,19 +13,23 @@ it('explains a saved search and clears it in the box and saved view while keepin
   view.filters.statuses = ['open'];
   render(<DesktopApp service={createDesktopService(transport)} />);
   await goToSession(route);
-  expect(await screen.findByText('Showing 1 of 9 items matching “receipt” in the statuses you picked')).toBeTruthy();
+  // The top bar's funnel (badge 1: Open is picked) shows the chip row. Its summary explains the statuses only; the search's
+  // count is the top bar's (SPEC §4: a search finds in place).
+  fireEvent.click(await screen.findByRole('button', { name: /^Filter by status, 1 status picked/ }));
+  const filterRow = await screen.findByRole('group', { name: 'Filter items' });
+  expect(within(filterRow).getByText('Showing 3 of 9 items')).toBeTruthy();
+  await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
   // The top bar's search box shows while it holds words; an empty search is the closed "Search the Map" button.
   const searchValue = () => document.querySelector<HTMLInputElement>('.tb-search-input')?.value ?? '';
   expect(searchValue()).toBe('receipt');
-  fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear the search' }));
   expect(searchValue()).toBe('');
-  expect(screen.queryByText(/items matching/)).toBeNull();
+  expect(document.querySelector('.tb-search-count')).toBeNull();
+  expect(within(filterRow).getByText('Showing 3 of 9 items')).toBeTruthy();
   await waitFor(() => expect(transport.preferences.sessions[0]!.filters.search).toBe(''));
   expect(transport.preferences.sessions[0]!.filters.statuses).toEqual(['open']);
-  // The top bar's funnel (badge 1: Open is still picked) shows the filter row; its menu lists the picked status.
-  fireEvent.click(screen.getByRole('button', { name: /^Filter by status, 1 status picked/ }));
-  fireEvent.click(within(await screen.findByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ }));
-  expect(screen.getByRole('menuitemcheckbox', { name: /^Open/ }).getAttribute('aria-checked')).toBe('true');
+  // Open is still picked.
+  expect(within(filterRow).getByRole('button', { name: /^Open \d+$/ }).getAttribute('aria-pressed')).toBe('true');
 });
 
 it('saves an explicit clear before switching to another session and typing there', async () => {
@@ -35,7 +39,7 @@ it('saves an explicit clear before switching to another session and typing there
   transport.preferences.sessions.push(transport.view(secondId));
   render(<DesktopApp service={createDesktopService(transport)} />);
   await goToSession(route);
-  const clear = await screen.findByRole<HTMLButtonElement>('button', { name: 'Clear search' });
+  const clear = await screen.findByRole<HTMLButtonElement>('button', { name: 'Clear the search' });
   await waitFor(() => expect(clear.disabled).toBe(false));
   fireEvent.click(clear);
   // Switch from the top bar's switcher (SPEC 5.13).

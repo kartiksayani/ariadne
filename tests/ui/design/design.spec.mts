@@ -79,14 +79,17 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   }
   const filters = page.getByRole('group', { name: 'Filter items' });
   if (await filters.count()) {
-    await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
+    // The chip row (SPEC 6.10): toggle buttons named "<status> <count>", no menu button and no combobox.
+    await expect(filters.getByRole('button', { name: /\d$/ }).first()).toBeVisible();
+    await expect(filters.getByRole('button', { name: /^Filter/ })).toHaveCount(0);
     await expect(filters.getByRole('combobox')).toHaveCount(0);
   }
+  // The Back-to pill (SPEC §5.8) floats over the Map in the scroller's shell, never inside the scroller, never in the Graph.
   if (graphFrame(spec)) {
-    await expect(page.locator('.tree-selected-edge')).toHaveCount(0);
+    await expect(page.locator('.tree-back')).toHaveCount(0);
   } else if (await page.locator('.tree-scroll').count()) {
-    await expect(page.locator('.tree-path > .tree-selected-slot')).toHaveCount(1);
-    await expect(page.locator('.tree-scroll .tree-selected-slot, .tree-scroll .tree-selected-edge')).toHaveCount(0);
+    await expect(page.locator('.tree-selected-slot')).toHaveCount(0);
+    await expect(page.locator('.tree-scroll .tree-back')).toHaveCount(0);
   }
   await expect(page.locator('.pw-rail')).toHaveCount(0);
   await expect(page.locator('.session-activity')).toHaveCount(0);
@@ -101,7 +104,7 @@ async function changesFit(surface: Locator) {
   const layout = await surface.evaluate(element => {
     const card = element.getBoundingClientRect();
     return { overflow: element.scrollWidth - element.clientWidth,
-      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-text, .change-comparison, .since-seen')].map(child => {
+      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-line, .change-comparison, .changes-seen')].map(child => {
         const rect = child.getBoundingClientRect();
         return { text: child.textContent, left: rect.left - card.left, right: rect.right - card.right,
           overflow: child.scrollWidth - child.clientWidth };
@@ -113,6 +116,14 @@ async function changesFit(surface: Locator) {
     expect(child.right, `${child.text} ends inside its card`).toBeLessThanOrEqual(1);
     expect(child.overflow, `${child.text} wraps instead of clipping`).toBeLessThanOrEqual(1);
   }
+}
+
+/** Opens the band's What changed popover (D18) over the Map and returns it. */
+async function openChanges(page: Page) {
+  await page.getByRole('button', { name: /new|changed|\d+ changes/ }).first().click();
+  const popover = page.getByRole('dialog', { name: 'What changed', exact: true });
+  await expect(popover).toBeVisible();
+  return popover;
 }
 
 async function compactCompare(surface: Locator) {
@@ -167,11 +178,19 @@ for (const theme of ['dark', 'light'] as const) {
     const older = page.locator('.change-history-entry').first();
     await expect(older).toContainText('Rewording');
     const historyControl = await compactCompare(older);
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    await since.getByRole('button', { name: /^Since you were here ·/ }).click();
-    const sinceCard = since.locator('.since-card').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
-    const sinceControl = await compactCompare(sinceCard);
-    expect([currentControl, historyControl, sinceControl]).toEqual([answerControl, answerControl, answerControl]);
+    await openChanges(page);
+    const sinceCard = page.getByRole('dialog', { name: 'What changed', exact: true }).getByTestId('changes-row')
+      .filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    // The popover's rows use the board's "› Before → after" line instead of the compact icon (SPEC 5.3).
+    const sinceLink = sinceCard.getByRole('button', { name: 'Before → after', exact: true });
+    await expect(sinceLink).toHaveAttribute('aria-expanded', 'false');
+    const sinceComparison = page.locator(`[id="${await sinceLink.getAttribute('aria-controls')}"]`);
+    await sinceLink.click();
+    await expect(sinceComparison.locator('del').first()).toBeVisible();
+    await expect(sinceComparison.locator('mark').first()).toBeVisible();
+    await expect(sinceCard.getByRole('button', { name: 'Hide before → after', exact: true })).toBeVisible();
+    await changesFit(sinceCard);
+    expect([currentControl, historyControl]).toEqual([answerControl, answerControl]);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 
@@ -182,18 +201,22 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(answer).toContainText('Because you chose Keep retries quiet:');
     await expect(answer.locator('.change-owner-words, .change-read-as')).toHaveCount(0);
     await changesFit(answer);
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    await brief.scrollIntoViewIfNeeded();
-    await expect(brief.locator('.brief-attribution')).toContainText('By the agent · as of');
+    const brief = (await openChanges(page)).getByRole('region', { name: 'Topic brief', exact: true });
+    await brief.getByRole('button', { name: /Brief/ }).click();
+    await expect(brief).toContainText('by the agent · updated');
     await expect(brief.locator('time')).toHaveAttribute('datetime', '2026-10-07T15:02:00.000Z');
-    await expect(brief.locator('.brief-list').nth(0).locator('.change-name')).toHaveText(['Recovery policy']);
-    await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
-    const replaced = brief.locator('.brief-list').nth(2);
-    await expect(replaced.locator('del')).toHaveText('Old retry policy');
-    await expect(replaced).toContainText('replaced by Recovery policy');
-    expect(await replaced.locator('del').evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('line-through');
-    const columns = await brief.locator('.brief-list').evaluateAll(elements => elements.map(element => ({
-      label: element.querySelector('strong')!.getBoundingClientRect().x, links: element.querySelector('ul')!.getBoundingClientRect().x,
+    const groups = brief.locator('.brief-group');
+    await expect(groups.nth(0).locator('.change-name')).toHaveText(['Recovery policy']);
+    await expect(groups.nth(0).locator('.brief-line')).toHaveText(['Keep retries quiet and resume saved changes once.']);
+    await expect(groups.nth(1).locator('.change-name')).toHaveText(['Recovery question']);
+    await expect(groups.nth(1).locator('.brief-line')).toHaveText(['Should recovery wait until you reconnect?']);
+    const replaced = groups.nth(2);
+    await expect(replaced.locator('.change-name')).toHaveText(['Old retry policy', 'Recovery policy']);
+    await expect(replaced.getByRole('img', { name: 'replaced by' })).toBeVisible();
+    // The names are the board's underlined, peekable names, and each group lists them in one column under its label.
+    expect(await replaced.locator('.change-name').first().evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
+    const columns = await groups.evaluateAll(elements => elements.map(element => ({
+      label: element.querySelector('h3')!.getBoundingClientRect().x, links: element.querySelector('ul')!.getBoundingClientRect().x,
     })));
     expect(new Set(columns.map(column => column.label)).size).toBe(1);
     expect(new Set(columns.map(column => column.links)).size).toBe(1);
@@ -201,38 +224,41 @@ for (const theme of ['dark', 'light'] as const) {
     await testInfo.attach(`changes-brief-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 
-  test(`M2 Since cards acknowledge Seen before leaving (${theme})`, async ({ page, origin }) => {
+  test(`M2 a row marked Seen stays, dimmed, until the popover closes (${theme})`, async ({ page, origin }) => {
     await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    await since.getByRole('button', { name: /^Since you were here ·/ }).click();
-    const card = since.locator('.since-card').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    const popover = await openChanges(page);
+    const card = popover.getByTestId('changes-row').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
     await changesFit(card);
-    await card.getByRole('button', { name: 'Seen', exact: true }).click();
-    await expect(card.getByRole('button', { name: '✓ Seen', exact: true })).toBeVisible();
-    await expect(card.getByRole('button', { name: '✓ Seen', exact: true })).toBeDisabled();
-    await expect(card).toHaveCount(0, { timeout: 6000 });
+    await card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }).click();
+    await expect(card.getByRole('button', { name: 'Retry schedule is seen', exact: true })).toBeDisabled();
+    await expect(card.getByTestId('change-marker')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
     await expect(page.locator('[data-item-id="3.9"]')).toContainText('Recovery question');
+    const again = await openChanges(page);
+    await expect(again.getByRole('button', { name: 'Retry schedule', exact: true })).toHaveCount(0);
   });
 
-  test(`M2 long absence puts the brief first and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`M2 long absence leads with a calm summary, then the brief, and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec('changes-away'), theme });
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    await expect(since).toContainText('8 changes while you were away');
-    await expect(since.locator('.since-card')).toHaveCount(0);
-    const briefBox = await brief.boundingBox(), sinceBox = await since.boundingBox();
-    expect(briefBox).not.toBeNull(); expect(sinceBox).not.toBeNull();
-    expect(briefBox!.y + briefBox!.height).toBeLessThan(sinceBox!.y);
-    await changesFit(brief); await changesFit(since);
-    await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
-    // Caught up leaves no box: a check in the brief's header line, with Undo beside it while it is offered.
-    await expect(since).toHaveCount(0);
-    await expect(brief.getByRole('img', { name: 'All caught up' })).toBeVisible();
+    const popover = await openChanges(page);
+    const away = popover.getByRole('region', { name: 'While you were away', exact: true });
+    const brief = popover.getByRole('region', { name: 'Topic brief', exact: true });
+    await expect(away).toContainText('You were away since');
+    const awayBox = await away.boundingBox(), briefBox = await brief.boundingBox();
+    expect(awayBox).not.toBeNull(); expect(briefBox).not.toBeNull();
+    expect(awayBox!.y + awayBox!.height).toBeLessThan(briefBox!.y);
+    await changesFit(away);
+    await away.getByRole('button', { name: 'Read the brief', exact: true }).click();
     await changesFit(brief);
+    await away.getByRole('button', { name: 'Mark all caught up', exact: true }).click();
+    // Caught up: the popover says so, and Undo is beside it and in the band while it is offered.
+    await expect(popover.getByText(/All caught up\. The markers are cleared/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
     await testInfo.attach(`changes-caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    await brief.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(since).toContainText('8 changes while you were away');
-    await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
+    await popover.getByRole('button', { name: '↺ Undo', exact: true }).click();
+    await expect(away).toContainText('You were away since');
+    await expect(brief.locator('.brief-group').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
     await testInfo.attach(`changes-away-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
@@ -241,39 +267,33 @@ for (const theme of ['dark', 'light'] as const) {
 const mapSizes = [{ brief: 'map-brief-long', map: 'map-thread' }, { brief: 'map-brief-long-small', map: 'map-thread-small' }] as const;
 
 for (const { brief: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
-  test(`Topic brief names flow across the width instead of one per line: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`Topic brief groups each name with its one-line text, one row per name: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
-    await brief.scrollIntoViewIfNeeded();
-    const decided = brief.locator('.brief-list').nth(0);
-    // Every name is there, in order.
+    const brief = (await openChanges(page)).getByRole('region', { name: 'Topic brief', exact: true });
+    await brief.getByRole('button', { name: /Brief/ }).click();
+    const decided = brief.locator('.brief-group').nth(0);
+    // Every name is there, in order, each on its own row with its text.
     await expect(decided.locator('.change-name')).toHaveText(['Recovery policy', ...longDecided]);
-    const layout = await decided.evaluate(list => {
-      const names = list.querySelector('ul')!, box = names.getBoundingClientRect(), items = [...names.children].map(item => item.getBoundingClientRect());
-      return { count: items.length, lines: new Set(items.map(rect => Math.round(rect.top))).size, width: box.width,
-        reach: Math.max(...items.map(rect => rect.right)) - box.left, label: 0,
-        dot: getComputedStyle(names.firstElementChild!, '::after').content, lastDot: getComputedStyle(names.lastElementChild!, '::after').content };
-    });
-    expect(layout.lines, 'names share lines').toBeLessThanOrEqual(Math.ceil(layout.count * 0.6));
-    expect(layout.lines).toBeGreaterThan(1);
-    expect(layout.reach, 'the names use the width').toBeGreaterThan(layout.width * 0.7);
-    expect(layout.dot).toBe('"·"');
-    expect(layout.lastDot).toBe('none');
+    await expect(decided.locator('li')).toHaveCount(longDecided.length + 1);
+    const rows = await decided.locator('li').evaluateAll(items => items.map(item => ({ top: item.getBoundingClientRect().top,
+      name: item.querySelector('.change-name')!.getBoundingClientRect().left, line: item.querySelector('.brief-line')?.textContent ?? '' })));
+    expect(new Set(rows.map(row => Math.round(row.top))).size, 'one row per name').toBe(rows.length);
+    expect(new Set(rows.map(row => Math.round(row.name))).size, 'the names share a column').toBe(1);
+    for (const row of rows) expect(row.line, 'each name has its one-line text').not.toBe('');
     // The group labels stay a column on the left, and "Your turn" / "Replaced" do not wrap.
-    const labels = await brief.locator('.brief-list > strong').evaluateAll(elements => elements.map(element => {
-      const range = document.createRange(); range.selectNodeContents(element);
+    const labels = await brief.locator('.brief-group > h3').evaluateAll(elements => elements.map(element => {
+      const range = document.createRange(); range.selectNodeContents(element.lastChild!);
       return { x: element.getBoundingClientRect().x, lines: new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size };
     }));
     expect(new Set(labels.map(label => label.x)).size).toBe(1);
     for (const label of labels) expect(label.lines, 'a group label stays on one line').toBe(1);
-    // "old replaced by new" is one unit: the "replaced by" and the new name share a line.
-    const pair = await brief.locator('.brief-list').nth(2).locator('li').first().evaluate(item => {
-      const replacement = item.querySelector('.brief-replacement')!, button = replacement.querySelector('button')!;
-      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
-      return { lead: middle(replacement.firstElementChild!.getBoundingClientRect()), name: middle(button.getBoundingClientRect()), rects: replacement.getClientRects().length };
+    // "old → new" reads as one unit: the arrow and both names share a line.
+    const pair = await brief.locator('.brief-group').nth(2).locator('li').first().evaluate(item => {
+      const names = item.querySelector('.brief-names')!, middle = (rect: DOMRect) => rect.top + rect.height / 2;
+      const buttons = [...names.querySelectorAll('button')].map(button => middle(button.getBoundingClientRect()));
+      return { spread: Math.max(...buttons) - Math.min(...buttons), rects: names.getClientRects().length };
     });
-    expect(Math.abs(pair.lead - pair.name)).toBeLessThan(4);
+    expect(pair.spread).toBeLessThan(4);
     expect(pair.rects).toBe(1);
     await changesFit(brief);
     await testInfo.attach(`brief-wrap-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
@@ -302,14 +322,15 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
       const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       // The answer dock floats over the foot of the Map: a chip under it is covered by the dock, not by the rail.
       const dockTop = document.querySelector('.answer-dock')?.getBoundingClientRect().top ?? innerHeight;
-      return { opaque: chip.every((value, at) => value === over[at]), contrast: (high + 0.05) / (low + 0.05), caret: parseFloat(caret.fontSize),
+      return { opaque: chip.every((value, at) => value === over[at]), contrast: (high + 0.05) / (low + 0.05), caret: parseFloat(caret.fontSize), topic: !!button.closest('.tree-topic'),
         width: box.width, height: box.height, covers: !!centre?.closest('.tree-chevron'), hidden: box.bottom < 0 || box.bottom > dockTop };
     }));
     for (const fact of facts.filter(value => !value.hidden)) {
       expect(fact.opaque, 'the chip hides the rail behind it').toBe(true);
       expect(fact.contrast, 'the caret reads against its chip').toBeGreaterThanOrEqual(4.5);
-      expect(fact.caret).toBeGreaterThanOrEqual(14);
-      expect(fact.width).toBe(16);
+      // The topic band's chevron is the board's: an 18px chip with a 12px caret (SPEC 2.2); the rows' are 16px chips with a 14px one.
+      expect(fact.caret).toBeGreaterThanOrEqual(fact.topic ? 12 : 14);
+      expect(fact.width).toBe(fact.topic ? 18 : 16);
       expect(fact.covers, 'the chip paints over the rail').toBe(true);
     }
     // Hover keeps a visible state.
@@ -320,130 +341,97 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
   });
 }
 
-for (const { map: frame } of mapSizes) test(`The selection tag and the ancestors share the path row without overlap: ${frame}`, async ({ page, origin }) => {
+for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the Map, clear of the topic band, with no path row above the Map: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
   await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
   await settle(page);
-  const tag = page.locator('.tree-path .tree-selected-edge');
+  const tag = page.locator('.tree-scroll-shell > .tree-back');
   await expect(tag).toBeVisible();
+  // The sticky band and the thread show the path (SPEC 2.2): nothing sits between the chips and the Map.
+  await expect(page.getByRole('navigation', { name: 'Map ancestors' })).toHaveCount(0);
   const boxes = await page.evaluate(() => {
     const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
-    const crumbs = [...document.querySelectorAll('.tree-breadcrumb button')].map(button => button.getBoundingClientRect());
-    return { path: box('.tree-path'), crumbs: box('.tree-breadcrumb'), tag: box('.tree-selected-edge'), buttons: crumbs, scroller: box('.tree-scroll') };
+    return { band: box('.tree-topic'), tag: box('.tree-back'), shell: box('.tree-scroll-shell'), scroller: box('.tree-scroll') };
   });
-  expect(boxes.crumbs.right).toBeLessThanOrEqual(boxes.tag.left + 0.5);
-  expect(boxes.tag.right).toBeLessThanOrEqual(boxes.path.right + 0.5);
-  expect(boxes.path.height).toBeLessThanOrEqual(28.5);
-  expect(boxes.path.bottom).toBeLessThanOrEqual(boxes.scroller.top + 0.5);
-  for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
+  // The scroller starts at the shell's top, and the pill sits over the rows, below the band, inside the Map's width.
+  expect(boxes.scroller.top).toBeCloseTo(boxes.shell.top, 0);
+  expect(boxes.tag.top).toBeGreaterThanOrEqual(boxes.band.bottom - 0.5);
+  expect(boxes.tag.left).toBeGreaterThanOrEqual(boxes.scroller.left - 0.5);
+  expect(boxes.tag.right).toBeLessThanOrEqual(boxes.scroller.right + 0.5);
 });
 
-/** The selected path and the plain guide must each run as one line from the topic band through its cards to the items. */
-async function railRuns(page: Page) {
+/** The accent thread (the only line the Map draws) runs as one line from the topic band down to the selected item's row. */
+async function threadRuns(page: Page) {
   await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
   await settle(page);
   return page.locator('.tree-topic-group').first().evaluate(group => {
     const origin = group.getBoundingClientRect(), topic = group.querySelector('.tree-topic')!.getBoundingClientRect();
-    const lines = [...group.querySelectorAll<HTMLElement>('.tree-guide')].map(line => ({ rect: line.getBoundingClientRect(), on: line.style.width === '1.5px' }))
-      .filter(line => Math.abs(line.rect.left - origin.left - 20) < 1.5 && line.rect.height > 0);
-    const runs = (on: boolean) => {
-      const merged: number[][] = [];
-      for (const [top, bottom] of lines.filter(line => line.on === on).map(line => [line.rect.top, line.rect.bottom]).sort((a, b) => a[0] - b[0])) {
-        const last = merged.at(-1);
-        if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
-      }
-      return merged;
-    };
-    const cards = group.querySelector('.topic-changes')?.getBoundingClientRect(), first = group.querySelector('[data-item-id]')?.getBoundingClientRect();
-    return { off: runs(false), on: runs(true), topic: { top: topic.top, bottom: topic.bottom }, first: first ? { top: first.top, bottom: first.bottom } : null,
-      cardsLeft: cards ? cards.left - origin.left : null, cardsHeight: cards?.height ?? 0 };
+    const everyLine = [...group.querySelectorAll<HTMLElement>('.tree-thread, .tree-thread-elbow')].map(line => line.getBoundingClientRect()).filter(rect => rect.height > 0);
+    const lines = everyLine.filter(rect => Math.abs(rect.left + 1.5 - origin.left - 20) < 1.5);
+    // The thread leaves the band's column at the ancestor where the selected path branches off, so a deep selection is reached
+    // along deeper columns: `reach` is the lowest point of the thread on any column.
+    const reach = Math.max(...everyLine.map(rect => rect.bottom));
+    const merged: number[][] = [];
+    for (const [top, bottom] of lines.map(rect => [rect.top, rect.bottom]).sort((a, b) => a[0] - b[0])) {
+      const last = merged.at(-1);
+      if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
+    }
+    const selected = group.querySelector('[aria-selected="true"]')?.getBoundingClientRect();
+    return { runs: merged, reach, topic: { top: topic.top, bottom: topic.bottom }, selected: selected ? { top: selected.top, bottom: selected.bottom } : null };
   });
 }
-for (const { name, frame, theme, act } of [
-  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'dark', act: async () => {} },
-  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'light', act: async () => {} },
-  { name: 'brief open, no since cards at 900', frame: 'map-thread-small', theme: 'dark', act: async () => {} },
-  { name: 'brief collapsed', frame: 'map-thread', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).first().click(); } },
-  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
-  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'light', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
-  { name: 'long brief collapsed at 900', frame: 'map-brief-long-small', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).click(); } },
-] as const) test(`The thread is one unbroken line through the topic cards: ${name} (${frame}, ${theme})`, async ({ page, origin }, testInfo) => {
-  await openApp(page, origin, { ...frameSpec(frame), theme });
-  await act(page);
-  const runs = await railRuns(page);
-  expect(runs.off, 'the plain guide is one line from the band to the last item').toHaveLength(1);
-  expect(runs.on, 'the accent thread is one line from the band to the selected path').toHaveLength(1);
-  for (const run of [runs.off[0]!, runs.on[0]!]) {
-    expect(run[0], 'it starts inside the band').toBeLessThanOrEqual(runs.topic.bottom);
-    expect(run[1], 'it reaches the first item').toBeGreaterThanOrEqual(runs.first!.top);
-  }
-  expect(runs.cardsHeight).toBeGreaterThan(0);
-  expect(runs.cardsLeft!, 'the cards sit clear of the rail').toBeGreaterThanOrEqual(24);
-  await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-});
+/** The topic's changes live in the band's popover now, so no card sits between the band and the first item. */
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
+  test(`The thread is one unbroken line from the band to the selected item: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const { runs, reach, topic, selected } = await threadRuns(page);
+    expect(selected, 'a row is selected').not.toBeNull();
+    expect(runs, 'one accent line from the band').toHaveLength(1);
+    expect(runs[0]![0], 'it starts inside the band').toBeLessThanOrEqual(topic.bottom);
+    expect(runs[0]![1], 'it runs on below the band, into the branch of the selected row').toBeGreaterThan(topic.bottom + 10);
+    expect(reach, 'it reaches the selected row').toBeGreaterThanOrEqual(selected!.top);
+    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
 
 for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below its band: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
   const group = page.locator('.tree-topic-group').first();
   await group.locator('.tree-topic .tree-chevron').dispatchEvent('click');
   await expect(group.locator('.tree-topic')).toHaveAttribute('aria-expanded', 'false');
-  await expect(group.locator('.tree-topic-cards')).toHaveCount(0);
   const below = await group.evaluate(element => {
     const band = element.querySelector('.tree-topic')!.getBoundingClientRect();
-    return [...element.querySelectorAll('.tree-guide')].filter(line => line.getBoundingClientRect().height > 0 && line.getBoundingClientRect().bottom > band.bottom + 2).length;
+    return [...element.querySelectorAll('.tree-thread, .tree-thread-elbow')].filter(line => line.getBoundingClientRect().height > 0 && line.getBoundingClientRect().bottom > band.bottom + 2).length;
   });
   expect(below).toBe(0);
 });
 
-for (const frame of ['map-thread', 'map-thread-small'] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`Nothing to catch up on is a check in the brief header, not a box: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
-    await openApp(page, origin, { ...frameSpec(frame), theme });
-    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
-    await expect(page.getByRole('region', { name: 'Since you were here', exact: true })).toHaveCount(0);
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true }).first();
-    const icon = brief.getByRole('img', { name: 'All caught up' });
-    await expect(icon).toBeVisible();
-    await expect(icon).toHaveAttribute('title', 'All caught up');
-    const line = await brief.evaluate(element => {
-      const toggle = element.querySelector('button')!.getBoundingClientRect(), mark = element.querySelector('[aria-label="All caught up"]')!.getBoundingClientRect();
-      return { sameLine: Math.abs((toggle.top + toggle.height / 2) - (mark.top + mark.height / 2)) < 8, after: mark.left >= toggle.right - 0.5 };
-    });
-    expect(line).toEqual({ sameLine: true, after: true });
-    await testInfo.attach(`caught-up-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-  });
-}
-
 for (const size of [{ width: 1280, height: 800 }, { width: 900, height: 650 }] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`Caught up keeps Undo beside the check, and changes keep their box: ${size.width}x${size.height} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`The What changed popover fits the window, never holds the Map, and keeps Undo reachable: ${size.width}x${size.height} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec('changes-away'), ...size, theme });
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    // While there are changes the box is today's, unchanged.
-    await expect(since).toContainText('8 changes while you were away');
-    await expect(brief.getByRole('img', { name: 'All caught up' })).toHaveCount(0);
+    const rowTop = () => page.locator('[data-item-id]').first().evaluate(element => element.getBoundingClientRect().top);
+    const before = await rowTop();
+    const popover = await openChanges(page);
+    expect(await rowTop(), 'opening it moves nothing in the Map').toBe(before);
+    const box = (await popover.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(size.width);
+    expect(box.y).toBeGreaterThanOrEqual(0); expect(box.y + box.height).toBeLessThanOrEqual(size.height);
+    await changesFit(popover.locator('.changes-body'));
     await testInfo.attach(`has-changes-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
-    await expect(since).toHaveCount(0);
-    const check = brief.getByRole('img', { name: 'All caught up' }), undo = brief.getByRole('button', { name: 'Undo', exact: true });
-    await expect(check).toBeVisible(); await expect(undo).toBeVisible();
-    const line = await brief.evaluate(element => {
-      const toggle = element.querySelector('button')!.getBoundingClientRect(), mark = element.querySelector('[aria-label="All caught up"]')!.getBoundingClientRect();
-      const undo = [...element.querySelectorAll('button')].find(button => button.textContent === 'Undo')!.getBoundingClientRect();
-      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
-      return { oneLine: Math.abs(middle(toggle) - middle(mark)) < 8 && Math.abs(middle(toggle) - middle(undo)) < 8, ordered: toggle.right <= mark.left + 0.5 && mark.right <= undo.left + 0.5 };
-    });
-    expect(line).toEqual({ oneLine: true, ordered: true });
-    await changesFit(brief);
+    await popover.getByRole('button', { name: 'Mark all caught up', exact: true }).click();
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeVisible();
     await testInfo.attach(`caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    await undo.click();
-    await expect(since).toContainText('8 changes while you were away');
+    await popover.getByRole('button', { name: '↺ Undo', exact: true }).click();
+    await expect(popover).toContainText('You were away since');
+    expect(await rowTop(), 'catching up and undoing move nothing in the Map').toBe(before);
   });
 }
 
-/** Graph cards and stubs never overlap one another. */
+/** Graph nodes never overlap one another. */
 async function noOverlap(page: Page) {
   const overlaps = await page.locator('.graph-canvas').evaluateAll(canvases => canvases.flatMap(canvas => {
-    const boxes = [...canvas.querySelectorAll('.graph-node, .graph-stub')].map(element => ({ name: element.getAttribute('data-item-id') ?? element.getAttribute('data-stub'), rect: element.getBoundingClientRect() }));
+    const boxes = [...canvas.querySelectorAll('.graph-node')].map(element => ({ name: element.getAttribute('data-item-id'), rect: element.getBoundingClientRect() }));
     return boxes.flatMap((a, i) => boxes.slice(i + 1).filter(b => Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left) > 1
       && Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top) > 1).map(b => `${a.name} x ${b.name}`));
   }));
@@ -451,48 +439,28 @@ async function noOverlap(page: Page) {
 }
 
 for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`The Graph folds hidden items into one small stub that opens and folds: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`The Graph draws no hidden item but the selected route, with no stub and no overlap: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const stubs = page.locator('.graph-stub');
-    expect(await stubs.count()).toBeGreaterThan(0);
-    await expect(page.locator('.graph-node.is-hidden'), 'hidden items are not drawn as cards').toHaveCount(0);
-    const size = await stubs.first().evaluate(stub => {
-      const rect = stub.getBoundingClientRect(), card = document.querySelector('.graph-node')!.getBoundingClientRect();
-      return { stubWidth: rect.width, stubHeight: rect.height, cardWidth: card.width, cardHeight: card.height };
-    });
-    expect(size.stubHeight, 'much smaller than a card').toBeLessThan(size.cardHeight / 2);
-    expect(size.stubWidth).toBeLessThan(size.cardWidth * 0.75);
+    await expect(page.locator('.graph-stub')).toHaveCount(0);
+    const selected = (await page.locator('.graph-node[aria-selected="true"]').getAttribute('data-item-id'))!;
+    const route = selected.split('.').map((_part, index, parts) => parts.slice(0, index + 1).join('.'));
+    const hidden = await page.locator('.graph-node.is-hidden').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-item-id')!));
+    for (const id of hidden) expect(route, `${id} is hidden and drawn only on the selected route`).toContain(id);
     await noOverlap(page);
-    const folded = await page.locator('.graph-node').count();
-    await stubs.first().scrollIntoViewIfNeeded();
-    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'false');
-    await stubs.first().click();
-    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'true');
-    expect(await page.locator('.graph-node').count()).toBeGreaterThan(folded);
-    expect(await page.locator('.graph-node.is-hidden').count()).toBeGreaterThan(0);
-    await noOverlap(page);
-    await testInfo.attach(`graph-stub-open-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    // The stub is a button: Enter folds again.
-    await stubs.first().focus(); await page.keyboard.press('Enter');
-    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('.graph-node.is-hidden')).toHaveCount(0);
-    expect(await page.locator('.graph-node').count()).toBe(folded);
-    await testInfo.attach(`graph-stub-folded-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await testInfo.attach(`graph-hidden-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
 
 for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`The hidden-items stub shows a whole focus ring under keyboard focus: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`A node reached by keys shows its whole selection ring: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const stub = page.locator('.graph-stub').first();
-    // The Graph's own keyboard moves (up and down in layout order) reach the stub and scroll it into view themselves.
+    // The Graph's own keyboard moves (up and down in layout order) scroll the target into view themselves.
     await page.locator('.graph-node[aria-selected="true"]').focus();
-    const reached = () => stub.evaluate(element => element === document.activeElement);
-    for (const key of ['ArrowDown', 'ArrowUp'] as const) for (let step = 0; step < 40 && !(await reached()); step++) { await page.keyboard.press(key); await page.waitForTimeout(40); }
-    await expect(stub).toBeFocused();
-    expect(await stub.evaluate(element => element.matches(':focus-visible')), 'keyboard focus shows the ring').toBe(true);
+    for (let step = 0; step < 6; step++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(40); }
+    const target = page.locator('.graph-node[aria-selected="true"]');
+    await expect(target).toBeFocused();
     await settle(page);
-    const ring = await stub.evaluate(element => {
+    const ring = await target.evaluate(element => {
       const style = getComputedStyle(element), rect = element.getBoundingClientRect();
       const width = parseFloat(style.outlineWidth) || 0, offset = parseFloat(style.outlineOffset) || 0;
       const grow = style.outlineStyle === 'none' ? 0 : width + Math.max(offset, 0);
@@ -507,9 +475,9 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
       }
       return { style: style.outlineStyle, width, shadow: style.boxShadow, drawn, clips, view: { width: innerWidth, height: innerHeight } };
     });
-    await page.screenshot({ path: testInfo.outputPath(`fix1-graph-stub-focus-${frame}-${theme}.png`), animations: 'disabled' });
-    const box = (await stub.boundingBox())!;
-    await page.screenshot({ path: testInfo.outputPath(`fix1-graph-stub-focus-zoom-${frame}-${theme}.png`), animations: 'disabled',
+    await page.screenshot({ path: testInfo.outputPath(`graph-node-focus-${frame}-${theme}.png`), animations: 'disabled' });
+    const box = (await target.boundingBox())!;
+    await page.screenshot({ path: testInfo.outputPath(`graph-node-focus-zoom-${frame}-${theme}.png`), animations: 'disabled',
       clip: { x: Math.max(0, box.x - 40), y: Math.max(0, box.y - 30), width: Math.min(box.width + 80, page.viewportSize()!.width), height: box.height + 60 } });
     expect(ring.style === 'none' ? ring.shadow : ring.style, 'a focus indicator is drawn').not.toBe('none');
     for (const clip of ring.clips) {
@@ -521,47 +489,8 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
   });
 }
 
-/** Focus leaves from the sticky Unfocus copy when the focused row is not on screen: filtered out by search, or its topic folded. */
-for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) for (const state of ['search', 'folded'] as const) {
-  test(`The sticky Unfocus is whole and clear of the path row when the focused row is ${state === 'search' ? 'filtered out by search' : 'under a folded topic'}: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
-    await openApp(page, origin, { ...frameSpec(frame), theme });
-    const roots = page.locator('.tree-item-root:has(.tree-chevron)'), first = roots.first();
-    const topic = page.locator('.tree-topic-group').first().locator('.tree-topic');
-    // Something that matches another topic's item only, so the search leaves rows on screen but not the focused one.
-    const other = ((await roots.last().locator('.tree-question').textContent()) ?? '').trim().slice(0, 14);
-    await first.getByRole('button', { name: /^Focus on / }).click();
-    await expect(first.getByRole('button', { name: /^Unfocus / })).toBeVisible();
-    if (state === 'search') {
-      await page.getByRole('button', { name: 'Search the Map' }).click();
-      await page.getByRole('textbox', { name: 'Search the Map' }).fill(other);
-    }
-    else await topic.locator('.tree-chevron').dispatchEvent('click');
-    await settle(page);
-    const copy = page.getByRole('navigation', { name: 'Map ancestors' }).getByRole('button', { name: /^Unfocus / });
-    await expect(copy, 'the exit stays in the path row').toBeVisible();
-    await expect(copy).toHaveText('Unfocus');
-    const facts = await page.evaluate(() => {
-      const box = (element: Element) => element.getBoundingClientRect();
-      const copy = document.querySelector('.tree-path .tree-focus-action')!, path = document.querySelector('.tree-path')!, bar = document.querySelector('.tree-breadcrumb')!;
-      const others = [...document.querySelectorAll('.tree-breadcrumb button:not(.tree-focus-action), .tree-selected-edge')].map(element => ({ name: element.textContent, rect: box(element) }));
-      const centre = document.elementFromPoint(box(copy).left + box(copy).width / 2, box(copy).top + box(copy).height / 2);
-      return { copy: box(copy), path: box(path), bar: box(bar), others, covers: !!centre?.closest('.tree-focus-action'), width: innerWidth, height: innerHeight,
-        clipped: copy.scrollWidth > copy.clientWidth };
-    });
-    expect(facts.copy.left).toBeGreaterThanOrEqual(facts.bar.left - 0.5); expect(facts.copy.right).toBeLessThanOrEqual(facts.bar.right + 0.5);
-    expect(facts.copy.top).toBeGreaterThanOrEqual(facts.path.top - 0.5); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.path.bottom + 0.5);
-    expect(facts.copy.right).toBeLessThanOrEqual(facts.width); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.height);
-    expect(facts.clipped, 'the word is not cut off').toBe(false);
-    expect(facts.covers, 'nothing paints over it').toBe(true);
-    for (const other of facts.others) {
-      const apart = other.rect.right <= facts.copy.left + 0.5 || other.rect.left >= facts.copy.right - 0.5 || other.rect.bottom <= facts.copy.top || other.rect.top >= facts.copy.bottom;
-      expect(apart, `${other.name} does not overlap Unfocus`).toBe(true);
-    }
-    await page.screenshot({ path: testInfo.outputPath(`fix1-unfocus-${state}-${frame}-${theme}.png`), animations: 'disabled' });
-    await copy.click();
-    await expect(copy).toHaveCount(0);
-  });
-}
+/* The sticky Unfocus copy in the path row is gone (D9): Focus and Unfocus are one band button, kept in reach by
+ * tests/e2e/tree-layout/tree-layout.spec.mts (the 92px swap and the 560/480px Map at the largest text). */
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -622,9 +551,11 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
   await openApp(page, origin, { ...frameSpec('1a'), theme });
   const root = page.locator('.tree-item.tree-item-root').first(), child = page.locator('.tree-item.tree-item-child').first();
   await expect(page.locator('.tree-id')).toHaveCount(0);
-  await expect(root.locator('.tree-top-colour')).toHaveCount(1);
-  await expect(child.locator('.tree-top-colour')).toHaveCount(0);
-  const heading = root.locator('.tree-heading'), title = root.locator('.tree-question'), status = heading.locator('.tree-row-status');
+  // A top item opens one box of its own; a child sits inside its top item's box and opens a second one. No stripe.
+  await expect(root.locator('.tree-box')).toHaveCount(1);
+  await expect(child.locator('.tree-box')).toHaveCount(2);
+  // The status is the end cluster's badge slot, level with the title's first line (alpha.20 C4).
+  const title = root.locator('.tree-question'), status = root.locator('.tree-end > .tree-end-badge');
   await expect(status).toBeVisible();
   const titleBefore = await title.boundingBox(), statusBefore = await status.boundingBox();
   expect(statusBefore!.y).toBeLessThan(titleBefore!.y + titleBefore!.height);

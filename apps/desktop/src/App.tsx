@@ -1,10 +1,12 @@
 import { useImplicitCaughtUp } from './ui/changes/useCaughtUp';
-import { TopicChanges } from './ui/changes/TopicChanges';
+import { RecentPopover } from './ui/navigation/Recent';
 import { useSeenDwell } from './ui/changes/useSeenDwell';
 import { useReadingSeen } from './state/preferences/reading';
 import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
 import { itemRemoved } from './selectors/removed';
 import { hasStatusFilter } from './selectors/tree/folds';
+import { filterCount, type LocalChip } from './selectors/tree/filter';
+import { useLocalChips } from './ui/tree/useLocalChips';
 import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
@@ -41,12 +43,12 @@ import { SessionNotice } from './components/edge-states/EdgeState';
 import { DraftConflictNotices } from './components/edge-states/DraftConflictNotices';
 import { hiddenItems, hiddenParentSource, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
+import type { MapSearchStatus } from './ui/tree/mapSearch';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
 import { RemoveDialog } from './ui/dialogs/RemoveDialog';
 import { notices } from './ui/pages/notices';
-import { isViewConflict } from './ui/shared/conflictNotice';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { themeToggle } from './ui/shell/model';
@@ -54,13 +56,13 @@ import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
-import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack';
+import { ackHoldFor, ackTarget, attachAckHolds, flushAckHold, stopAckHolds } from './ui/shared/ack';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
 import { useWorkspaceKeys } from './ui/keys';
 import { itemIntents, workspaceKeys, type ItemIntentApp, type TreeRemoveTarget } from './ui/shell/workspaceKeys';
-import { dispatchIntent, useIntents } from './ui/intents';
+import { useIntents } from './ui/intents';
 import { useConversation } from './ui/detail/useConversation';
 
 const adapters: readonly AdapterChoice[] = [
@@ -83,8 +85,8 @@ interface Application {
 const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 const clearedFilters = (filters: { readonly archived: boolean }): SessionPreferences['filters'] =>
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
-const filtering = (filters: Immutable<SessionPreferences['filters']>) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
-  || filters.owners.length > 0 || filters.hide_later;
+const filtering = (filters: Immutable<SessionPreferences['filters']>, local: readonly LocalChip[]) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
+  || filters.owners.length > 0 || filters.hide_later || local.length > 0;
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
@@ -97,6 +99,8 @@ interface CenterProps {
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void;
   readonly filterOpen?: boolean;
+  readonly onCloseFilter?: () => void;
+  readonly onSearchStatus?: (status: MapSearchStatus | null) => void;
 }
 function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
@@ -109,11 +113,9 @@ function SessionCenter({ application, view, graph, reveal, ...props }: CenterPro
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
   return <TreeView {...props} navigation={application.navigation} store={view.store} actions={actions} drafts={application.drafts}
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
-    topicContent={session ? topicId => <TopicChanges session={session} topicId={topicId} navigation={application.navigation}
-      onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
-    graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
-      tight={props.detailOpen} reveal={reveal} onReveal={props.onSelected} /> : null} />;
+    graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store}
+      reveal={reveal} onReveal={props.onSelected} onClearFilters={props.onClearFilters} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -197,22 +199,23 @@ function Workspace({ application }: { application: Application }) {
   const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
   const answerJumpSequence = useRef(0);
   const consumeAnswerJump = useCallback((token: number) => setAnswerJump(previous => previous?.token === token ? null : previous), []);
-  const ackRequest = useRef(0);
   const ackNoticeId = useRef<string | null>(null);
   const ackActions = store ? application.actions.forSession(store) : null;
   const ackState = useSyncExternalStore(ackActions?.subscribe ?? noSubscription, ackActions?.getSnapshot ?? noSession, ackActions?.getSnapshot ?? noSession);
   useEffect(() => {
-    ++ackRequest.current;
     if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
-    return () => {
-      ++ackRequest.current;
-      if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
-    };
+    return () => { if (ackNoticeId.current) notices.dismiss(ackNoticeId.current); };
   }, [key, selectedId]);
+  // Leaving a session saves its held Acks now (D11). A Tree to Graph switch stays in the session and flushes nothing.
+  const shownSessionId = route?.session_id ?? null, previousSessionId = useRef(shownSessionId);
+  useEffect(() => {
+    const before = previousSessionId.current;
+    previousSessionId.current = shownSessionId;
+    if (before && before !== shownSessionId) void flushAckHold(before);
+  }, [shownSessionId]);
   useEffect(() => {
     const receipt = ackState?.receipt;
     if (receipt && 'data' in receipt && receipt.data.kind === 'item_ack') {
-      ++ackRequest.current;
       const route = ackActions?.session.getSnapshot().route;
       if (route) notices.dismiss(JSON.stringify(['item-ack', route.project_id, route.session_id, receipt.data.item_id]));
     }
@@ -254,7 +257,7 @@ function Workspace({ application }: { application: Application }) {
     for (const [target, request] of quickRequests.current) if (request === token) quickRequests.current.delete(target);
     setOwnerFocus(current => current?.token === token ? null : current);
   };
-  const reveal = async (target: ItemRoute, token: number, fromHistory = false, onReveal?: (result: RevealedItem) => void, requireItem = fromHistory): Promise<{ request: number; result: RevealedItem } | null> => {
+  const reveal = async (target: ItemRoute, token: number, fromHistory = false, onReveal?: (result: RevealedItem) => void, requireItem = fromHistory, openDetail = true): Promise<{ request: number; result: RevealedItem } | null> => {
     let result: RevealedItem | null = null;
     let failure: unknown = null;
     // Reserve the destination at the click, before registered item resolution
@@ -271,13 +274,17 @@ function Workspace({ application }: { application: Application }) {
         return resolved;
       }, error => { failure = error; });
     const request = navigation.getNavigationRequest();
+    // Closed Details stays closed through this navigation: its epoch is the one the owner dismissed Details at.
+    if (!openDetail && !detailOpen) detailDismissedAt.current = request;
     const opened = navigation.getNavigationCompletion(request);
     const saved = await opened;
     if (navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
     if (!saved) { if (failure) throw failure; return null; }
     if (!result) return null;
     recordViewed(result);
-    detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); setDetailAsked(count => count + 1);
+    setLocalReveal(result);
+    // "Go to" in the peek selects and scrolls to the row; only the opening paths open Details.
+    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };
   };
@@ -289,14 +296,14 @@ function Workspace({ application }: { application: Application }) {
     invalidateOwnerRequest(); setLocalReveal(result);
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
   };
-  const revealLinkedItem = (target: ItemRoute) => {
+  const revealLinkedItem = (target: ItemRoute, openDetail = true) => {
     if (conversation) closeConversation();
     setRouteError(null);
     invalidateOwnerRequest();
-    return reveal(target, shortcutSequence.current);
+    return reveal(target, shortcutSequence.current, false, undefined, false, openDetail);
   };
-  const revealItem = (target: ItemRoute) => {
-    void revealLinkedItem(target).catch((error: unknown) => reportRouteError(navigationFailure(error)));
+  const revealItem = (target: ItemRoute, openDetail = true) => {
+    void revealLinkedItem(target, openDetail).catch((error: unknown) => reportRouteError(navigationFailure(error)));
   };
   const navigateHistory = (direction: HistoryDirection) => {
     if (conversation || !route || state.writing || state.pendingOperationId !== null) return false;
@@ -426,6 +433,11 @@ function Workspace({ application }: { application: Application }) {
   // A view saved by an older release may still show archived topics in the Tree; Tree or Graph leaves that.
   const archived = view?.filters.archived ?? false;
   const [filterOpen, setFilterOpen] = useState(false);
+  const localChips = useLocalChips(view?.session.session_id ?? '');
+  // The Recent popover under the top bar's clock button; ⌘E and the button both toggle it (D19).
+  const [recentOpen, setRecentOpen] = useState(false);
+  // The Map publishes its search count, arrows and note here for the top bar.
+  const [searchStatus, setSearchStatus] = useState<MapSearchStatus | null>(null);
 
   // Remove (handoff README "Remove"): ask, then hide at once and run after the undo window (ui/remove/queue).
   const [asking, setAsking] = useState<{ target: RemoveTarget; subject: RemoveSubject } | null>(null);
@@ -475,7 +487,13 @@ function Workspace({ application }: { application: Application }) {
   const clearFilters = () => {
     if (!view) return;
     setSearchEdit(null); setDismissedReveal(currentReveal);
+    localChips.set([]);
     saveView({ filters: clearedFilters(view.filters) });
+  };
+  // An explicit clear (the top bar's ×, esc, MapSearch.clear) saves at once, so a session switch never brings it back.
+  const clearSearch = () => {
+    setSearchEdit({ route: key, text: '', attempted: false });
+    if (view?.filters.search) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
   };
   const toggleLater = (target: ItemRoute, itemId: string) => {
     if (!preferences) return false;
@@ -508,22 +526,10 @@ function Workspace({ application }: { application: Application }) {
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
       if (repeat) return true;
-      const id = JSON.stringify(['item-ack', target.project_id, target.session_id, target.item_id]);
-      ackNoticeId.current = id;
-      const blocked = ackBlocked(actions);
-      if (blocked) {
-        notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: blocked });
-        return true;
-      }
-      const attempted = ++ackRequest.current;
-      notices.dismiss(id);
-      void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
-        if (saved) navigationVisits.record(target, item.id, 'acked');
-        const error = actions.getSnapshot().error;
-        if (attempted === ackRequest.current && !saved && error && !isViewConflict(error)) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
-      }).catch(error => {
-        if (attempted === ackRequest.current) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
-      });
+      ackNoticeId.current = JSON.stringify(['item-ack', target.project_id, target.session_id, target.item_id]);
+      // The Map's rows and Details draw their own "Acked · Undo" and say so to the hold; where none does (the Graph, a folded
+      // topic, a peek) the hold's notice is the Undo.
+      ackHoldFor(target.session_id, actions).ack(item);
       return true;
     },
     focused: () => {
@@ -541,16 +547,19 @@ function Workspace({ application }: { application: Application }) {
     askRemove,
     toggleLater, toggleHidden,
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })),
-    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
+    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters, localChips.chips) && !query ? undefined : clearFilters,
   };
   useIntents(itemIntents(intentApp));
+  useIntents({ 'recent.open': () => { if (!store || viewOf(state).kind !== 'session') return false; setRecentOpen(value => !value); return true; } });
+  // Recent belongs to the session on screen: leaving it, or a page, closes it.
+  const viewKind = viewOf(state).kind;
+  useEffect(() => { setRecentOpen(false); }, [key, viewKind]);
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys(intentApp), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
-  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
+  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} navigation={navigation} onGoTo={target => revealItem(target, false)} onOpenDetails={target => revealItem(target)} onAgentNotRunning={onAgentNotRunning}
     answerTarget={conversationOpen && conversation && route ? { ...route, item_id: conversation.itemId } : undefined}
-    onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
     <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys} onKeyDownCapture={event => {
       if (!conversationOpen) return;
@@ -580,12 +589,17 @@ function Workspace({ application }: { application: Application }) {
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget} waitingStore={application.waiting}
-      chrome={{ query, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
-        filter: store ? { active: filterOpen, count: view && hasStatusFilter(view.filters.statuses) ? view.filters.statuses.length : 0, onToggle: () => setFilterOpen(value => !value) } : undefined,
-        onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,
+      chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
+        filter: store ? { active: filterOpen, count: view ? filterCount({ view, local: localChips.chips }) : localChips.chips.length, onToggle: () => setFilterOpen(value => !value) } : undefined,
+        onRecent: store ? () => setRecentOpen(value => !value) : undefined, recentOpen,
+        recentPanel: recentOpen && store && route && sessionState?.snapshot?.session
+          ? <RecentPopover session={sessionState.snapshot.session} entries={view?.recent_items}
+            onReveal={itemId => revealItem({ ...route, item_id: itemId })}
+            onClose={restoreFocus => { setRecentOpen(false); if (restoreFocus) document.querySelector<HTMLElement>('[data-popover-trigger="recent"]')?.focus(); }} /> : undefined,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
-        // A new search is a filter change: it drops the temporary reveal (the selection stays as its own row).
-        onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
+        // A search highlights in place (SPEC §6.9): typing keeps every row, including a temporary reveal's.
+        onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); } : undefined,
+        onClearSearch: view ? clearSearch : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
@@ -615,7 +629,7 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       onCloseDetail={closeDetail}
-      renderSession={opened => <SessionCenter filterOpen={filterOpen} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+      renderSession={opened => <SessionCenter filterOpen={filterOpen} onCloseFilter={() => setFilterOpen(false)} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && !!selectedId}
@@ -628,10 +642,8 @@ function Workspace({ application }: { application: Application }) {
           else if (intent === 'later') toggleLater(target, target.item_id);
           else focusOwner(target, intent, undefined, onReveal);
         }}
-        onClearSearch={() => {
-          setSearchEdit({ route: key, text: '', attempted: false }); setDismissedReveal(currentReveal);
-          if (view) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
-        }}
+        onSearchStatus={setSearchStatus}
+        onClearSearch={clearSearch}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} />} />
     {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
@@ -670,11 +682,12 @@ export function DesktopApp({ service }: { service: RendererService }) {
     const next: Application = { service, navigation, waiting, removals,
       drafts: new OwnerDraftStore(service, undefined, navigation.preferenceWrites), actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
-    const detachAckAll = attachAckAll(service);
+    const detachAckAll = attachAckAll(service), detachAckHolds = attachAckHolds(service);
     const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);
     // Leaving the app runs the removals still in their window rather than dropping them.
-    return () => { detachLinkFailures(); detach(); detachAckAll(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); void stopAckAll(service).finally(() => next.navigation.stop()); };
+    return () => { detachLinkFailures(); detach(); detachAckAll(); detachAckHolds(); void removals.flush(); next.discovery.dispose(); next.waiting.stop();
+      void Promise.all([stopAckAll(service), stopAckHolds(service)]).finally(() => next.navigation.stop()); };
   }, [service]);
   // Links in agent text open in the system browser; a failure leaves the app where it is and says so.
   const openLink = useMemo(() => linkOpener(service), [service]);

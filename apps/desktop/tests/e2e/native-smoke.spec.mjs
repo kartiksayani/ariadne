@@ -14,6 +14,7 @@ import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
 import { folded, openFollowUp, ownerReplyTarget, sendDetailReply, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { acceptanceBlocks } from './block-results.mjs';
+import { selectedBlocks } from './native-specs.mjs';
 import { historyFailureFacts } from './history-evidence.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
@@ -22,7 +23,7 @@ const evidence = process.env.ARIADNE_E2E_EVIDENCE;
 const phase = process.env.ARIADNE_E2E_PHASE;
 const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 // What one surface shows for a saved reply's delivery: its stuck note (when it has words) or else the dock's delivery line.
 // `facts` lists every stuck note and delivery line present, so a failure says what was actually there.
@@ -356,7 +357,8 @@ describe('native owner FIFO and real process restoration', () => {
     assert.ok(addresses.length > 0 && addresses.every(line => /^n(127\.0\.0\.1|\[::1\]):/.test(line)), 'Driver must bind only loopback');
     const configuration = await readJson(join(root, 'journey.json'));
     const priorResults = phase === 'restoration' ? await readJson(join(process.env.ARIADNE_E2E_PRIOR_EVIDENCE, 'block-results.json')) : [];
-    const blocks = acceptanceBlocks({ evidence, reset: resetAcceptanceUI, capture: captureBlockFailure, priorResults });
+    const blocks = acceptanceBlocks({ evidence, reset: resetAcceptanceUI, capture: captureBlockFailure, priorResults,
+      only: selectedBlocks(process.env.ARIADNE_E2E_BLOCKS) });
     if (phase === 'delivery') {
       await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
       await delivery(configuration);

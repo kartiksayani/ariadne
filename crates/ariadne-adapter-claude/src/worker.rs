@@ -30,7 +30,8 @@ impl Worker {
         &self,
         operation: impl FnOnce(&mut State, Instant) -> Result<T, AdapterError> + Send + 'static,
     ) -> AdapterFuture<'static, T> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline =
+            Instant::now() + ariadne_agent_protocol::deadline_scale::scaled(Duration::from_secs(5));
         self.call_before(deadline, operation)
     }
     pub(crate) fn call_before<T: Send + 'static>(

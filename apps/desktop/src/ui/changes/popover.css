@@ -1,0 +1,404 @@
+/* The band's opener (SPEC 5.5): "◆ 5 new ◇ 5 changed since 20:40 ›". The band owns where it sits. */
+.changes-opener {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.changes-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.changes-summary:hover,
+.changes-opener[data-open] .changes-summary {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.changes-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.changes-since {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.changes-diamond {
+  flex: none;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+
+.changes-diamond[data-kind="new"] {
+  background: var(--attention);
+}
+
+.changes-diamond[data-kind="changed"] {
+  border: 1.5px solid var(--attention);
+}
+
+.changes-undo {
+  margin-right: 0;
+}
+
+/* The popover: portalled to .product-app and placed by ChangesOpener from the opener's rect. */
+.changes-popover {
+  position: fixed;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--a-side);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.55;
+}
+
+.changes-popover:focus-visible {
+  outline: none;
+}
+
+.changes-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 4px 14px;
+}
+
+.changes-head > i {
+  font-size: calc(14px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.changes-head h2 {
+  margin: 0;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+  line-height: inherit;
+  letter-spacing: normal; /* The shared heading rule's -0.015em is not the board's. */
+}
+
+.changes-head > .change-muted {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-head .changes-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.changes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 8px 14px 18px;
+  overflow: auto;
+}
+
+.changes-section {
+  min-width: 0;
+}
+
+.changes-label-caps {
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-brief-head,
+.changes-since-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.changes-brief-head {
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font: inherit;
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: .07em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* SPEC 5.2: the head is one small-caps line: the word, then the agent's note in plain type, all at the label's size. */
+.changes-brief-head > i {
+  font-size: 11px;
+}
+
+.changes-brief-head .changes-label-caps {
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.changes-brief-head .change-muted {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: inherit;
+}
+
+/* The agent's paragraph: three lines, then "Show more" when the text is longer. */
+.brief-lead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.brief-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  line-height: 1.45;
+}
+
+.brief-text[data-open] {
+  display: block;
+  overflow: visible;
+}
+
+.brief-more {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--a-acc-text);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  cursor: pointer;
+}
+
+.brief-more:hover {
+  text-decoration: underline;
+}
+
+.changes-brief-counts {
+  margin: 2px 0 0 calc(12px * var(--text-scale) + 8px);
+}
+
+.changes-brief-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* SPEC 5.2: a group is its label (with the status icon), then one row per name: the name, then its one-line text. */
+.brief-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.brief-group ul {
+  padding: 0 0 0 calc(12px * var(--text-scale) + 6px);
+  margin: 0;
+  list-style: none;
+}
+
+.brief-group li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  padding: 1px 0;
+}
+
+.brief-names {
+  flex: none;
+  max-width: 100%;
+}
+
+.brief-line {
+  flex: 1 1 14ch;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-catch-up {
+  margin-left: auto;
+  padding: 2px 9px;
+  border: 1px solid var(--a-edge-strong);
+  border-radius: 6px;
+  background: var(--a-card);
+  font-size: inherit;
+}
+
+.changes-rows {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 6px 0 0;
+  list-style: none;
+}
+
+.changes-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.changes-row[data-seen] > *:not(.changes-seen, .change-compare) {
+  opacity: .5;
+}
+
+.changes-row .change-name {
+  padding: 0;
+  font-weight: 500;
+}
+
+/* Names in this popover read as the board's peekable names: text colour, underlined. */
+.changes-popover .change-name {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.changes-popover .change-name:hover {
+  text-decoration-color: currentcolor;
+}
+
+.changes-what {
+  flex: 1;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-what[data-tone="new"] {
+  color: var(--a-acc-text);
+}
+
+.changes-time {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-seen {
+  padding: 1px 8px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font-size: inherit;
+}
+
+.changes-row .change-compare {
+  display: contents;
+}
+
+.changes-row .change-comparison {
+  flex-basis: 100%;
+}
+
+/* "› Before → after" sits on its own line under the row, in line with the pill; its card opens below it. */
+.changes-row .change-compare-link {
+  display: block;
+  flex-basis: 100%;
+  min-width: 0;
+  padding-left: calc(15px * var(--text-scale) + 8px);
+}
+
+.changes-row .change-compare-link .change-comparison {
+  box-sizing: border-box;
+  margin: 4px 0 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--a-card);
+}
+
+.changes-away p {
+  margin: 0 0 6px;
+}
+
+.changes-away-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.changes-away-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 2px 0;
+}
+
+.changes-away-names {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.changes-away-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.changes-caught-up {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-footnote {
+  margin: 0;
+  font-size: calc(11.5px * var(--text-scale));
+}

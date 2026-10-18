@@ -1,12 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { immutable, SessionStore } from '../../../src/data/session-store';
 import { createDesktopService } from '../../../src/data/service';
 import { SessionActions } from '../../../src/components/bindings/actions';
-import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest, SessionSeen } from '../../../src/generated/core';
+import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import { AckAll } from '../../../src/ui/navigation/AckAll';
 import { ackAllFor, ackAllItems, attachAckAll, stopAckAll, ACK_ALL_HOLD_MS } from '../../../src/ui/navigation/ackAllController';
-import { RecentDialog, RecentTrail, recentEntries, recordRecent } from '../../../src/ui/navigation/Recent';
+import { RecentPopover, recentEntries, recordRecent } from '../../../src/ui/navigation/Recent';
 import { navigationVisits } from '../../../src/ui/navigation/visits';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { notices } from '../../../src/ui/pages/notices';
@@ -62,31 +62,28 @@ it('deduplicates Recent by item, retains newest action and limits distinct visit
   expect(recordRecent([...entries, entries[0]!], '99', 'peeked')[0]!.action).toBe('peeked');
 });
 
-it('Recent filters use the shared meaningful-change selectors and links reveal the item', async () => {
+it('Recent lists what changed lately with its label and what was viewed, and a click reveals the item and closes', async () => {
   const { session } = await ready(), item = session.items['1']!;
-  const baseline = '2026-10-01T00:00:00.000Z';
-  const seen: SessionSeen = { session: route, since: baseline, items: [{ item_id: item.id, revision: item.revision }], topics: [] };
-  item.created_at = baseline;
-  item.changes = [{ revision: item.revision + 1, at: '2026-10-13T00:00:00.000Z', wording_only: true,
-    cause_message_id: crypto.randomUUID(), before: { question: 'Earlier result' } }];
-  const entries = recordRecent([], '1', 'viewed');
-  expect(recentEntries(session, entries, true, seen)).toHaveLength(0);
-  item.changes[0]!.wording_only = false;
-  expect(recentEntries(session, entries, true, seen)).toHaveLength(1);
+  item.changes = [{ revision: item.revision + 1, at: '2026-10-13T00:00:00.000Z', cause_message_id: crypto.randomUUID(), before: { status: 'open' } }];
+  item.status = 'decided';
+  const entries = recordRecent(recordRecent([], '1.1', 'peeked', '2026-10-13T00:10:00.000Z'), '1', 'viewed', '2026-10-13T00:20:00.000Z');
+  expect(recentEntries(session, entries).map(visit => visit.item.id)).toEqual(['1', '1.1']);
   const reveal = vi.fn(), close = vi.fn();
-  render(<RecentDialog session={session} entries={entries} seen={seen} onReveal={reveal} onClose={close} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Changed only' }));
-  fireEvent.click(screen.getByRole('button', { name: /Result 1 · viewed/ }));
-  expect(reveal).toHaveBeenCalledWith('1'); expect(close).toHaveBeenCalledOnce();
+  render(<RecentPopover session={session} entries={entries} onReveal={reveal} onClose={close} />);
+  const lately = screen.getByRole('region', { name: 'Changed lately' }), viewed = screen.getByRole('region', { name: 'Viewed' });
+  expect(within(lately).getByRole('button', { name: /Result 1.*Open → Decided/ })).toBeTruthy();
+  expect(within(viewed).getAllByRole('button').map(button => button.textContent)).toEqual([expect.stringMatching(/Result 1.*viewed/), expect.stringMatching(/Result 1\.1.*peeked/)]);
+  fireEvent.click(within(viewed).getByRole('button', { name: /Result 1\.1.*peeked/ }));
+  expect(reveal).toHaveBeenCalledWith('1.1'); expect(close).toHaveBeenCalledOnce();
 });
 
-it('Recent trail shows three names/actions and Next reveals the supplied waiting item', async () => {
+it('Recent says so when nothing has been viewed, and closes on Escape', async () => {
   const { session } = await ready();
-  let entries = recordRecent([], '1', 'viewed');
-  for (const id of ['1.1', '2', '3']) entries = recordRecent(entries, id, 'peeked');
-  const reveal = vi.fn(); render(<RecentTrail session={session} entries={entries} nextWaiting={session.items['2']!} onReveal={reveal} />);
-  expect(screen.getByRole('navigation', { name: 'Your recent trail' }).querySelectorAll('.recent-trail-items button')).toHaveLength(3);
-  fireEvent.click(screen.getByRole('button', { name: /^Next:/ })); expect(reveal).toHaveBeenCalledWith('2');
+  const close = vi.fn();
+  render(<RecentPopover session={session} entries={[]} onReveal={vi.fn()} onClose={close} />);
+  expect(screen.getByText('Open or peek at an item to start your recent trail.')).toBeTruthy();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(close).toHaveBeenCalledWith(true);
 });
 
 it('Ack all includes only eligible findings/explanations from the selected live topic', async () => {
@@ -267,19 +264,91 @@ it('the refcounted visit writer saves other-session visits and preserves unrelat
   releaseB(); navigation.stop();
 });
 
-it('failed Recent writes retain visits behind a visible exact-save retry', async () => {
+it('a failed Recent write is retried once, quietly, with the exact operation before any notice', async () => {
   const { transport, service } = await ready();
   const navigation = new NavigationStore(service);
   await navigation.refresh();
   const release = navigationVisits.bind(navigation);
   transport.failNext = 'preferences_patch';
   navigationVisits.record(route, '1.1', 'answered');
-  await vi.waitFor(() => expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeTruthy());
+  await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  const patches = transport.mutations.filter(request => request.command.command === 'preferences_patch');
+  expect(patches).toHaveLength(2);
+  expect(patches[1]!.command.op_id).toBe(patches[0]!.command.op_id);
+  expect(navigation.getSnapshot().pendingOperationId).toBeNull();
+  release(); navigation.stop();
+});
+
+it('a Recent write that fails twice shows one notice, and its retry saves', async () => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let failures = 2;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'preferences_patch' && failures > 0) { failures--; transport.mutations.push(structuredClone(args.request) as OwnerMutationRequest); throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  navigationVisits.record(route, '1.1', 'answered');
+  await vi.waitFor(() => expect(notices.getSnapshot().filter(notice => notice.id === 'recent-save')).toHaveLength(1));
   expect(navigation.getSnapshot().pendingOperationId).not.toBeNull();
   notices.getSnapshot().find(notice => notice.id === 'recent-save')!.actions![0]!.run();
   await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
   expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
   release(); navigation.stop();
+});
+
+it('another writer holding the store is not reported as a failed Recent save', async () => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let lose = true;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    const request = args.request as OwnerMutationRequest;
+    const entries = 'command' in request && request.command.command === 'preferences_patch' ? request.command.params.entries : [];
+    if (lose && entries.some(entry => entry.kind === 'set_global')) { lose = false; throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  await navigation.saveTheme('dark', navigation.getSnapshot().preferences!.revision);
+  expect(navigation.getSnapshot().pendingOperationId).not.toBeNull();
+  navigationVisits.record(route, '1.1', 'answered');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  release(); navigation.stop();
+});
+
+it('a miss behind another writer resets the count, so a later own miss is still retried quietly', async () => {
+  const other = { ...route, session_id: '00000000-0000-4000-8000-0000000000aa' };
+  const state = { writing: false, pendingOperationId: null as string | null, error: null as { code: string } | null, preferences: { revision: 1, sessions: [] as unknown[] } };
+  const listeners = new Set<() => void>();
+  const outcomes: ('own miss' | 'behind another writer' | 'saved')[] = ['own miss', 'behind another writer', 'own miss', 'saved'];
+  const calls: string[] = [];
+  const stub = {
+    getSnapshot: () => state,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    isRecentPending: () => false,
+    retryMutation: async () => false,
+    // Visits other tests left queued share the module's queue; this writer saves them so only `other` is scripted.
+    saveRecentItems: async (session: { session_id: string }) => {
+      if (session.session_id !== other.session_id) return true;
+      const outcome = outcomes.shift()!;
+      calls.push(outcome);
+      state.writing = outcome === 'behind another writer';
+      state.error = outcome === 'own miss' ? { code: 'invalid_response' } : null;
+      return outcome === 'saved';
+    },
+  };
+  const release = navigationVisits.bind(stub as unknown as NavigationStore);
+  navigationVisits.record(other, '1', 'viewed');
+  await vi.waitFor(() => expect(calls).toEqual(['own miss', 'behind another writer']));
+  state.writing = false; listeners.forEach(listener => { listener(); });
+  await vi.waitFor(() => expect(calls).toEqual(['own miss', 'behind another writer', 'own miss', 'saved']));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  release();
 });
 
 it('Waiting visits persist a never-opened session without opening its tab or changing navigation', async () => {
