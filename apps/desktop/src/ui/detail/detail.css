@@ -83,6 +83,12 @@
   flex-shrink: 0;
 }
 
+/* A question waiting on the owner picks the composer out: a waiting-coloured top edge and a soft glow (SPEC 5.3). */
+.detail-dock-waiting {
+  border-top: 1.5px solid var(--st-waiting);
+  box-shadow: 0 -10px 24px color-mix(in srgb, var(--st-waiting) 8%, transparent);
+}
+
 .detail-head {
   flex: none;
   position: sticky;

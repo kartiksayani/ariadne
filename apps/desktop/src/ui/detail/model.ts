@@ -254,6 +254,7 @@ function chatLabel(session: Immutable<Session>, item: Immutable<Item>, message: 
       || Object.values(session.inputs).some(input => input?.message_id === message.id && input.kind === 'answer');
     return answered ? 'You' : 'You replied';
   }
+  if (message.author === 'system') return 'System';
   if (message.id === item.created_message_id) return item.type === 'finding' ? 'Agent found this' : 'Agent raised this';
   return item.updated_message_ids.includes(message.id) ? 'Agent updated' : 'Agent explained';
 }
@@ -515,7 +516,7 @@ export function topicChat(session: Immutable<Session>, topicId: string, now: num
     const result = input && !cancelled && !answeredInChat ? input.attempts.flatMap(attempt => attempt.domain_result ? [attempt.domain_result] : [])
       .filter(value => value.handled_through_message_number >= message.number && (!nextOwner || value.handled_through_message_number < nextOwner.number)).at(-1)?.explanation ?? '' : '';
     return { id: message.id, message: excerptView(message, now),
-      label: message.author === 'owner' ? 'You replied' : 'Agent',
+      label: message.author === 'owner' ? 'You replied' : message.author === 'system' ? 'System' : 'Agent',
       status: input ? bubbleStatus(input, stuck) : null, asks: [],
       you: message.author === 'owner' ? input ? sentView(input) : { how: 'said' as const, text: message.body, note: '' } : null,
       pending: input && ACTIVE_INPUT.has(input.state) ? { input, ...sentView(input), caption: caption(input), stuck } : null,

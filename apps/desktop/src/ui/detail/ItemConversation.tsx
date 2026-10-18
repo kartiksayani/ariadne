@@ -592,7 +592,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       </div>} />}
     </div>
 
-    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
+    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}${answerState.live ? ' detail-dock-waiting' : ''}`}>
     {expanded && model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
     {!(expanded && showAnswer) && (ackTo || model.open) && <div className="detail-quick-actions">
