@@ -4,17 +4,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
-import type { ContinuePreview, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
+import type { OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import type { ItemStatus } from '../../../src/generated/domain/models';
 import { ackTarget, flushAckHold } from '../../../src/ui/shared/ack';
 import { currentQuestionReplied, ownerReplied } from '../../../src/selectors/waiting/replied';
-import { continueGroups } from '../../../src/ui/pages/model';
 import { AppTransport, route, secondId } from '../app/transport';
 import { goToSession } from '../app/open';
 import { notices } from '../../../src/ui/pages/notices';
+import { toasts } from '../../../src/ui/shell/toast';
+import { clearToast, heldToast } from './ackFixture';
 
 // A held Ack outlives its view by design, so a test drains it before the next one starts: no timer or notice leaks across tests.
-afterEach(async () => { await act(async () => { await flushAckHold(route.session_id); }); cleanup(); notices.clear(); vi.restoreAllMocks(); });
+afterEach(async () => { await act(async () => { await flushAckHold(route.session_id); }); cleanup(); notices.clear(); clearToast(); vi.restoreAllMocks(); });
 /** An Ack waits 6 s for its Undo (pinned in hold.test.tsx). These tests are about what an Ack does, so the window is over here:
  * whatever is held saves now, as it does when the owner leaves the session. */
 const holdOver = () => act(async () => { await flushAckHold(route.session_id); });
@@ -607,7 +608,7 @@ describe('the Ack hold in the app (D11)', () => {
     expect(transport.sessions.get(route.session_id)!.items['1.1']!.status).toBe('done');
   });
 
-  const heldNotice = () => notices.getSnapshot().find(entry => entry.text.startsWith('Acked'));
+  const heldNotice = () => heldToast();
   const closeDetails = async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
     await waitFor(() => expect(screen.queryByLabelText(/^Detail of /)).toBeNull());
@@ -628,7 +629,7 @@ describe('the Ack hold in the app (D11)', () => {
     fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
     await waitFor(() => expect(heldNotice()).toBeDefined());
     expect(acks(transport)).toHaveLength(0);
-    act(() => { heldNotice()!.actions![0]!.run(); });
+    act(() => { toasts.runUndo(heldNotice()!.id); });
     await holdOver();
     expect(acks(transport)).toHaveLength(0);
     expect(heldNotice()).toBeUndefined();
@@ -654,50 +655,18 @@ describe('the Ack hold in the app (D11)', () => {
     await waitFor(() => expect(screen.queryByLabelText(/^Detail of /)).toBeNull());
     await act(async () => { row().focus(); fireEvent.keyDown(row(), { key: 'a' }); });
     const notice = await waitFor(() => {
-      const found = notices.getSnapshot().find(entry => entry.text.startsWith('Acked'));
+      const found = heldToast();
       expect(found).toBeTruthy(); return found!;
     });
-    expect(notice.actions?.map(action => action.label)).toEqual(['Undo']);
-    act(() => { notice.actions![0]!.run(); });
+    expect(typeof notice.undo).toBe('function');
+    act(() => { toasts.runUndo(notice.id); });
     await holdOver();
     expect(acks(transport)).toHaveLength(0);
-    expect(notices.getSnapshot().some(entry => entry.text.startsWith('Acked'))).toBe(false);
+    expect(heldToast()).toBeUndefined();
   });
 });
 
 describe('Ack eligibility follows the current question episode', () => {
-  it('previews preserved finished statuses and internal replacements without requesting Ack', () => {
-    const transport = new AckTransport(), source = transport.sessions.get(route.session_id)!, ids = ['1', '5', '6', '7', '1.1'];
-    for (const [id, status] of [['1', 'decided'], ['5', 'done'], ['6', 'dropped'], ['7', 'replaced']] as const) {
-      source.items[id]!.status = status; source.items[id]!.outcome = `Recorded ${status} outcome.`;
-    }
-    source.items['7']!.replaced_by = '1';
-    const before = JSON.stringify(source);
-    const preview: ContinuePreview = { source: route, target: { ...route, session_id: 'other-session' }, source_topic_id: source.items['1']!.topic_id,
-      source_revision: source.revision, source_sha256: 'a'.repeat(64), summary: 'Continue the notes.', readiness: { kind: 'blocked', reasons: ['target_closed'] },
-      mapping: ids.map(id => ({ source_item_id: id, action: { kind: 'copy' } })) };
-    const groups = continueGroups(source, preview);
-    expect(groups.map(group => group.title)).toEqual(['Open or in progress · 1', 'Decided or done · 2', 'Dropped or replaced · 2']);
-    expect(groups[0].lines).toEqual([{ id: '1.1', text: source.items['1.1']!.question }]);
-    expect(groups[1].lines).toEqual([{ id: '1', text: 'Recorded decided outcome.' }, { id: '5', text: 'Recorded done outcome.' }]);
-    expect(groups[2].lines).toEqual([{ id: '6', text: 'Recorded dropped outcome.' }, { id: '7', text: 'Recorded replaced outcome.' }]);
-    expect(groups.some(group => group.title.includes('Ack') || group.lines.some(line => line.text.startsWith('Mark ')))).toBe(false);
-    expect(JSON.stringify(source)).toBe(before);
-    expect(source.items['7']!.replaced_by).toBe('1');
-  });
-
-  it('previews an external ImportedDrop with its imported outcome and preserves source history', () => {
-    const transport = new AckTransport(), source = transport.sessions.get(route.session_id)!, item = source.items['7']!;
-    item.status = 'replaced'; item.replaced_by = '8'; item.outcome = 'The original replacement outcome.';
-    const before = JSON.stringify(source), outcome = 'Imported replacement outside the continued topic: 8';
-    const preview: ContinuePreview = { source: route, target: { ...route, session_id: 'other-session' }, source_topic_id: item.topic_id,
-      source_revision: source.revision, source_sha256: 'a'.repeat(64), summary: 'Continue the notes.', readiness: { kind: 'blocked', reasons: ['target_closed'] },
-      mapping: [{ source_item_id: item.id, action: { kind: 'imported_drop', external_replacement_id: '8', outcome,
-        why: 'The original source replacement remains provenance; it is not a live target edge.' } }] };
-    expect(continueGroups(source, preview)).toEqual([{ title: 'Dropped or replaced · 1', icon: 'ph ph-x-circle', color: 'var(--st-dropped)',
-      lines: [{ id: item.id, text: outcome }] }]);
-    expect(JSON.stringify(source)).toBe(before);
-  });
   it.each(['open', 'in_progress', 'waiting_on_me', 'done', 'decided', 'dropped', 'replaced'] as ItemStatus[])('offers Ack only for eligible %s', status => {
     const transport = new AckTransport(), session = transport.sessions.get(route.session_id)!, item = session.items['1.1']!;
     item.status = status;

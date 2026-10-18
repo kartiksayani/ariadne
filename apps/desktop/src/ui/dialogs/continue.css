@@ -1,0 +1,64 @@
+/* Continue (SPEC 10.7, 10.8): the session picker and the editable summary, on the redesign's dialog card. */
+.dg-continue-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dg-continue-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  cursor: pointer;
+}
+
+.dg-continue-option:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
+.dg-continue-option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.dg-continue-option-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(13.5px * var(--text-scale));
+  font-weight: 500;
+}
+
+.dg-continue-option-desc {
+  padding-left: 22px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.dg-continue {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.dg-textarea {
+  height: auto;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.dg-continue-status,
+.dg-continue-sent {
+  font-size: calc(12.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.dg-continue-sent { color: var(--st-done); }

@@ -4,9 +4,10 @@ import { ACK_HOLD_MS, ackHoldFor, attachAckHolds, flushAckHold, stopAckHolds, us
 import { ACK_ALL_HOLD_MS, ackAllFor, ackAllItems } from '../../../src/ui/navigation/ackAllController';
 import { notices } from '../../../src/ui/pages/notices';
 import { route } from '../app/transport';
-import { acked, acks, change, itemOf, noticeTexts, ready, stores, type Ready } from './ackFixture';
+import { toasts } from '../../../src/ui/shell/toast';
+import { acked, acks, change, clearToast, heldToast, itemOf, noticeTexts, ready, stores, type Ready } from './ackFixture';
 
-afterEach(() => { cleanup(); stores.forEach(store => store.close()); stores.length = 0; notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); stores.forEach(store => store.close()); stores.length = 0; notices.clear(); clearToast(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('the single-Ack hold', () => {
   it('holds an Ack for 6 s without writing, then saves it once', async () => {
@@ -192,6 +193,32 @@ describe('the single-Ack hold', () => {
     expect(acks(r.transport)).toHaveLength(1);
   });
 
+  it('offers Try again after a definite failure; the retry holds again and then says "Saved your Ack"', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.transport.refuse = true;
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS + 1);
+    await vi.advanceTimersByTimeAsync(0);
+    const failure = notices.getSnapshot().find(notice => notice.text.includes('can’t be acknowledged now'))!;
+    expect(failure.actions?.map(action => action.label)).toEqual(['Try again']);
+    r.transport.refuse = false;
+    failure.actions![0]!.run();
+    expect(acks(r.transport)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS + 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acks(r.transport)).toHaveLength(2);
+    expect(toasts.current()?.text).toBe('Saved your Ack on “Result 1”.');
+    expect(toasts.current()?.undo).toBeUndefined();
+  });
+
+  it('a plain Ack that saves says nothing in a toast', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS + 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.current()).toBeNull();
+  });
+
   it('refuses at click time while another change is being saved, writing nothing and holding nothing', async () => {
     const r = await ready(); vi.useFakeTimers();
     vi.spyOn(r.actions, 'getSnapshot').mockReturnValue({ ...r.actions.getSnapshot(), writing: true });
@@ -298,19 +325,31 @@ describe('Ack all and single holds', () => {
 });
 
 describe('a held Ack with no row or Details to show it (the Graph, a peek)', () => {
-  const held = () => notices.getSnapshot().find(notice => notice.text.startsWith('Acked'));
-  const shown = async () => { await vi.advanceTimersByTimeAsync(400); return held(); };
+  const held = () => heldToast();
+  const shown = async () => { await vi.advanceTimersByTimeAsync(0); return held(); };
 
   it('announces itself with an Undo, and the Undo writes nothing', async () => {
     const r = await ready(); vi.useFakeTimers();
     r.hold.ack(itemOf(r));
     const notice = await shown();
     expect(notice?.text).toBe('Acked “Result 1”');
-    expect(notice?.actions?.map(action => action.label)).toEqual(['Undo']);
-    notice!.actions![0]!.run();
+    expect(typeof notice?.undo).toBe('function');
+    toasts.runUndo(notice!.id);
     expect(held()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 2);
     expect(acks(r.transport)).toHaveLength(0);
+  });
+
+  it('loses its Undo when the save starts, while the text may stay; hovering cannot bring it back', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    const toast = (await shown())!;
+    toasts.pause(toast.id);
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS);
+    expect(toasts.current()).toMatchObject({ id: toast.id, expired: true });
+    toasts.runUndo(toast.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acked(r.transport)).toEqual(['1']);
   });
 
   it('is gone when the save starts, and the Ack is written once', async () => {
@@ -349,7 +388,7 @@ describe('a held Ack with no row or Details to show it (the Graph, a peek)', () 
     expect(held()).toBeUndefined();
     release();
     expect(held()?.text).toBe('Acked “Result 1”');
-    held()!.actions![0]!.run();
+    toasts.runUndo(held()!.id);
     expect(held()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 2);
     expect(acks(r.transport)).toHaveLength(0);

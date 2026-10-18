@@ -604,14 +604,16 @@ describe('explicit Continue preview and request identity', () => {
     await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
     return { transport, store, targetActions, topic, sent };
   }
-  const send = () => screen.getByRole('button', { name: /^Send to / }) as HTMLButtonElement;
-  it('shows the grouped summary and queued readiness before Send, then sends the reviewed revisions', async () => {
+  const send = () => screen.getByRole('button', { name: /^Send summary/ }) as HTMLButtonElement;
+  const summaryBox = () => screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Summary' });
+  it('shows the editable summary and queued readiness before Send, then sends the reviewed revisions once and says so', async () => {
     const { transport, topic, sent } = await previewSetup();
     expect(screen.getByText(/isn’t running, so the summary waits until it runs again/)).toBeDefined();
-    const summary = screen.getByLabelText('Summary');
-    expect(summary.getAttribute('data-summary')).toBe('Approved full snapshot. Keep copied source provenance.');
-    expect(summary.querySelector('.pw-continue-line code')).toBeNull();
-    expect(within(summary).getByText(/^Waiting on you · \d+$/)).toBeDefined();
+    expect(screen.getByRole('dialog', { name: new RegExp(`^Continue “${topic.name}” in “.+”$`) })).toBeDefined();
+    expect(screen.getByText(/The topic stays here too, marked “Continued in .+”\./)).toBeDefined();
+    expect(summaryBox().rows).toBe(7);
+    expect(summaryBox().value).toBe('Approved full snapshot. Keep copied source provenance.');
+    expect(summaryBox().getAttribute('data-summary')).toBe('Approved full snapshot. Keep copied source provenance.');
     expect(transport.mutations).toHaveLength(0);
     expect(transport.queries.filter(query => query.request.command === 'topic_continue_preview')).toMatchObject([{ session: null }]);
     const source = structuredClone(transport.source);
@@ -622,7 +624,64 @@ describe('explicit Continue preview and request identity', () => {
       summary: 'Approved full snapshot. Keep copied source provenance.',
     } } });
     expect(transport.source).toEqual(source);
-    expect(screen.queryByRole('dialog')).toBeNull(); expect(sent).toEqual([targetRoute]);
+    // After the send only Done is left, with the time it was sent.
+    expect(screen.getByRole('status').textContent).toMatch(/^✓ Sent once at \d\d:\d\d\. .+ in “.+” (is picking|will pick) the topic up/);
+    expect(sent).toEqual([targetRoute]);
+    expect(screen.queryByRole('button', { name: /^Send summary/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '← Back' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it('sends exactly the words in the box, and Send is off while the box is empty', async () => {
+    const { transport } = await previewSetup();
+    fireEvent.change(summaryBox(), { target: { value: '   ' } });
+    expect(send().disabled).toBe(true);
+    fireEvent.change(summaryBox(), { target: { value: '  My own summary.\nSecond line. ' } });
+    expect(send().disabled).toBe(false);
+    await act(async () => { fireEvent.click(send()); });
+    expect(transport.mutations[0]).toMatchObject({ command: { command: 'topic_continue', params: { summary: '  My own summary.\nSecond line. ' } } });
+  });
+  it('Esc and Cancel keep the edited summary for that topic and target; reopening shows it; a send clears it', async () => {
+    const { topic, transport } = await previewSetup();
+    fireEvent.change(summaryBox(), { target: { value: 'Edited before Esc.' } });
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    expect(summaryBox().value).toBe('Edited before Esc.');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    expect(summaryBox().value).toBe('Edited before Esc.');
+    await act(async () => { fireEvent.click(send()); });
+    expect(transport.mutations[0]).toMatchObject({ command: { params: { summary: 'Edited before Esc.' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    expect(summaryBox().value).toBe('Approved full snapshot. Keep copied source provenance.');
+  });
+  it('the scrim never cancels, and Back returns to the picker with the edit kept', async () => {
+    const { topic } = await previewSetup();
+    fireEvent.change(summaryBox(), { target: { value: 'Kept through Back.' } });
+    fireEvent.click(document.querySelector('.dg-scrim')!);
+    expect(screen.getByRole('dialog')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: '← Back' }));
+    expect(screen.getByRole('dialog', { name: `Continue “${topic.name}” in another session` })).toBeDefined();
+  });
+  it('Sending… locks Back, Cancel and Send, and Esc does not close', async () => {
+    const { transport } = await previewSetup();
+    let release!: (value: MutationEnvelope) => void;
+    transport.replies.push(new Promise<MutationEnvelope>(resolve => { release = resolve; }));
+    await act(async () => { fireEvent.click(send()); });
+    expect(screen.getByRole('button', { name: /^Sending…/ }).hasAttribute('disabled')).toBe(true);
+    expect((screen.getByRole('button', { name: '← Back' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(summaryBox().readOnly).toBe(true);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toBeDefined();
+    await act(async () => { release(failure('invalid_transition')); });
+    expect(screen.getByText(/Nothing was sent\./)).toBeDefined();
   });
   it('blocks a changed preview, prepares again deliberately and freezes an uncertain Send across source change', async () => {
     const { transport, store, targetActions } = await previewSetup(); ++transport.source.revision;
@@ -631,18 +690,41 @@ describe('explicit Continue preview and request identity', () => {
     expect(screen.getByText('The topic or this session changed. Prepare the summary again before sending.')).toBeDefined();
     fireEvent.click(screen.getByRole('button', { name: 'Prepare again' }));
     await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.change(summaryBox(), { target: { value: 'Words to keep exactly.' } });
     transport.replies.push(new Error('Lost acknowledgement'));
     await act(async () => { fireEvent.click(send()); });
     const request = structuredClone(transport.mutations[0]); ++transport.source.revision;
     await act(async () => { await store.refresh(); });
     expect(screen.queryByRole('button', { name: 'Prepare again' })).toBeNull();
+    // The uncertain Send froze the words and the target: no Back, no Send, no edits; Esc keeps the operation.
+    expect(summaryBox().value).toBe('Words to keep exactly.'); expect(summaryBox().readOnly).toBe(true);
+    expect((screen.getByRole('button', { name: '← Back' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /^Send summary/ })).toBeNull();
     expect(targetActions.getSnapshot().pending).toEqual(request);
     const alert = screen.getByText(/isn’t sure the summary was sent/);
-    expect(alert.getAttribute('data-operation-id')).toBe(request.command.op_id);
+    expect(alert.closest('[data-operation-id]')?.getAttribute('data-operation-id')).toBe(request.command.op_id);
     transport.replies.push(failure('preview_stale'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(transport.mutations).toEqual([request, request]); expect(targetActions.getSnapshot().pending).toBeNull();
     expect(screen.getByRole('button', { name: 'Prepare again' })).toBeDefined();
+  });
+  it('Esc keeps an uncertain Send; reopening the topic goes back to it on the same target, with Check again and no picker', async () => {
+    const { transport, topic, targetActions } = await previewSetup();
+    fireEvent.change(summaryBox(), { target: { value: 'Exact words of the uncertain send.' } });
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { fireEvent.click(send()); });
+    const request = structuredClone(transport.mutations[0]);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(targetActions.getSnapshot().pending).toEqual(request);
+    // Opening it again without a target, as the band does, must not offer another session.
+    act(() => { openContinueTopic({ source: route, topicId: topic.id }); });
+    expect(screen.queryByRole('dialog', { name: /in another session$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeDefined();
+    expect(summaryBox().value).toBe('Exact words of the uncertain send.');
+    transport.replies.push(failure('preview_stale'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
+    expect(transport.mutations).toEqual([request, request]);
   });
   it('disables Send for an unknown target binding', async () => {
     const { transport } = await previewSetup(true);

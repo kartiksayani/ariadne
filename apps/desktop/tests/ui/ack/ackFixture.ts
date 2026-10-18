@@ -5,6 +5,7 @@ import { SessionActions } from '../../../src/components/bindings/actions';
 import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import { ackHoldFor } from '../../../src/ui/shared/ack';
 import { notices } from '../../../src/ui/pages/notices';
+import { toasts } from '../../../src/ui/shell/toast';
 import { AppTransport, route } from '../app/transport';
 
 export const stores: SessionStore[] = [];
@@ -51,6 +52,9 @@ export const acks = (transport: AppTransport) => transport.mutations.filter(valu
 export const acked = (transport: AppTransport) => acks(transport).map(value => value.command.command === 'ack' && value.command.params.item_id);
 export const itemOf = (r: Ready, id = '1') => r.store.getSnapshot().snapshot!.session.items[id]!;
 export const noticeTexts = () => notices.getSnapshot().map(notice => notice.text);
+/** The toast that carries a held Ack's Undo (E19); an expired toast has lost its Undo, so it is not "held". */
+export const heldToast = (prefix = 'Acked') => { const toast = toasts.current(); return toast && toast.text.startsWith(prefix) && !toast.expired ? toast : undefined; };
+export const clearToast = () => { const toast = toasts.current(); if (toast) toasts.dismiss(toast.id); };
 /** Changes the server's item, then lets the session store read it. */
 export async function change(r: Ready, edit: (item: NonNullable<Ready['session']['items'][string]>) => void, id = '1') {
   const item = r.session.items[id]!;

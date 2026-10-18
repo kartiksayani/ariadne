@@ -14,6 +14,7 @@ import type { RevealedItem } from '../../../src/data/routes';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
+import { ContinueTopicHost } from '../../../src/ui/dialogs/ContinueTopicDialog';
 import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tree/TreeView';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
@@ -1574,7 +1575,10 @@ describe('session tree lifecycle', () => {
   });
   it('offers Continue elsewhere on an earlier topic and asks which other session takes it', async () => {
     const { navigation, rerender } = await mount();
-    rerender({ summaries: navigation.getSnapshot().sessions!.sessions.items });
+    const summaries = navigation.getSnapshot().sessions!.sessions.items;
+    rerender({ summaries });
+    // Continue is one flow in the app's host, not in the Map (SPEC 10.7, 10.8).
+    render(<ContinueTopicHost navigation={navigation} actions={new SessionActionControllers(navigation.service)} summaries={summaries} />);
     expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue elsewhere' })).toBeNull();
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' }));

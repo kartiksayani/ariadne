@@ -5,7 +5,6 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
@@ -52,7 +51,7 @@ import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
-import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
+import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { useFilterFolds } from '../shared/filterFolds';
@@ -186,7 +185,6 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
-  const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
@@ -533,8 +531,6 @@ export function TreeView(props: TreeViewProps) {
 
   // ⇧F and c act on the current view's selected item: the bigger view's item while it covers the tree.
   const actingItem = () => { const id = covered ? props.actingId ?? null : selectedId; return id ? session?.items[id] : undefined; };
-  // The bigger view makes the Map inert; the dialogs its keys open (Recent, Continue) show above it instead.
-  const lift = (node: ReactNode) => covered ? createPortal(node, scroller.current?.closest('.product-app') ?? document.body) : node;
   const toggleSelectedFocus = () => {
     if (focusDisabled) return false;
     if (focusedId) { focusBranch(null); return true; }
@@ -549,7 +545,7 @@ export function TreeView(props: TreeViewProps) {
     // As the topic band offers it: not for a topic continued from elsewhere, nor while a topic reply is on its way.
     if (session?.topics[item.topic_id]?.origin) return false;
     if (latest.current.rows.some(row => row.kind === 'topic' && row.topic.id === item.topic_id && row.delivery)) return false;
-    setContinuing(item.topic_id); return true;
+    openContinueTopic({ source: route, topicId: item.topic_id }); return true;
   };
   useIntents({
     'focus.toggle': toggleSelectedFocus,
@@ -1213,7 +1209,7 @@ export function TreeView(props: TreeViewProps) {
       next: <NextUnseen position={at >= 0 ? at + 1 : null} total={unseen.length} onNext={() => nextCallbacks.current()} />,
       focus: <FocusButton focusedName={focusedName} canFocus={!!actingItem()} busy={focusDisabled} onToggle={() => { toggleSelectedFocus(); }} />,
       continue: row.topic.origin ? undefined
-        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => setContinuing(id)} />,
+        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => openContinueTopic({ source: route, topicId: id })} />,
       menu: <TopicMenu topicName={row.topic.name} dismissKey={row.key}
         reply={{ run: () => setReplying(id), unavailable: replyBlocked }}
         bin={{ count: binItems, open: () => binView.reveal(route, id) }}
@@ -1353,8 +1349,5 @@ export function TreeView(props: TreeViewProps) {
     </div>}
     {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
     {lifecycle.dialog}
-    {continuing && lift(<ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
-      onCancel={() => setContinuing(null)}
-      onPick={target => { setContinuing(null); openContinueTopic({ source: route, topicId: continuing, target }); }} />)}
   </section></MapSearchContext.Provider>;
 }
