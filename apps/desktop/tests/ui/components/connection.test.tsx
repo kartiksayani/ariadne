@@ -7,7 +7,7 @@ import type { ConnectionCardActions, ConnectionKind, ConnectionView } from '../.
 afterEach(cleanup);
 
 const everything = (): Required<ConnectionCardActions> => ({
-  onSending: vi.fn(), onHowToConnect: vi.fn(), onTryAgain: vi.fn(), onShowFile: vi.fn(), onShowFolder: vi.fn(), onClose: vi.fn(), onReopen: vi.fn(),
+  onSending: vi.fn(), onHowToConnect: vi.fn(), onTryAgain: vi.fn(), onTryAgainUnsaved: vi.fn(), onShowFile: vi.fn(), onShowFolder: vi.fn(), onClose: vi.fn(), onReopen: vi.fn(),
   onCopyId: vi.fn(() => Promise.resolve(true)), onCopyCommand: vi.fn(() => Promise.resolve(true)), onCopyInstruction: vi.fn(() => Promise.resolve(true)),
 });
 const kinds: ConnectionKind[] = ['live', 'loading', 'none', 'off', 'closed', 'reconnect', 'unreadable', 'stale', 'unsaved'];
@@ -39,14 +39,14 @@ describe('connection card wording', () => {
     expect(connectionCopy(view('off', { lastSeenAt: '20:58' })).lines[0]).toBe('Last seen at 20:58 in Claude Code in iTerm window 1. What you send waits and goes out once when it runs again.');
     expect(connectionCopy(view('reconnect', { droppedAt: '21:30' })).lines[0]).toBe('The connection to Claude Code in iTerm window 1 dropped at 21:30. Ariadne tries again every few seconds.');
     expect(connectionCopy(view('stale', { lastGoodAt: '21:24' })).lines[0]).toBe('Ariadne last read this session at 21:24. Newer changes couldn’t be read; it keeps trying.');
-    expect(connectionCopy(view('unsaved', { unsavedAt: '21:31' })).lines[1]).toContain('at 21:31');
+    expect(connectionCopy(view('unsaved', { unsavedAt: '21:31' })).lines[1]).toContain('noticed at 21:31');
     expect(connectionCopy(view('closed', { closedAt: '21:33' })).lines[0]).toBe('You closed this session today at 21:33. It’s read-only.');
   });
 
   it('the line above the Map exists for each state that changes what I can do, and for no other', () => {
     expect(kinds.filter(kind => connectionLine(view(kind)) === null)).toEqual(['live', 'loading']);
     expect(connectionLine(view('unreadable', { unreadableLine: 1204 }))!.text).toContain('line 1,204');
-    expect(connectionLine(view('unsaved', { unsavedChange: 'Later on “separate hit metrics”', unsavedAt: '21:31' }))!.text).toContain('Later on “separate hit metrics”, at 21:31.');
+    expect(connectionLine(view('unsaved', { unsavedAt: '21:31' }))).toMatchObject({ title: 'Ariadne isn’t sure your last change was saved.', text: 'It checks again when you press Try again.' });
     expect(connectionLine(view('stale', { lastGoodAt: '21:24' }))!.title).toBe('Showing the last good copy, from 21:24.');
   });
 });

@@ -95,9 +95,12 @@ class TreeLayoutTransport extends AppTransport {
   }
   /** Set by a spec: every Ack is refused, so an Ack all batch stops in its failed state ("0 saved · N to finish"). */
   failAck = false;
+  /** Set while a read of the session fails, as a locked or damaged session file does: the Map keeps its last good copy. */
+  failReads = false;
   /** The owner's Ack lands: the proposal is accepted, so the item takes its target status and leaves "to ack". */
   async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
+    if (this.failReads && !('command' in request) && request.request.command === 'session_get') throw new Error('The session file could not be read.');
     if ('command' in request && request.command.command === 'ack') {
       if (this.failAck) throw new Error('The Ack could not be saved.');
       const session = this.sessions.get(request.session!.session_id)!, item = session.items[request.command.params.item_id]!;
@@ -118,6 +121,14 @@ class TreeLayoutTransport extends AppTransport {
     // The agent renames an item above the reading row to a much longer name: it wraps to more lines.
     if (change === 'grow-above') { items['9']!.question = 'Another item 9, renamed to a much longer name that wraps over several lines in the Map. '.repeat(3); ++items['9']!.revision; }
     if (change === 'session-ends') { session.state = 'closed'; session.closed_at = session.updated_at; }
+    // The connection lines above the Map (SPEC 12.3, 12.6, 12.8): the agent stops and returns, the connection drops, a read fails
+    // (the Map keeps its last good copy) and comes back.
+    const binding = session.bindings[session.active_binding_id!]!;
+    if (change === 'agent-stops') { binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; }
+    if (change === 'connection-drops') binding.connection_state = 'reconnecting';
+    if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; }
+    if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
+    if (change === 'read-returns') this.failReads = false;
     // The dependency of the last Blocked item is done: it leaves the Blocked filter by itself.
     if (change === 'settle') { items['2']!.status = 'done'; ++items['2']!.revision; }
     // An Ack landing from elsewhere (the Graph has no Ack button): the item takes its target status and is no longer to ack.

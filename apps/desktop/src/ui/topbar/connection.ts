@@ -57,7 +57,7 @@ export function connectionCopy(view: ConnectionView): CardCopy {
     case 'reconnect': return { title: 'Reconnecting…', lines: [`The connection to ${where} ${view.droppedAt ? `dropped at ${view.droppedAt}` : 'dropped'}. Ariadne tries again every few seconds.`, 'What you send waits here and goes out once, when it’s back.'] };
     case 'unreadable': return { title: 'Can’t read this session', lines: ['The session file ends partway through a line, so Ariadne can’t build the Map. Nothing in the file was changed.'] };
     case 'stale': return { title: 'Showing the last good copy', lines: [`${view.lastGoodAt ? `Ariadne last read this session at ${view.lastGoodAt}. ` : ''}Newer changes couldn’t be read; it keeps trying.`] };
-    case 'unsaved': return { title: 'Your last change may not be saved', lines: [`Connected to ${where}.`, `Ariadne couldn’t write to its data folder${view.unsavedAt ? ` at ${view.unsavedAt}` : ''}. The change is kept in memory and saved as soon as it can write again.`] };
+    case 'unsaved': return { title: 'Your last change may not be saved', lines: [`Connected to ${where}.`, `Ariadne isn’t sure your last change was saved${view.unsavedAt ? ` (noticed at ${view.unsavedAt})` : ''}. It checks again when you press Try again.`] };
   }
 }
 
@@ -72,10 +72,10 @@ export function connectionLine(view: ConnectionView): LineCopy | null {
     case 'closed': if (view.archived) return { icon: 'ph ph-lock-simple', color: text(62), title: 'This session is archived.',
       text: 'It’s read-only. Restore it, then reopen it to answer; the questions that were waiting are still here.' };
       return { icon: 'ph ph-lock-simple', color: text(62), title: 'This session is closed.', text: 'It’s read-only. Reopen it to answer; the questions that were waiting are still here.' };
-    case 'reconnect': return { icon: 'ph ph-circle-notch', color: 'var(--a-warn)', title: `Reconnecting to ${agent}…`, text: `${view.droppedAt ? `The connection dropped at ${view.droppedAt}. ` : ''}What you send waits here and goes out once, when it’s back.` };
+    case 'reconnect': return { icon: 'ph ph-circle-notch', color: 'var(--a-warn)', title: `Reconnecting to ${agent}…`, text: `${view.droppedAt ? `The connection dropped at ${view.droppedAt}.` : 'The connection dropped.'} What you send waits here and goes out once, when it’s back.` };
     case 'unreadable': return { icon: 'ph ph-warning-circle', color: 'var(--a-danger)', title: 'This session can’t be read.', text: `Its file ends partway through ${view.unreadableLine ? `line ${view.unreadableLine.toLocaleString('en-US')}` : 'a line'}, so there’s no Map to show. Nothing in the file was changed, and Ariadne tries again when it changes.` };
     case 'stale': return { icon: 'ph ph-clock-counter-clockwise', color: 'var(--a-warn)', title: `Showing the last good copy${view.lastGoodAt ? `, from ${view.lastGoodAt}` : ''}.`, text: 'Newer changes in the session couldn’t be read. You can read the Map; answers wait until it can be read again.' };
-    case 'unsaved': return { icon: 'ph ph-warning', color: 'var(--a-warn)', title: 'Your last change may not be saved.', text: `${view.unsavedChange ? `${view.unsavedChange}${view.unsavedAt ? `, at ${view.unsavedAt}` : ''}. ` : ''}Ariadne couldn’t write to its data folder; it keeps the change and tries again. Don’t quit Ariadne until this clears.` };
+    case 'unsaved': return { icon: 'ph ph-warning', color: 'var(--a-warn)', title: 'Ariadne isn’t sure your last change was saved.', text: 'It checks again when you press Try again.' };
     case 'live': case 'loading': return null;
   }
 }

@@ -65,10 +65,10 @@ export interface ConnectionView {
   readonly closedAt?: string;
   /** Closed because it is archived: its button restores it ("Restore session") instead of reopening it. */
   readonly archived?: boolean;
-  /** "21:31", when Ariadne couldn't write to its data folder */
+  /** "21:31", when Ariadne first noticed it wasn't sure the last change was saved */
   readonly unsavedAt?: string;
-  /** What the unsaved change was: "Later on “separate hit metrics”". */
-  readonly unsavedChange?: string;
+  /** Set when the last change may not be saved while another state is on show (the top bar's dot says only one thing): the line adds the report under that state's line. */
+  readonly unsavedToo?: boolean;
   /** The line the session file ends partway through. */
   readonly unreadableLine?: number;
   /** "Claude Code" */
@@ -81,7 +81,10 @@ export interface ConnectionCardActions {
   /** Opens the dispatch dialog (Live, Not running). */
   readonly onSending?: () => void;
   readonly onHowToConnect?: () => void;
+  /** Try again / Try now: checks the pending save, re-reads the session, or reconnects, whichever the state is about. */
   readonly onTryAgain?: () => void;
+  /** The same for the unsaved-change report when it sits under another state's line (`unsavedToo`). */
+  readonly onTryAgainUnsaved?: () => void;
   readonly onShowFile?: () => void;
   readonly onShowFolder?: () => void;
   /** Close the session (read-only until reopened). */

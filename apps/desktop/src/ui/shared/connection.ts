@@ -6,8 +6,10 @@
 // every 30 s; 90 s without one is stale) means Ariadne lost the host while the
 // binding is still connected: the handoff's "Reconnecting" state, in which
 // sending waits and the owner's choice is kept.
-import type { Immutable } from '../../data/session-store';
+import { createContext } from 'react';
+import type { Immutable, SessionState } from '../../data/session-store';
 import type { ConnectionState, PresenceObservation } from '../../generated/domain/models';
+import type { ConnectionKind } from '../topbar/model';
 
 export type Connection = 'connected' | 'reconnecting' | 'not_running' | 'none';
 
@@ -30,3 +32,33 @@ export const agentRunning = (connection: Connection): boolean => connection === 
 
 /** The answer box's note while reconnecting (Ariadne.dc.html:1405). */
 export const reconnectingNote = (agent: string): string => `Reconnecting to ${agent}. Your choice is kept; sending resumes when the connection is back.`;
+
+/**
+ * Where the session stands for the owner (SPEC 5.12): the top bar's dot, the card, the line above the Map and the dock's
+ * chip read this one answer. A stale read counts only when a refresh failed (it keeps `error`); a change hint also parks
+ * the status at `stale` until the next read lands, and that is no state worth a line.
+ */
+export function connectionKind(state: Pick<SessionState, 'snapshot' | 'status' | 'error' | 'presence'>): ConnectionKind {
+  const session = state.snapshot?.session;
+  if (!session) return state.status === 'loading' ? 'loading' : 'unreadable';
+  if (session.archived_at != null || session.state === 'closed') return 'closed';
+  if (state.status === 'stale' && !!state.error) return 'stale';
+  if (state.status === 'inaccessible') return 'unreadable';
+  const binding = session.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
+  const connection = connectionOf(binding, binding ? state.presence[binding.id] : null);
+  return connection === 'connected' ? 'live' : connection === 'reconnecting' ? 'reconnect' : connection === 'not_running' ? 'off' : 'none';
+}
+
+const readTimes = new WeakMap<object, number>();
+/** When this read of the session was first seen: "the last good copy, from 21:24" names it while later reads fail. */
+export function readAt(snapshot: object): number {
+  let at = readTimes.get(snapshot);
+  if (at === undefined) { at = Date.now(); readTimes.set(snapshot, at); }
+  return at;
+}
+
+/**
+ * True where the line above the Map carries the "isn’t sure your last change was saved" report, so the Map’s own banners
+ * for it stay out (SPEC 12.9). Absent a line (a view mounted alone, a page), the banner stays.
+ */
+export const UnsavedLine = createContext(false);

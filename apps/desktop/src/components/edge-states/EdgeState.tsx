@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { CoreFailure, plainFailure, ServiceFailure, type SessionState } from '../../data';
+import { plainFailure, type SessionState } from '../../data';
 import { SessionActions, useSessionActions } from '../bindings/actions';
 import { agentName } from '../../ui/shell/model';
 import { unconfirmedText } from '../bindings/unconfirmed';
@@ -44,12 +44,10 @@ export function ActionFailure({ actions }: { actions: SessionActions }) {
     </>}
     onRetry={state.pending && !state.writing ? () => { void actions.retry(); } : undefined} retryLabel="Check again" />;
 }
+/**
+ * The in-flow notice of a session that isn't ready. A stale or unreadable session is now told by the line above the Map and
+ * the Map's own panel (SPEC 12.7, 12.8), once, in one place: only the first read still shows its own notice.
+ */
 export function SessionNotice({ state, refresh }: { state: SessionState; refresh: () => void }) {
-  const error = state.error;
-  const malformed = error instanceof ServiceFailure && error.reason === 'invalid_response'
-    || error instanceof CoreFailure && ['corrupt_session', 'future_schema'].includes(error.error.code);
-  const kind: EdgeKind | null = malformed ? 'malformed' : state.status === 'loading' ? 'loading'
-    : state.status === 'inaccessible' || state.status === 'closed' ? 'unavailable' : state.status === 'stale' ? 'stale' : null;
-  return kind && <EdgeState kind={kind} onRetry={refresh}
-    detail={error instanceof CoreFailure ? <p>{plainFailure(error)}</p> : undefined} />;
+  return state.status === 'loading' ? <EdgeState kind="loading" onRetry={refresh} /> : null;
 }
