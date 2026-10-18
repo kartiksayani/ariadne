@@ -243,6 +243,7 @@
 /* Segments before the last keep at least 6ch and shrink first; the last shrinks last. */
 .shell-detail-head .detail-path {
   flex-wrap: nowrap;
+  font-size: calc(12px * var(--text-scale));
   overflow: hidden;
 }
 
@@ -275,21 +276,20 @@
   box-shadow: inset 3px 0 var(--color-divider);
 }
 
-/* The bigger view's head: the same row, with "← Map" first and a rule under it. */
+/* The bigger view's head: the same row, with "← Map" first (the board draws no rule under it). */
 .shell-detail-head.conversation-header {
   align-items: flex-start;
   justify-content: flex-start;
   gap: 2px;
   padding: 8px 6px 0 12px;
-  border-bottom: 1px solid var(--color-divider);
 }
 
 .shell-detail-map.btn {
   flex: none;
   height: 26px;
-  margin-right: 8px;
-  padding: 0 9px 0 7px;
-  font-size: calc(12.5px * var(--text-scale));
+  margin-right: 6px;
+  padding: 0 8px 0 7px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .detail-head-key {

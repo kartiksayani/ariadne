@@ -333,9 +333,9 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '2.10': [...topBarMain(BAR), ...dockOpen(600, 450, [0.002, 0.002])],
   '3.1': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...detailsEdge([0.002, 0.002])],
   '3.6': [...topBarMain(BAR), ...dockOpen(572, 351, [0.002, 0.002]), ...detailsRail(572, 351)],
-  // The bigger view's head: "← Map" and the right-hand controls. The path between is the app's own text (the fixture's names), and the body
-  // (badge row, title, chat) is W3's and W4's pieces, so only the head, the top bar and the dock line are held.
-  '3.2': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...box('details head, left', [0, 40, 90, 40], [0, 40, 90, 40]), ...box('details head, right', [1080, 40, 200, 40], [700, 40, 200, 40])],
+  // The bigger view's head: the right-hand controls (Back and Forward draw greyed here, the board's enabled: under 1%). Masked: "← Map" (the app's button differs from the board's 26px ring button by about 12% of
+  // its pixels, a visual nit for alpha.22) and the path between (the app's own text). The body (badge row, title, chat) is W3's and W4's.
+  '3.2': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...box('details head, right', [1080, 40, 200, 40], [700, 40, 200, 40], [0.01, 0.012])],
   // The board's second file (R4, states 12 to 16) draws the dock line's question in 72% text; its first file (1 to 3) in full text.
   // The app draws it as the first file does, so these states hold the line's pill and chips and leave the text between.
   // The board's R4 file also draws the dock's chevron in full text colour (the first file and the app: muted), so the chip region stops before it.
