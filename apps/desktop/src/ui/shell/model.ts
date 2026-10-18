@@ -6,9 +6,10 @@ const pad = (value: number) => String(value).padStart(2, '0');
 const startOfDay = (at: Date) => new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
 const daysBefore = (at: number, now: number) => Math.round((startOfDay(new Date(now)) - startOfDay(new Date(at))) / 86_400_000);
 
-/** Host agent names as the handoff writes them. */
+/** The product name of a host agent as the board writes it: "Claude Code", "Codex". An adapter id it does not know is shown as it is. */
 export function agentName(adapterId: string): string {
-  if (adapterId === 'claude_code_mod') return 'claude-code';
+  if (adapterId === 'claude_code_mod') return 'Claude Code';
+  if (adapterId === 'codex') return 'Codex';
   return adapterId;
 }
 
@@ -28,16 +29,16 @@ export const ownerDescription = (naming: SessionNaming | null | undefined): stri
 
 /** `title` is what names the session; `secondary` is the agent line, kept quieter beneath a name. */
 export interface SessionLabel { readonly named: boolean; readonly title: string; readonly secondary: string | null; readonly description: string | null }
-/** The owner's name leads when one is set, over the agent line ("claude-code · iTerm window 1"). Unnamed, the agent line is the title. */
+/** The owner's name leads when one is set, over the agent line ("Claude Code · iTerm window 1"). Unnamed, the agent line is the title. */
 export function sessionLabel(naming: SessionNaming | null | undefined, agentLine: string): SessionLabel {
   const name = ownerName(naming);
   return { named: name !== null, title: name ?? agentLine, secondary: name === null ? null : agentLine, description: ownerDescription(naming) };
 }
 
-/** "claude-code · iTerm window 1", or just the agent when the host reports no location. */
+/** "Claude Code · iTerm window 1", or just the agent when the host reports no location. */
 export const agentLine = (agent: string, location: string | null | undefined): string => location ? `${agent} · ${location}` : agent;
 
-/** The words a confirmation uses for a session: the owner's name, else "the claude-code session from today". */
+/** The words a confirmation uses for a session: the owner's name, else "the Claude Code session from today". */
 export function sessionPhrase(naming: SessionNaming | null | undefined, agent: string, when: string): string {
   const name = ownerName(naming);
   return name ? `the “${name}” session` : `the ${agent} session from ${when.toLowerCase()}`;
