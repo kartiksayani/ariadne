@@ -34,15 +34,27 @@ export function ConnectionCard({ view, actions, onDismiss }: ConnectionCardProps
   </div>;
 }
 
-/** The in-flow line above the Map. Live and Connecting draw none. "No agent connected" carries its steps, folded until asked for. */
-export function ConnectionLine({ view, actions, steps: control, command = '/ariadne-connect' }: ConnectionLineProps) {
+/**
+ * The in-flow line above the Map. Live and Connecting draw none. "No agent connected" carries its steps, folded until asked for.
+ * When the last change may not be saved while another state is on show, that report is a second line under it.
+ */
+export function ConnectionLine(props: ConnectionLineProps) {
+  const { view, actions } = props;
+  if (!view.unsavedToo) return <Line {...props} />;
+  return <>
+    <Line {...props} />
+    <Line view={{ ...view, kind: 'unsaved', unsavedToo: false }} actions={{ ...actions, onTryAgain: actions.onTryAgainUnsaved }} label="Saving" />
+  </>;
+}
+
+function Line({ view, actions, steps: control, command = '/ariadne-connect', label = 'Connection' }: ConnectionLineProps & { readonly label?: string }) {
   const copy = connectionLine(view);
   const [own, setOwn] = useState(false);
   const steps = control?.open ?? own, toggleSteps = control?.onToggle ?? (() => setOwn(open => !open));
   const [command1, copyCommand] = useCopy(), [instruction, copyInstruction] = useCopy();
   if (!copy) return null;
   const connect = view.kind === 'none', onCopyInstruction = actions.onCopyInstruction;
-  return <section className="cl" aria-label="Connection" role="status">
+  return <section className="cl" aria-label={label} role="status">
     <div className="cl-row">
       <i className={`${copy.icon}${view.kind === 'reconnect' ? ' p-spin' : ''} cl-icon`} style={{ color: copy.color }} aria-hidden="true" />
       <span className="cl-text"><span className="cl-title">{copy.title}</span> <span className="cl-body">{copy.text}</span></span>

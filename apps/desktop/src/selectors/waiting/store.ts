@@ -144,6 +144,7 @@ export class WaitingStore {
         const projects = new Map(capture.projects.map(project => [project.project_id, project]));
         const sessions: WaitingSession[] = [];
         const capturedStores = new Map<string, SessionStore>();
+        let degraded: CoreFailure | ServiceFailure | null = null;
         // Sequential registered reads bound concurrent IO without truncating the catalogue.
         for (const summary of capture.sessions) {
           if (summary.archived_at != null) continue;
@@ -153,8 +154,12 @@ export class WaitingStore {
           await store.refresh();
           if (this.stopped) return;
           const state = store.getSnapshot();
-          if (state.error) throw state.error;
-          if (!state.snapshot || state.snapshot.session.revision !== summary.revision) throw new ServiceFailure('invalid_response');
+          // One session that can't be read never hides the others' questions. With a last good copy it is listed from that
+          // copy; with none it is left out. Either way the capture is marked stale, with the first failure kept to show.
+          if (!state.snapshot || state.error || state.snapshot.session.revision !== summary.revision) {
+            degraded ??= state.error ?? new ServiceFailure('invalid_response');
+            if (!state.snapshot) continue;
+          }
           capturedStores.set(JSON.stringify([summary.project_id, summary.session_id]), store);
           sessions.push(Object.freeze({ project: immutable(project), summary: immutable(summary), session: state.snapshot.session }));
         }
@@ -165,7 +170,7 @@ export class WaitingStore {
         this.publish({ sessions: Object.freeze(sessions), waiting, sent, counts: immutable(capture.result.counts),
           unavailableProjects: immutable(capture.projects.filter(project => project.availability === 'unavailable')),
           status: this.requested || sessions.some(session => this.opened.open({ project_id: session.session.project_id,
-            session_id: session.session.id }).getSnapshot().status !== 'ready') ? 'stale' : 'ready', error: null });
+            session_id: session.session.id }).getSnapshot().status !== 'ready') || degraded ? 'stale' : 'ready', error: degraded });
       } catch (error: unknown) {
         const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('invalid_response');
         this.publish({ status: this.state.counts ? 'stale' : 'unavailable', error: failure });

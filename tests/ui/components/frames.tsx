@@ -77,7 +77,7 @@ const states: Record<string, ConnectionView> = {
   reconnect: { kind: 'reconnect', agent: 'Claude Code', where: 'Claude Code in iTerm window 1', droppedAt: '21:30' },
   unreadable: { kind: 'unreadable', unreadableLine: 1204 },
   stale: { kind: 'stale', lastGoodAt: '21:24' },
-  unsaved: { kind: 'unsaved', where: 'Claude Code in iTerm window 1', unsavedAt: '21:31', unsavedChange: 'Later on “separate hit metrics”' },
+  unsaved: { kind: 'unsaved', where: 'Claude Code in iTerm window 1', unsavedAt: '21:31' },
 };
 for (const [id, view] of Object.entries(states)) {
   renderers[`connection-${id}`] = context => <>

@@ -325,7 +325,51 @@ describe('registered global capture', () => {
     expect(store.getSnapshot().status).toBe('stale'); expect(store.getSnapshot().waiting).toBe(previous.waiting);
     transport.capture(); const changed = mutableSession(); changed.revision = 22; transport.script.set('session_get', [loaded(changed)]);
     await store.refresh(); expect(store.getSnapshot().error).toBeInstanceOf(ServiceFailure);
-    expect(store.getSnapshot().counts).toBe(previous.counts);
+    // A session that moved on since the catalogue still lists its questions (never miss one); the read is marked stale.
+    expect(store.getSnapshot().status).toBe('stale'); expect(store.getSnapshot().waiting).toHaveLength(1);
+  });
+  describe('one unreadable session never hides the others’ questions', () => {
+    /** Three registered sessions of one project, each with the fixture's one waiting question. */
+    const three = () => {
+      const { store, transport, opened } = setup();
+      const rows = ['a1', 'b2', 'c3'].map((tag, at) => {
+        const row = fixture(); row.session.id = inputId(`0${at + 1}`); row.summary.session_id = row.session.id; return { ...row, tag };
+      });
+      const capture = (reads: (QueryEnvelope | Error)[]) => {
+        transport.push('project_list', projectPage()); transport.push('session_list', sessionPage(rows.map(row => row.summary)));
+        transport.push('session_get', ...reads);
+      };
+      return { store, transport, opened, rows, capture };
+    };
+    const ids = (store: WaitingStore) => store.getSnapshot().waiting.map(row => row.route.session_id).sort();
+    it('a session never read (no snapshot) is left out; the other two are listed and the read is stale', async () => {
+      const { store, rows, capture } = three();
+      capture([loaded(rows[0]!.session), new Error('The session file could not be read.'), loaded(rows[2]!.session)]);
+      await store.start();
+      const state = store.getSnapshot();
+      expect(state.sessions.map(entry => entry.session.id)).toEqual([rows[0]!.session.id, rows[2]!.session.id]);
+      expect(state.waiting).toHaveLength(2);
+      expect(state.status).toBe('stale');
+      expect(state.error).toBeInstanceOf(ServiceFailure);
+      expect(ids(store)).toEqual([rows[0]!.session.id, rows[2]!.session.id]);
+    });
+    it('a session that read before and fails now keeps its last good questions in the list', async () => {
+      const { store, rows, capture } = three();
+      capture(rows.map(row => loaded(row.session))); await store.start();
+      expect(store.getSnapshot().waiting).toHaveLength(3); expect(store.getSnapshot().status).toBe('ready');
+      capture([loaded(rows[0]!.session), new Error('The session file could not be read.'), loaded(rows[2]!.session)]);
+      await store.refresh();
+      expect(store.getSnapshot().waiting).toHaveLength(3);
+      expect(store.getSnapshot().status).toBe('stale');
+      expect(store.getSnapshot().error).toBeInstanceOf(ServiceFailure);
+    });
+    it('every session unreadable leaves an empty list marked stale, never a healthy empty queue', async () => {
+      const { store, capture } = three();
+      capture([new Error('x'), new Error('y'), new Error('z')]); await store.start();
+      expect(store.getSnapshot().waiting).toHaveLength(0);
+      expect(store.getSnapshot().status).toBe('stale');
+      expect(store.getSnapshot().error).toBeInstanceOf(ServiceFailure);
+    });
   });
   it('preserves the last capture when global project/session counts straddle a mutation', async () => {
     const { store, transport } = setup(); transport.capture(); await store.start(); const before = store.getSnapshot();
