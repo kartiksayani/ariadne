@@ -867,6 +867,9 @@ test('a failed Ack all keeps Continue and the "…" menu inside a 480px band at 
     const progress = band.getByRole('status').filter({ hasText: 'to finish' });
     await expect(progress).toBeVisible();
     await expect(progress).toHaveAttribute('title', /saved · \d+ to finish/);
+    // Dismissing the failure notice is never a dead end: Retry and Cancel remaining stay on the band, in reach.
+    await expect(band.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+    await expect(band.getByRole('button', { name: 'Cancel remaining', exact: true })).toBeVisible();
     await expectButtonsInReach(band);
     await expect(band.getByRole('button', { name: /^Continue/ })).toBeVisible();
     await expect(band.getByRole('button', { name: /^More actions for/ })).toBeVisible();

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { notices } from '../../../src/ui/pages/notices';
 import { Body } from '../../../src/ui/shell/Body';
 import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 
 const rect = (top: number) => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: top, toJSON: () => ({}) });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { notices.clear(); cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const frames = () => { vi.stubGlobal('requestAnimationFrame', (run: () => void) => { run(); return 0; }); };
 
 describe('notice placement (E20)', () => {
@@ -71,6 +72,27 @@ describe('notice placement (E20)', () => {
     await act(async () => { await Promise.resolve(); });
     expect(toast.dataset.placement).toBeUndefined();
     expect(toast.style.getPropertyValue('--notice-bottom')).toBe('');
+  });
+
+  it('publishes where the stack ends, from the Map’s shell, so the Back-to pill hangs below it; unset when no card shows or on a page', async () => {
+    frames();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('pw-notice-stack') ? { ...rect(100), bottom: 200 } as DOMRect
+        : this.classList.contains('tree-scroll-shell') ? rect(92) as DOMRect : rect(0) as DOMRect;
+    });
+    const { container, rerender } = render(<DockInsetProvider height={0}><Body main={<div className="tree-scroll-shell"><div className="tree-topic" /></div>} /></DockInsetProvider>);
+    const body = container.querySelector<HTMLElement>('.shell-body-viewport')!;
+    expect(body.style.getPropertyValue('--notice-stack-bottom')).toBe('');
+    act(() => { notices.push({ id: 'n', icon: 'ph ph-warning', tone: 'warn', text: 'A notice.' }); });
+    // The store shows a notice 300 ms after it is raised.
+    await waitFor(() => expect(body.style.getPropertyValue('--notice-stack-bottom')).toBe('108px'));
+    act(() => { notices.dismiss('n'); });
+    await waitFor(() => expect(body.style.getPropertyValue('--notice-stack-bottom')).toBe(''));
+    // On a page no Map is drawn, so there is no pill to keep clear.
+    act(() => { notices.push({ id: 'm', icon: 'ph ph-warning', tone: 'warn', text: 'Another.' }); });
+    rerender(<DockInsetProvider height={0}><Body main={<p>Projects</p>} /></DockInsetProvider>);
+    await waitFor(() => expect(container.querySelector('.pw-note')).not.toBeNull());
+    expect(body.style.getPropertyValue('--notice-stack-bottom')).toBe('');
   });
 
   it('keeps the toast at the dock on the Map and on a page', () => {

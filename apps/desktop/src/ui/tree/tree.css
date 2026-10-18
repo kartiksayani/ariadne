@@ -584,7 +584,8 @@
   transform: translateX(-50%);
 }
 
-.tree-back[data-edge="above"] { top: calc(var(--tree-header-height, 0px) + 12px); }
+/* Above: under the band, or under the notice stack when one hangs there (Body publishes --notice-stack-bottom), so a card never covers the pill. */
+.tree-back[data-edge="above"] { top: max(calc(var(--tree-header-height, 0px) + 12px), calc(var(--notice-stack-bottom, 0px) + 6px)); }
 .tree-back[data-edge="below"] { bottom: calc(var(--dock-inset, 0px) + 14px); }
 
 .tree-back-arrow {

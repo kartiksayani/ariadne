@@ -1,6 +1,7 @@
 // The Map never moves for a notice or a toast (alpha.21 E19, E20). The stack and the toast float over the Map, so raising, stacking,
 // expanding and dismissing them leaves every row in view where it was (position, height, text width), at the top, in the middle and at
-// the bottom of the Map, in the Tree and the Graph. The stack hangs below the topic band and stays above the open dock.
+// the bottom of the Map, in the Tree and the Graph. The stack hangs below the topic band and stays above the open dock, and the
+// Back-to pill at the Map's top hangs below the stack, so a card never covers it nor takes its clicks.
 import { test, expect, type Page } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -117,5 +118,36 @@ test('the stack hangs below the topic band, and above the open dock', async ({ p
     expect(bottom!.y + bottom!.height, 'the stack ends above the open dock').toBeLessThanOrEqual(dockBox!.y);
     const region = await stack(page).boundingBox(), map = await page.locator('.tree-scroll').boundingBox();
     expect(region!.x, 'left 10 of the Map region').toBeCloseTo(map!.x + 10, 0);
+  });
+});
+
+test('with notices up, the Back-to pill hangs below the stack, is visible and clickable, and returns to its place when they go', async ({ page }) => {
+  await serve(async origin => {
+    await open(page, origin);
+    await scrollTo(page, 'Tree', 'top');
+    await page.locator('.tree-item[data-item-id="1"] .tree-question').click();
+    await expect(page.locator('.tree-item[data-item-id="1"]')).toHaveAttribute('aria-selected', 'true');
+    await scrollTo(page, 'Tree', 'bottom');
+    const pill = page.locator('.tree-scroll-shell > .tree-back');
+    await expect(pill).toHaveAttribute('data-edge', 'above');
+    const resting = (await pill.boundingBox())!;
+    await push(page, 'n1', 'warn', 'The first notice.');
+    await push(page, 'n2', 'warn', 'The second notice.');
+    await page.waitForTimeout(400);
+    await expect(cards(page)).toHaveCount(2);
+    await settle(page);
+    const lowest = Math.max(...await Promise.all([0, 1].map(async index => { const box = (await cards(page).nth(index).boundingBox())!; return box.y + box.height; })));
+    const lowered = (await pill.boundingBox())!;
+    expect(lowered.y, 'the pill starts below the lowest card').toBeGreaterThanOrEqual(lowest + 5);
+    expect(lowered.y).toBeGreaterThan(resting.y);
+    await expect(pill).toBeVisible();
+    // Playwright refuses a click another element would take, so this fails if a card still covers the pill.
+    await pill.click({ trial: true });
+    await page.evaluate(() => { const { notices } = (window as unknown as { floating: Floating }).floating; notices.dismiss('n1'); notices.dismiss('n2'); });
+    await expect(cards(page)).toHaveCount(0);
+    await settle(page);
+    expect((await pill.boundingBox())!.y, 'with no card the pill is back at the band').toBeCloseTo(resting.y, 0);
+    await pill.click();
+    await expect(pill).toHaveCount(0);
   });
 });

@@ -5,7 +5,7 @@ import { SideCovered } from './sideCovered';
 import { DETAILS_RAIL, useDetailsColumn } from '../../state/details/column';
 import { Notices } from '../pages/notices';
 import { Toast } from './ToastView';
-import { useMapNoticeTop } from './noticeTop';
+import { useMapNoticeTop, useNoticeStackBottom } from './noticeTop';
 
 /** Body state the dock and the Details column replace; until then the shell keeps today's layout. */
 export interface LegacyBody {
@@ -84,6 +84,7 @@ export function Body({ main, side, dock, conversation }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null), toast = useRef<HTMLDivElement>(null);
   useNoticeBand(view, layer, toast, !!conversation);
   const mapTop = useMapNoticeTop(ref, !conversation);
+  useNoticeStackBottom(ref, !conversation);
   const width = useWidth(ref);
   // No dock (a page), no room under it.
   const dockInset = useDockInset(), inset = dock ? dockInset : 0;

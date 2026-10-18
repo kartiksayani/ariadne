@@ -45,3 +45,39 @@ export function useMapNoticeTop(viewport: RefObject<HTMLElement | null>, active:
   }, [viewport, active]);
   return active ? top : null;
 }
+
+/**
+ * Where the notice stack ends over a Map, in pixels from the top of the Map's scroll shell, published as `--notice-stack-bottom`
+ * on the body. The "Back to" pill that floats at the Map's top hangs below it (tree.css), so a card never covers the pill nor
+ * takes its clicks. Unset while no card is showing. This only follows the stack; the Map itself never moves.
+ */
+export function useNoticeStackBottom(viewport: RefObject<HTMLElement | null>, active: boolean): void {
+  useLayoutEffect(() => {
+    const host = viewport.current;
+    if (!active || !host) return undefined;
+    let frame = 0;
+    const watched = new Set<Element>();
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => schedule());
+    const place = () => {
+      frame = 0;
+      const stack = host.querySelector<HTMLElement>('.shell-notices .pw-notice-stack'), shell = host.querySelector<HTMLElement>('.shell-center .tree-scroll-shell');
+      // Follow the two boxes that move the pill's limit: the stack as cards come and go, the Map's shell as lines open above it.
+      const next = new Set<Element>([stack, shell].filter((element): element is HTMLElement => !!element));
+      for (const element of watched) if (!next.has(element)) { resize?.unobserve(element); watched.delete(element); }
+      for (const element of next) if (!watched.has(element)) { resize?.observe(element); watched.add(element); }
+      if (!stack || !shell || !stack.querySelector('.pw-note')) { host.style.removeProperty('--notice-stack-bottom'); return; }
+      host.style.setProperty('--notice-stack-bottom', `${Math.max(0, Math.round(stack.getBoundingClientRect().bottom - shell.getBoundingClientRect().top))}px`);
+    };
+    function schedule() { if (!frame) frame = requestAnimationFrame(place); }
+    // Cards arrive and go inside the layer; a page swapping for a Map changes the center before any size.
+    const mutate = new MutationObserver(schedule);
+    for (const part of host.querySelectorAll('.shell-notices, .shell-center')) mutate.observe(part, { childList: true, subtree: true });
+    window.addEventListener('resize', schedule);
+    place();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      resize?.disconnect(); mutate.disconnect(); window.removeEventListener('resize', schedule);
+      host.style.removeProperty('--notice-stack-bottom');
+    };
+  }, [viewport, active]);
+}
