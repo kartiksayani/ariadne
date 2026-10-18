@@ -11,8 +11,9 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { NoticeStore } from '../../../src/ui/pages/notices';
-import { removeCopy, type RemoveSubject, type RemoveTarget } from '../../../src/ui/dialogs/remove';
-import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
+import { removeSessionCopy, removeWarning, type RemoveSubject, type RemoveTarget } from '../../../src/ui/dialogs/remove';
+import { sessionRemoval } from '../../../src/ui/pages/model';
+import { itemScope, sessionScope, topicScope, wordsInScope } from '../../../src/ui/remove/words';
 import { RemovalContext, RemovalQueue, UNDO_MS, type Pinned } from '../../../src/ui/remove/queue';
 import { Hidden, hiddenKey, nextSelection, removeLabel, removeSubject, tellOf, visibleSession } from '../../../src/ui/remove/model';
 import { TreeView } from '../../../src/ui/tree/TreeView';
@@ -203,6 +204,38 @@ describe('the removal queue', () => {
     expect(service.removeItem.mock.calls.map(call => ((call as unknown[])[1] as { expected_revision: number }).expected_revision)).toEqual([3, 3]);
   });
 
+  // E28 on Retry: after an uncertain failure the rows came back, so the owner may have typed; Retry checks again first.
+  it.each([
+    ['nothing new: the kept command runs under the same op id', { scope: ['1', '1.1'], words: [] }, false],
+    ['the item is gone (the first attempt committed): the kept command replays', null, false],
+    ['a draft typed while the rows were back', { scope: ['1', '1.1'], words: ['draft:new'] }, true],
+    ['an input saved while the rows were back', { scope: ['1', '1.1'], words: ['input:new'] }, true],
+    ['an item added below it', { scope: ['1', '1.1', '1.2'], words: [] }, true],
+  ] as const)('Retry after an uncertain failure, %s', async (_, now, changed) => {
+    const { service, queue, notice, text, settled, again, setReview } = harness(), restore = vi.fn();
+    service.removeItem.mockRejectedValueOnce(new Error('Desktop service is unavailable.'));
+    const op = queue.schedule(itemTarget('1'), itemSubject(), { restore, pinned: { scope: ['1', '1.1'], words: [] } });
+    setReview({ scope: ['1', '1.1'], words: [] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    expect(service.removeItem).toHaveBeenCalledOnce();
+    setReview(now);
+    settled.mockClear();
+    await act(async () => { notice().actions![0]!.run(); await vi.advanceTimersByTimeAsync(0); });
+    expect(settled).toHaveBeenCalledWith(route);
+    if (changed) {
+      expect(service.removeItem).toHaveBeenCalledOnce();
+      expect(queue.getSnapshot().empty).toBe(true);
+      expect(restore).toHaveBeenCalledOnce();
+      expect(text()).toEqual(['“Stale plans” changed while you were removing it. Nothing was removed.']);
+      expect(notice().actions!.map(action => action.label)).toEqual(['Remove again']);
+      notice().actions![0]!.run();
+      expect(again).toHaveBeenCalledWith(itemTarget('1'));
+    } else {
+      expect(service.removeItem.mock.calls.map(call => (call as unknown[])[2])).toEqual([op, op]);
+      expect(restore).not.toHaveBeenCalled();
+    }
+  });
+
   // E31: Empty deletes at once, one fresh op id each, no window and no note per entry; what left the bin is not deleted.
   it('deletes bin entries at once and reports what it could not delete', async () => {
     const binned = structuredClone(demo) as Session;
@@ -263,47 +296,36 @@ describe('remove model', () => {
     expect(removeLabel(removeSubject(session, { kind: 'topic', session: route, topic_id: topicId })!)).toBe('the topic “Delivery decisions”');
     expect(tellOf({ ...session, state: 'closed' } as Immutable<Session>).mode).toBe('closed');
   });
-  it('says how many queued messages a removal cancels, naming their agent', () => {
-    const warn = (subject: RemoveSubject | null) => removeCopy(subject!).warn;
-    const item = (itemId: string) => ({ kind: 'item' as const, item: { ...route, item_id: itemId } });
-    // Item 4 holds the queued drop (input 76); item 1 holds none.
-    expect(removeSubject(session, item('4'))!.unsent).toEqual({ count: 1, agent: 'demo.local' });
-    // A drop is not an answer: the warning says "messages" for every kind.
-    expect(warn(removeSubject(session, item('4')))).toBe('1 of your messages hasn’t reached demo.local yet; removing cancels it.');
-    expect(warn(removeSubject(session, item('1')))).toBe('');
-    expect(removeSubject(session, { kind: 'topic', session: route, topic_id: topicId })!.unsent?.count).toBe(1);
-    // The session and its project hold both queued messages (76 and the topic continuation 77).
+  // E27: the warnings count the words that go; every one is quoted below them. A session's removal deletes every input in it.
+  it('a session removal warns about every word in it, naming its agent', () => {
+    const words = wordsInScope(session, { entries: {} }, sessionScope(session));
+    expect(words.map(entry => entry.key).sort()).toEqual([72, 73, 74, 76, 77, 78].map(n => `input:00000000-0000-4000-8000-0000000000${n}`).sort());
     const counts = sessionRemoval(session, new Set());
-    expect(warn({ kind: 'session', agent: 'demo.local', when: 'Yesterday', ...counts }))
-      .toBe('1 question waiting on you goes with it. 2 of your messages haven’t reached demo.local yet; removing cancels them.');
-    const other = structuredClone(demo) as Session, binding = other.bindings[other.active_binding_id!]!; binding.adapter_id = 'codex';
-    expect(projectRemoval([session, other as Immutable<Session>]).unsent).toEqual({ count: 4, agent: 'the agent' });
-    // Waiting questions and unsent messages are both named.
-    expect(removeCopy({ ...removeSubject(session, item('4'))!, waiting: 1 } as RemoveSubject).warn)
-      .toBe('1 question waiting on you goes with it. 1 of your messages hasn’t reached demo.local yet; removing cancels it.');
+    const subject = { kind: 'session', agent: 'demo.local', when: 'Yesterday', ...counts } as const;
+    expect(removeSessionCopy(subject, { pending: 4, any: true }).warn)
+      .toBe('1 question waiting on you goes with it. 4 of your messages haven’t reached demo.local yet; removing cancels them; copy your words below first.');
+    expect(removeSessionCopy(subject, { pending: 0, any: true }).warn).toBe('1 question waiting on you goes with it. Your words below go with it; copy them first.');
+    expect(removeSessionCopy({ ...subject, waiting: 0 }, { pending: 0, any: false }).warn).toBe('');
+    expect(removeWarning(removeSubject(session, { kind: 'item', item: { ...route, item_id: '4' } }) as Extract<RemoveSubject, { kind: 'item' }>, { pending: 1, any: true }))
+      .toBe('1 of your messages hasn’t reached demo.local yet; removing cancels it; copy your words below first.');
   });
 
-  it.each(['item', 'topic'] as const)('warns about binned questions and only messages cancelled by agent removal for a %s', kind => {
+  it.each(['item', 'topic'] as const)('a binned %s counts its binned questions and quotes every cancelled word, whatever cancelled it', kind => {
     const binned = structuredClone(demo) as Session, input = Object.values(binned.inputs).find(value => value?.state === 'queued')!;
     const itemId = input.target.item_id!, item = binned.items[itemId]!, topic = binned.topics[item.topic_id]!;
     Object.values(binned.items).forEach(value => { if (value?.status === 'waiting_on_me') value.status = 'open'; });
     item.status = 'waiting_on_me';
     if (kind === 'item') item.removed_at = binned.updated_at;
     else topic.removed_at = binned.updated_at;
-    input.state = 'cancelled'; input.cancel_cause = 'agent_removed';
+    input.state = 'cancelled'; input.cancel_cause = 'agent_removed'; input.payload.text = 'words the agent removal cancelled';
     const unrelated = structuredClone(input); unrelated.id = '00000000-0000-4000-8000-000000000098'; unrelated.cancel_cause = 'owner';
     const notification = structuredClone(input); notification.id = '00000000-0000-4000-8000-000000000099'; notification.kind = 'removed';
     binned.inputs = { [input.id]: input, [unrelated.id]: unrelated, [notification.id]: notification };
     const target = kind === 'item' ? { kind: 'item' as const, item: { ...route, item_id: itemId } }
       : { kind: 'topic' as const, session: route, topic_id: topic.id };
-    const subject = removeSubject(binned, target)!;
-    expect(subject).toMatchObject({ removed: true, waiting: 1, unsent: { count: 0, cancelled: 1 } });
-    expect(removeCopy(subject).warn).toBe('1 question waiting on you goes with it. Your 1 cancelled message is deleted forever.');
-    unrelated.cancel_cause = 'agent_removed';
-    expect(removeCopy(removeSubject(binned, target)!).warn).toBe('1 question waiting on you goes with it. Your 2 cancelled messages are deleted forever.');
-    unrelated.cancel_cause = 'owner';
-    input.state = 'queued'; delete input.cancel_cause;
-    expect(removeSubject(binned, target)!.unsent).toEqual({ count: 1, agent: 'demo.local' });
+    expect(removeSubject(binned, target)).toMatchObject({ removed: true, waiting: 1 });
+    const scope = kind === 'item' ? itemScope(binned as Immutable<Session>, itemId) : topicScope(topic.id);
+    expect(wordsInScope(binned as Immutable<Session>, { entries: {} }, scope).map(entry => entry.key)).toEqual([`input:${input.id}`, `input:${unrelated.id}`]);
   });
   it('keeps binned waiting questions out of an active topic removal warning', () => {
     const current = structuredClone(demo) as Session;
@@ -369,5 +391,29 @@ describe('tree remove triggers', () => {
     expect(row('1')).toBeNull(); expect(row('1.1')).toBeNull(); expect(row('2')).not.toBeNull();
     act(() => { queue.undo(op); });
     expect(row('1')).not.toBeNull();
+  });
+
+  // E29: a removed strip offers Undo only in the window; once the command is running its click does nothing.
+  it.each([
+    ['a topic', { kind: 'topic', session: route, topic_id: topicId } as RemoveTarget, /^Removed “[^”]+” · \d+ items? · Undo$/, /^Removed “[^”]+” · \d+ items?$/],
+    ['a parent item', itemTarget('1'), /^Removed “[^”]+” and the \d+ items? below it$/, /^Removed “[^”]+” and the \d+ items? below it$/],
+  ] as const)('the strip of %s drops Undo when the window ends', async (_, target, during, after) => {
+    const { queue, service } = harness();
+    // The command never answers, so the entry stays past its window (sending).
+    service.removeItem.mockImplementation(() => new Promise(() => {})); service.removeTopic.mockImplementation(() => new Promise(() => {}));
+    await mount(queue);
+    const subject = target.kind === 'topic' ? { kind: 'topic', name: 'x', items: 1, waiting: 0, tell: tell('tell') } as RemoveSubject : itemSubject();
+    act(() => { queue.schedule(target, subject); });
+    const strip = () => screen.getByRole('treeitem', { name: target.kind === 'topic' ? /^Removed “[^”]+” · / : /^Removed “[^”]+” and the / });
+    expect(strip().getAttribute('aria-label')).toMatch(during);
+    expect(within(strip()).getByRole('button').getAttribute('title')).toBe('Undo the remove');
+    const undo = vi.spyOn(queue, 'undo');
+    await act(async () => { void queue.flush(); await Promise.resolve(); });
+    expect(strip().getAttribute('aria-label')).toMatch(after);
+    expect(within(strip()).getByRole('button').getAttribute('title')).toBeNull();
+    fireEvent.click(within(strip()).getByRole('button'));
+    fireEvent.keyDown(strip(), { key: 'Enter' });
+    expect(undo).not.toHaveBeenCalled();
+    expect(service.removeItem.mock.calls.length + service.removeTopic.mock.calls.length).toBe(1);
   });
 });

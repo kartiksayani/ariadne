@@ -18,6 +18,9 @@ export const itemScope = (session: Immutable<Session>, itemId: string): WordsSco
   ({ items: new Set(removedSubtree(session, itemId).map(item => item.id)), topics: new Set() });
 /** A whole topic. */
 export const topicScope = (topicId: string): WordsScope => ({ items: new Set(), topics: new Set([topicId]) });
+/** A whole session: core's session and project removes delete every input in it, whatever its target (E27). */
+export const sessionScope = (session: Immutable<Session>): WordsScope => ({ items: new Set(Object.keys(session.items)),
+  topics: new Set([...Object.keys(session.topics), ...Object.values(session.inputs).flatMap(input => input ? [input.target.topic_id] : [])]) });
 
 export interface WordsEntry {
   readonly kind: 'input' | 'draft';
@@ -96,29 +99,57 @@ export function wordsLabel(entry: WordsEntry): string {
  * family walk includes them. `complete` is false when any read failed or the reads took longer than `ms`.
  */
 export interface ArchivedRead { readonly sessions: readonly Immutable<Session>[]; readonly complete: boolean }
-export async function readArchived(service: RendererService, ms = 5000): Promise<ArchivedRead> {
+const INCOMPLETE: ArchivedRead = { sessions: [], complete: false };
+
+/** Every session the catalogue lists (of one project, or all) that `keep` keeps; null when the catalogue is incomplete. */
+async function listRoutes(service: RendererService, projectId: string | null, keep: (archived: boolean) => boolean): Promise<SessionRef[] | null> {
+  const routes: SessionRef[] = [];
+  let cursor: QueryCursor | null = null;
+  for (let pages = 0; pages < 1000; pages++) {
+    const page: SessionListResult = await service.query({ session: null, request: { command: 'session_list', params: { project_id: projectId, state: null, cursor, limit: 100 } } });
+    if (page.counts.completeness !== 'complete' || page.counts.unavailable_session_ids.length) return null;
+    for (const summary of page.sessions.items) if (keep(summary.archived_at != null)) routes.push({ project_id: summary.project_id, session_id: summary.session_id });
+    cursor = page.sessions.next_cursor;
+    if (!cursor) return routes;
+  }
+  return null;
+}
+
+/** Each session read fresh, within `ms`; incomplete when the list is missing, any read fails, or time runs out. */
+async function readRoutes(service: RendererService, routes: () => Promise<readonly SessionRef[] | null>, ms: number): Promise<ArchivedRead> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<ArchivedRead>(resolve => { timer = setTimeout(() => resolve({ sessions: [], complete: false }), ms); });
+  const timeout = new Promise<ArchivedRead>(resolve => { timer = setTimeout(() => resolve(INCOMPLETE), ms); });
   const read = (async (): Promise<ArchivedRead> => {
-    const routes: SessionRef[] = [];
-    let cursor: QueryCursor | null = null;
-    for (let pages = 0; pages < 1000; pages++) {
-      const page: SessionListResult = await service.query({ session: null, request: { command: 'session_list', params: { project_id: null, state: null, cursor, limit: 100 } } });
-      if (page.counts.completeness !== 'complete' || page.counts.unavailable_session_ids.length) return { sessions: [], complete: false };
-      for (const summary of page.sessions.items) if (summary.archived_at != null) routes.push({ project_id: summary.project_id, session_id: summary.session_id });
-      cursor = page.sessions.next_cursor;
-      if (!cursor) break;
-    }
-    if (cursor) return { sessions: [], complete: false };
+    const list = await routes();
+    if (!list) return INCOMPLETE;
     const sessions: Immutable<Session>[] = [];
-    for (const route of routes) {
+    for (const route of list) {
       const result = await service.query({ session: route, request: { command: 'session_get', params: {} } });
-      if (result.session.id !== route.session_id) return { sessions: [], complete: false };
+      if (result.session.id !== route.session_id) return INCOMPLETE;
       sessions.push(immutable(result.session));
     }
     return { sessions, complete: true };
-  })().catch((): ArchivedRead => ({ sessions: [], complete: false }));
+  })().catch((): ArchivedRead => INCOMPLETE);
   try { return await Promise.race([read, timeout]); } finally { clearTimeout(timer); }
+}
+
+export function readArchived(service: RendererService, ms = 5000): Promise<ArchivedRead> {
+  return readRoutes(service, () => listRoutes(service, null, archived => archived), ms);
+}
+
+/** What a session or project removal deletes: core purges every input in its sessions (E27). */
+export type WholeTarget = { readonly kind: 'session'; readonly session: SessionRef } | { readonly kind: 'project'; readonly project_id: string };
+/** The words a session or project removal deletes; `complete` is false when any of its sessions couldn't be read. */
+export interface WordsRead { readonly words: readonly WordsEntry[]; readonly complete: boolean }
+/**
+ * The words inventory of a whole session, or of every session of a project (archived ones too), each read fresh when the
+ * dialog opens. The drafts are read after the sessions, so a draft saved meanwhile is listed once.
+ */
+export async function readWords(service: RendererService, drafts: () => Pick<DraftState, 'entries'>, target: WholeTarget, ms = 5000): Promise<WordsRead> {
+  const read = await readRoutes(service, async () => target.kind === 'session' ? [target.session] : listRoutes(service, target.project_id, () => true), ms);
+  if (!read.complete) return { words: [], complete: false };
+  const entries = drafts();
+  return { words: read.sessions.flatMap(session => wordsInScope(session, entries, sessionScope(session))), complete: true };
 }
 
 /** Whether removing `topic` would reach other sessions, and the names of those the app can see. */
@@ -128,7 +159,8 @@ const sessionName = (session: Immutable<Session>) => session.name?.trim() || ses
 /**
  * E34: a topic has a continuation family when it was continued from somewhere (`origin`), when any session the app
  * holds has a copy of it (a topic whose `origin.topic_id` is this one), or when that can't be known: the waiting reader
- * isn't ready, a project or session can't be read, or the archived sessions weren't all read (`archived` null while
+ * isn't ready (loading, stale or unavailable) or kept a read error, a project or session can't be read, or the archived
+ * sessions weren't all read (`archived` null while
  * checking). Core removes the whole family, and words in other sessions can't be shown here.
  */
 export function hasFamily(topic: Immutable<Topic>, sessions: readonly Immutable<Session>[], waiting: WaitingState, archived: ArchivedRead | null): FamilyCheck {
@@ -150,7 +182,9 @@ export function hasFamily(topic: Immutable<Topic>, sessions: readonly Immutable<
   const names = [...new Set([...seen].map(id => owner.get(id)).filter((id): id is string => !!id && id !== home)
     .map(id => known.get(id)).filter((session): session is Immutable<Session> => !!session).map(sessionName))];
   const counts = waiting.counts;
-  const unknown = waiting.status === 'loading' || waiting.status === 'unavailable' || waiting.unavailableProjects.length > 0
+  // A stale capture or a kept read error means a session may be missing from `waiting.sessions` (the reader drops one it
+  // can't read and has no earlier copy of), so its copies can't be seen.
+  const unknown = waiting.status !== 'ready' || waiting.error != null || waiting.unavailableProjects.length > 0
     || !counts || counts.completeness !== 'complete' || counts.unavailable_session_ids.length > 0 || !archived?.complete;
   return { family: seen.size > 1 || unknown, sessions: names };
 }

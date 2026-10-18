@@ -754,8 +754,10 @@ describe('agent removal receipts in the composed app', () => {
     const archivedRow = (await screen.findAllByText(session.topics[topicA]!.name)).map(name => name.closest<HTMLElement>('.ar-row')).find(Boolean)!;
     fireEvent.click(within(archivedRow).getByRole('button', { name: /^More for / }));
     fireEvent.click(screen.getByRole('menuitem', { name: /^Remove from Ariadne/ }));
-    const confirm = within(await screen.findByRole('alertdialog'));
+    // The app's Remove flow (E34): an archived topic offers no "Archive instead".
+    const confirm = within(await screen.findByRole('dialog', { name: /^Remove the “.*” topic\?$/ }));
     expect(confirm.getByText(/The topic and its 6 items are removed from Ariadne/)).toBeTruthy();
+    expect(confirm.queryByRole('button', { name: /Archive instead/ })).toBeNull();
     fireEvent.click(confirm.getByRole('button', { name: /^Cancel/ }));
   });
 
@@ -836,7 +838,7 @@ describe('permanent removal scope with only binned work', () => {
     const archived = await waitFor(() => { const row = document.querySelector<HTMLElement>('.ar-row'); expect(row).not.toBeNull(); return row!; });
     fireEvent.click(within(archived).getByRole('button', { name: /^More for / }));
     fireEvent.click(screen.getByRole('menuitem', { name: /^Remove from Ariadne/ }));
-    const confirm = within(await screen.findByRole('alertdialog'));
+    const confirm = within(await screen.findByRole('dialog', { name: /^Remove / }));
     expect(confirm.getByText(/and the 2 topics only it has \(7 items\)/)).toBeTruthy();
     expect(confirm.getByRole('button', { name: 'Remove session' })).toBeTruthy();
     expect(transport.mutations.some(request => request.command.command === 'session_remove')).toBe(false);

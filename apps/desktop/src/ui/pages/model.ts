@@ -6,7 +6,6 @@ import type { ContinuePreview, SessionRef } from '../../generated/core';
 import type { Item, ItemStatus, ProjectSummary, Session, SessionSummary, Topic } from '../../generated/domain/models';
 import { agentName, clock, ownerName, sessionWhen, shortDate } from '../shell/model';
 import { agentRunning, connectionOf } from '../shared/connection';
-import { unsentOf } from '../remove/model';
 import { sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
@@ -130,13 +129,12 @@ export function sessionRemoval(session: Immutable<Session> | null, shared: Reado
   const topics = Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic), own = topics.filter(topic => !shared.has(`${session.id}:${topic.id}`));
   const ownIds = new Set(own.map(topic => topic.id));
   const items = Object.values(session.items).filter((item): item is Immutable<Item> => !!item && ownIds.has(item.topic_id));
-  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => waitingOnOwner(session, item) && !itemRemoved(session, item.id)).length,
-    unsent: unsentOf([session]) };
+  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => waitingOnOwner(session, item) && !itemRemoved(session, item.id)).length };
 }
 
 /** Project counts for the Remove dialog of a project. */
 export function projectRemoval(sessions: readonly Immutable<Session>[]) {
   const items = sessions.flatMap(session => Object.values(session.items).filter((item): item is Immutable<Item> => !!item));
   return { topics: sessions.reduce((sum, session) => sum + Object.keys(session.topics).length, 0), items: items.length,
-    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => waitingOnOwner(session, item)).length, 0), unsent: unsentOf(sessions) };
+    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => waitingOnOwner(session, item)).length, 0) };
 }

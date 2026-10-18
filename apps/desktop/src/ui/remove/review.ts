@@ -19,7 +19,7 @@ export function removeReview(session: Immutable<Session>, target: Placed, drafts
   const ids = target.kind === 'item' ? [...scope.items]
     : [target.topic_id, ...Object.values(session.items).flatMap(item => item?.topic_id === target.topic_id ? [item.id] : [])];
   return { target, subject, together: target.kind === 'item' ? togetherRows(session, target.item.item_id) : [], words,
-    pinned: { scope: ids, words: words.map(entry => entry.key) } };
+    pinned: { scope: ids, words: words.map(entry => entry.key) }, archived: target.kind === 'topic' && session.topics[target.topic_id]?.archived_at != null };
 }
 
 interface DraftsSource { readonly getSnapshot: () => Pick<DraftState, 'entries'>; readonly subscribe: (listener: () => void) => () => void }

@@ -23,7 +23,8 @@ import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WaitingStore, useWaiting } from '../../selectors/waiting/store';
 import { switcherData } from '../../state/navigation/switcher';
 import { ArchivePage } from '../../ui/pages/ArchivePage';
-import type { RemoveHandler } from '../../ui/dialogs/remove';
+import type { RemoveHandler, RemoveTarget } from '../../ui/dialogs/remove';
+import { readWords, type WholeTarget, type WordsRead } from '../../ui/remove/words';
 import { ProjectsPage } from '../../ui/pages/ProjectsPage';
 import { SessionLists } from '../../ui/pages/SessionLists';
 import { FirstRun } from '../../ui/pages/FirstRun';
@@ -73,6 +74,13 @@ export interface NavigationWorkspaceProps {
   readonly onHide?: () => void;
   /** Runs after the owner confirms a project or session Remove on the pages. Required: the triggers always render. */
   readonly onRemoveTarget: RemoveHandler;
+  /**
+   * An archived topic's Remove on the Archive page: the app's own Remove flow (E34), which quotes its words and checks
+   * its continuation family. The app always passes it; without one (a bare workspace in tests) that Remove does nothing.
+   */
+  readonly onAskRemove?: (target: Extract<RemoveTarget, { kind: 'topic' }>) => void;
+  /** The words a session or project removal deletes (E27); without one, they're read with no drafts. */
+  readonly onReadWords?: (target: WholeTarget) => Promise<WordsRead>;
   /** Session dispatch and lifecycle actions for the project page; one per app. */
   readonly actions?: SessionActionControllers;
   /** Clock for relative times; tests pin it. */
@@ -185,7 +193,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
 }
 
 export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, detailRail, detailAsked, onDetailsFolded, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
-  actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
+  onAskRemove = () => {}, onReadWords, actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const dock = useDock();
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
@@ -325,6 +333,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   const listing = view.kind === 'page';
   // Message counts, topic chips and remove counts come from each listed session's snapshot.
   const snapshots = useSessionSnapshots(listing ? store.service : null, listing ? sessions : []);
+  const readRemoved = onReadWords ?? ((target: WholeTarget) => readWords(store.service, () => ({ entries: {} }), target));
   const counts = view.kind === 'page' && view.page === 'projects' ? state.projects?.counts : matchingSessions?.counts;
   // The connect card belongs to the project page it was made on, directly under the project header,
   // and goes with its session: dismissed, removed (or pending removal), or another page shown.
@@ -360,12 +369,13 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   const copyWords = (text: string, done: string) => copyText(text).then(() => { notices.push({ icon: 'ph ph-check-circle', text: done }); return true; },
     () => { notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', tone: 'problem', text: 'Copy failed. Try again.' }); return false; });
   const page = view.kind === 'page' && view.page === 'archive'
-    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} navigationDisabled={navigationDisabled} back={back} onOpenSession={openSession} onRemove={onRemoveTarget} />
+    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} navigationDisabled={navigationDisabled} back={back} onOpenSession={openSession} onRemove={onRemoveTarget}
+      onAskRemove={onAskRemove} onReadWords={readRemoved} />
     : firstRun ? <FirstRun command="/ariadne-connect" onCopyCommand={() => copyWords('/ariadne-connect', 'Command copied.')}
       onCopyInstruction={instruction ? () => copyWords(instruction, 'Instruction copied.') : undefined} onRegister={() => register('')} />
     : view.kind === 'session' ? null : view.page === 'projects'
     ? <ProjectsPage currentSession={last} projects={projects} sessions={sessions} snapshots={snapshots} now={at} back={back} disabled={disabled} navigationDisabled={navigationDisabled}
-      discovery={discovery} onOpen={openProject} onOpenSession={openSession} onRegister={register} onRemove={onRemoveTarget}>
+      discovery={discovery} onOpen={openProject} onOpenSession={openSession} onRegister={register} onRemove={onRemoveTarget} onReadWords={readRemoved}>
       {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
     </ProjectsPage>
     : <SessionLists navigation={store} actions={actions} projects={selectedProject ? [selectedProject] : pageProjectId ? [] : projects} single={!!pageProjectId}

@@ -42,7 +42,7 @@ const items = (count: number) => `${count} item${count === 1 ? '' : 's'}`;
 export function placeText(place: PlaceStrip): string {
   if (place.reason === 'archived') return `Archived “${place.name}” · ${items(place.count)} · Undo`;
   if (place.reason === 'agent-removed') return `${place.agent ?? 'The agent'} removed “${place.name}”${place.count > 1 ? ` · ${items(place.count)}` : ''}`;
-  if (!place.itemId) return `Removed “${place.name}” · ${items(place.count)} · Undo`;
+  if (!place.itemId) return `Removed “${place.name}” · ${items(place.count)}${place.ended ? '' : ' · Undo'}`;
   return place.count > 1 ? `Removed “${place.name}” and the ${items(place.count - 1)} below it` : `Removed “${place.name}”`;
 }
 
@@ -61,15 +61,17 @@ export function Strip(props: StripProps) {
   const { row, focused, remember, onFocus, onKeyDown, onToggle, onPlace } = props;
   const hidden = row.reason === 'hidden';
   if (row.place) {
-    const place = () => onPlace?.(row);
+    // A removed strip whose window ended offers no Undo: its click and keys do nothing (E29).
+    const ended = !!row.place.ended;
+    const place = () => { if (!ended) onPlace?.(row); };
     return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} tabIndex={focused ? 0 : -1}
       className="tree-row tree-hidden-group tree-place" data-row={row.key} data-strip={row.reason} data-branch={row.branch ?? undefined}
-      style={branchStyle(row.branch, row.depth)} aria-label={stripText(row)}
+      style={branchStyle(row.branch, row.depth)} aria-label={stripText(row)} aria-disabled={ended || undefined}
       onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
       onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); place(); } else onKeyDown(event); }}>
       <Boxes boxes={row.boxes} />
       <Guides guides={row.guides} />
-      <button type="button" tabIndex={-1} className="tree-strip" title={TITLE[row.reason]} onClick={event => { event.stopPropagation(); place(); }}>
+      <button type="button" tabIndex={-1} className="tree-strip" title={ended ? undefined : TITLE[row.reason]} onClick={event => { event.stopPropagation(); place(); }}>
         <i className={ICON[row.reason]} aria-hidden="true" />
         <span>{stripText(row)}</span>
       </button>

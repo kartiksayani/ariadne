@@ -8,7 +8,8 @@
 // Never lose typed text: the owner reviewed the scope and the words a removal
 // deletes (E27). At commit the queue first waits for any send being saved in that
 // session, then reads the session again; if anything new appeared in scope (an
-// item, an input, a draft) it doesn't commit and puts the rows back.
+// item, an input, a draft) it doesn't commit and puts the rows back. Retry after
+// an uncertain failure runs the same recheck before it reuses the kept command.
 import { createContext, useContext, useSyncExternalStore } from 'react';
 import { CoreFailure, type RendererService } from '../../data/service';
 import type { Immutable } from '../../data/session-store';
@@ -28,6 +29,8 @@ export const UNDO_MS = 5000;
 type Mode = 'tell' | 'queued' | 'closed' | 'local';
 type Stage = 'pending' | 'sending' | 'done' | 'failed';
 type Params = { readonly gone: true; readonly changed?: true } | { readonly gone: false; readonly call: () => Promise<unknown> };
+/** A fresh read found words or items the owner didn't review: nothing is removed. */
+const CHANGED: Params = { gone: true, changed: true };
 type Placed = Extract<RemoveTarget, { kind: 'item' | 'topic' }>;
 /** The scope (item and topic ids) and the words inventory keys the owner reviewed; the commit compares a fresh read. */
 export interface Pinned { readonly scope: readonly string[]; readonly words: readonly string[] }
@@ -205,7 +208,8 @@ export class RemovalQueue {
     if (entry.stage !== 'pending') return entry.running ?? Promise.resolve();
     this.clearTimer(entry);
     entry.stage = 'sending';
-    // The window ended: the toast's Undo goes at once.
+    // The window ended: the toast's and the strip's Undo go at once.
+    this.republish();
     if (entry.toast) this.toasts.expire(entry.toast);
     else if (entry.mode === 'tell' || entry.mode === 'queued') this.note(entry);
     entry.running = this.execute(entry);
@@ -213,7 +217,11 @@ export class RemovalQueue {
   }
   private async execute(entry: Entry): Promise<void> {
     try {
-      const params = entry.params ?? await this.command(entry);
+      let params = entry.params;
+      // Retry after an uncertain failure: the rows came back meanwhile and the owner may have typed, so the kept command
+      // runs (same op id) only after the same recheck finds nothing new (E28).
+      if (params && !params.gone && placed(entry.target) && entry.pinned && (await this.recheck(entry, targetSession(entry.target))).changed) params = CHANGED;
+      params ??= await this.command(entry);
       entry.params = params;
       if (params.gone && params.changed) {
         // New words or items appeared after the review: nothing is removed and the rows come back.
@@ -244,14 +252,8 @@ export class RemovalQueue {
     const { service } = this.deps, target = entry.target, opId = entry.opId;
     if (target.kind === 'project') return { gone: false, call: () => service.removeProject({ project_id: target.project_id }, opId) };
     const route = targetSession(target);
-    // A send being saved now must land before the recheck, so its input is seen (E28).
-    if (placed(target) && entry.pinned) await this.deps.settled?.(route);
-    const session = await this.deps.read(route);
-    if (!session) throw new Error('The session could not be read.');
-    if (placed(target) && entry.pinned && this.deps.review) {
-      const now = this.deps.review(session, target);
-      if (now && (now.scope.some(id => !entry.pinned!.scope.includes(id)) || now.words.some(key => !entry.pinned!.words.includes(key)))) return { gone: true, changed: true };
-    }
+    const { session, changed } = await this.recheck(entry, route);
+    if (changed) return CHANGED;
     if (target.kind === 'session') {
       return { gone: false, call: () => service.removeSession({ project_id: route.project_id, session_id: route.session_id, expected_revision: session.revision }, opId) };
     }
@@ -263,6 +265,18 @@ export class RemovalQueue {
     return item ? { gone: false, call: () => service.removeItem(route, { item_id: item.id, expected_revision: item.revision }, opId) } : { gone: true };
   }
 
+  /**
+   * The session read again, and whether it holds anything in scope the owner didn't review (E28). A send being saved now
+   * lands first, so its input is seen. Without a pinned review (sessions, projects, a leaf with no words) nothing changes.
+   */
+  private async recheck(entry: Entry, route: SessionRef): Promise<{ readonly session: Immutable<Session>; readonly changed: boolean }> {
+    const target = entry.target, pinned = entry.pinned;
+    if (placed(target) && pinned) await this.deps.settled?.(route);
+    const session = await this.deps.read(route);
+    if (!session) throw new Error('The session could not be read.');
+    const now = placed(target) && pinned && this.deps.review ? this.deps.review(session, target) : null;
+    return { session, changed: !!now && !!pinned && (now.scope.some(id => !pinned.scope.includes(id)) || now.words.some(key => !pinned.words.includes(key))) };
+  }
   private noticeId(entry: Entry) { return `remove:${entry.opId}`; }
   /** The note for the entry's stage (Ariadne.dc.html:1349-1360 removeVals). */
   private note(entry: Entry, failure?: string): void {
@@ -294,8 +308,10 @@ export class RemovalQueue {
   }
   private clearTimer(entry: Entry) { if (entry.timer) clearTimeout(entry.timer); entry.timer = null; }
   private republish() {
-    const keys = [...this.entries.values()].filter(entry => entry.stage !== 'failed').map(entry => targetKey(entry.target));
-    this.hidden = keys.length ? new Hidden(new Set(keys)) : NOTHING_HIDDEN;
+    const shown = [...this.entries.values()].filter(entry => entry.stage !== 'failed');
+    // A strip offers Undo only while its entry is in the window (E29).
+    this.hidden = shown.length ? new Hidden(new Set(shown.map(entry => targetKey(entry.target))),
+      new Set(shown.filter(entry => entry.stage === 'pending').map(entry => targetKey(entry.target)))) : NOTHING_HIDDEN;
     this.listeners.forEach(listener => listener());
   }
 }

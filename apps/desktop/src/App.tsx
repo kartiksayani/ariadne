@@ -50,6 +50,7 @@ import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/re
 import { RemoveDialog, type FamilyState, type RemoveReview } from './ui/dialogs/RemoveDialog';
 import { againRequests, archiveRequests } from './ui/remove/requests';
 import { draftsSettled, removeReview } from './ui/remove/review';
+import { readWords } from './ui/remove/words';
 import type { Pinned } from './ui/remove/queue';
 import { notices } from './ui/pages/notices';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
@@ -496,6 +497,19 @@ function Workspace({ application }: { application: Application }) {
   const removeHandler: RemoveHandler = (target, subject) => removeTarget(target, subject);
   const asker = useRef(askRemove);
   asker.current = askRemove;
+  // The Archive page's Remove of an archived topic takes the same flow (E34). Its session may not be read yet (an archived
+  // session's): it is read first, and a session that still can't be read says so rather than doing nothing.
+  const askRemoveFresh = (target: Extract<RemoveTarget, { kind: 'topic' }>) => {
+    const store = navigation.opened.open(target.session);
+    const ask = () => {
+      // Asked, or read but nothing to ask about (gone, or already being removed).
+      if (asker.current(target) || store.getSnapshot().snapshot) return;
+      notices.push({ id: `remove-read-failed:${target.session.session_id}:${target.topic_id}`, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true,
+        text: 'Ariadne couldn’t read that session, so it can’t show what removing the topic deletes. Nothing was removed. Try again.' });
+    };
+    if (store.getSnapshot().snapshot) ask();
+    else void store.refresh().then(ask, ask);
+  };
   useEffect(() => { const again = (target: TreeRemoveTarget) => { asker.current(target); }; againRequests.add(again); return () => { againRequests.delete(again); }; }, []);
   const showView = (mode: 'tree' | 'graph' | 'archive') => {
     if (conversation) closeConversation();
@@ -607,7 +621,8 @@ function Workspace({ application }: { application: Application }) {
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
-      onRemoveTarget={removeHandler} waitingStore={application.waiting}
+      onRemoveTarget={removeHandler} onAskRemove={askRemoveFresh} waitingStore={application.waiting}
+      onReadWords={target => readWords(application.service, () => application.drafts.getSnapshot(), target)}
       chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
         filter: store ? { active: filterOpen, count: view ? filterCount({ view, local: localChips.chips }) : localChips.chips.length, onToggle: () => setFilterOpen(value => !value) } : undefined,
         onRecent: store ? () => setRecentOpen(value => !value) : undefined, recentOpen,

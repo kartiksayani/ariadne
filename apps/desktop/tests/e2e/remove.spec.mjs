@@ -10,15 +10,11 @@ import { topicAction } from './history-actions.spec.mjs';
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const exists = async path => { try { await stat(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } };
 const wait = (condition, message, timeout = 20000) => browser.waitUntil(condition, { timeout, interval: 100, timeoutMsg: message });
-const dialog = () => browser.$('[role="alertdialog"]');
 const notices = () => browser.$('.pw-notices');
 const topicBand = name => browser.$(`.tree-rows [role="treeitem"][aria-label="${name}"]`);
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
-async function confirm(label) {
-  await click(await dialog().$(`button=${label}`));
-  await wait(async () => !(await dialog().isExisting()), `${label} confirmation did not close`);
-}
-// Remove for an item or a topic (10.2, 10.14) quotes the owner's words before anything runs; a leaf with none goes at once.
+// Remove for an item, a topic (10.2, 10.14) or a session quotes the owner's words before anything runs; a leaf with none
+// goes at once. A session's Remove enables once its words are read.
 const removeDialog = () => browser.$('[role="dialog"][aria-label^="Remove "]');
 async function confirmRemove(label) {
   await click(await removeDialog().$(`button*=${label}`));
@@ -89,10 +85,9 @@ export async function runRemoveAcceptance(configuration) {
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === item.id, 'Selecting the row did not open its detail');
   await browser.execute(selector => document.querySelector(selector).focus(), row);
   await browser.keys('Backspace');
-  // A leaf with none of the owner's words goes at once (E28); anything else asks first.
-  await browser.pause(300);
-  if (await removeDialog().isExisting()) await confirmRemove('Remove');
+  // A leaf with none of the owner's words goes at once (E28): no dialog, the row goes.
   await wait(async () => !(await browser.$(row).isExisting()), 'The removed row stayed in the tree');
+  assert.equal(await removeDialog().isExisting(), false, 'A leaf with none of the owner’s words asked first');
   // The rows give way to a strip in their place, and the toast says when the agent is told.
   await (await strip('Removed “')).waitForDisplayed();
   await wait(async () => (await toastText()).includes('is told in 5 s'), 'Item remove did not offer Undo', 4000);
@@ -125,7 +120,7 @@ export async function runRemoveAcceptance(configuration) {
   await (await browser.$(archived)).waitForDisplayed();
   await click(await browser.$(archived).$('button[aria-label^="More for "]'));
   await click(await browser.$('[role="menuitem"]*=Remove from Ariadne'));
-  await confirm('Remove session');
+  await confirmRemove('Remove session');
   await wait(async () => !(await browser.$(archived).isExisting()), 'The removed session row stayed listed');
   assert.ok(await exists(sessionPath), 'Session remove ran before Dismiss');
   await dismissNote(text => /^Removed the .+ session from .+\.$/.test(text), 'the session removal');
@@ -137,6 +132,7 @@ export async function runRemoveAcceptance(configuration) {
   const projectMore = `button[aria-label="More for ${projectName}: remove project"]`;
   await click(await browser.$(projectMore));
   await click(await browser.$('[role="menuitem"]*=Remove project'));
+  // Remove project enables once the words in its sessions are read and quoted (E27).
   const removing = await browser.$('[role="dialog"]');
   await click(await removing.$('button=Remove project'));
   await wait(async () => !(await removing.isExisting()), 'Remove project confirmation did not close');

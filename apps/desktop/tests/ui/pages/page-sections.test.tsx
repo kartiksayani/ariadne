@@ -20,7 +20,8 @@ async function setup(archived = false) {
   const actions = new SessionActionControllers(service), state = navigation.getSnapshot();
   const props = { navigation, actions, projects: state.projects!.projects.items, sessions: state.sessions!.sessions.items,
     snapshots: new Map([...transport.sessions.values()].map(session => [sessionKey({ project_id: session.project_id, session_id: session.id }), session])),
-    now: Date.now(), narrow: false, disabled: false, onOpenSession: vi.fn(), onRemove: vi.fn() };
+    now: Date.now(), narrow: false, disabled: false, onOpenSession: vi.fn(), onRemove: vi.fn(),
+    onAskRemove: vi.fn(), onReadWords: vi.fn(async () => ({ words: [], complete: true })) };
   return { props, first, second, transport };
 }
 const rowName = (name: string) => screen.queryByRole('button', { name });

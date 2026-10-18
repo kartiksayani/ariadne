@@ -7,7 +7,7 @@ import type { RendererService } from '../../../src/data/service';
 import type { Input, Session, Topic } from '../../../src/generated/domain/models';
 import type { DraftEntry } from '../../../src/state/drafts/store';
 import type { WaitingState } from '../../../src/selectors/waiting/store';
-import { hasFamily, itemScope, newWords, readArchived, topicScope, wordsInScope, wordsLabel, type ArchivedRead } from '../../../src/ui/remove/words';
+import { hasFamily, itemScope, newWords, readArchived, readWords, sessionScope, topicScope, wordsInScope, wordsLabel, type ArchivedRead } from '../../../src/ui/remove/words';
 
 const session = demo as unknown as Immutable<Session>;
 const T10 = '00000000-0000-4000-8000-000000000010', T11 = '00000000-0000-4000-8000-000000000011';
@@ -48,6 +48,20 @@ describe('wordsInScope', () => {
     expect(entry).toMatchObject({ kind: 'input', text: session.inputs[input(78)]!.payload.text, intent: 'answer', state: 'cancelled' });
     expect(entry!.about).toBeTruthy();
     expect(wordsLabel(entry!)).toBe(`Your cancelled answer, about “${entry!.about}”`);
+  });
+
+  // Archiving a topic cancels its queued words (`topic_archived`); removing the archived topic deletes them, so they're quoted.
+  it.each(['agent_removed', 'owner', 'owner_edit', 'topic_archived', 'session_closed'] as const)('keeps a cancelled input with words whatever cancelled it: %s', cause => {
+    const at = withInput(input(78), { cancel_cause: cause });
+    expect(keys(itemScope(at, '1'), noDrafts, at)).toEqual([`input:${input(78)}`]);
+    expect(keys(topicScope(T10), noDrafts, at)).toContain(`input:${input(78)}`);
+  });
+
+  it('a whole session (session and project remove): every input with words and every draft in it, none from elsewhere', () => {
+    const here = draft('topic words', { topic_id: T10, item_id: null }), elsewhere = draft('other words', { topic_id: T10, item_id: null }, {}, 'other');
+    const all = keys(sessionScope(session), drafts(here, elsewhere));
+    expect(all.slice(0, -1).sort()).toEqual([72, 73, 74, 76, 77, 78].map(n => `input:${input(n)}`).sort());
+    expect(all.at(-1)).toBe(`draft:${here.draft.op_id}`);
   });
 
   it('leaves out a cancelled input with no words and the removed-notice kind', () => {
@@ -124,6 +138,9 @@ describe('hasFamily', () => {
     ['an archived read that failed or timed out', () => hasFamily(topic(T10), [], waiting(), read([], false)), true],
     ['the waiting reader still loading', () => hasFamily(topic(T10), [], waiting([session], { status: 'loading' }), read()), true],
     ['the waiting reader unavailable', () => hasFamily(topic(T10), [], waiting([session], { status: 'unavailable' }), read()), true],
+    // The waiting reader drops a session it can't read and has no earlier copy of, and marks the capture stale.
+    ['a degraded capture (stale, a session dropped)', () => hasFamily(topic(T10), [], waiting([session], { status: 'stale' }), read()), true],
+    ['a capture with a read error kept', () => hasFamily(topic(T10), [], waiting([session], { error: new Error('unreadable') } as unknown as Partial<WaitingState>), read()), true],
     ['a project that can’t be read', () => hasFamily(topic(T10), [], waiting([session], { unavailableProjects: [{}] } as unknown as Partial<WaitingState>), read()), true],
     ['a session that can’t be read', () => hasFamily(topic(T10), [], waiting([session], { counts: { completeness: 'complete', unavailable_session_ids: ['x'] } } as unknown as Partial<WaitingState>), read()), true],
     ['a partial catalogue', () => hasFamily(topic(T10), [], waiting([session], { counts: { completeness: 'partial', unavailable_session_ids: [] } } as unknown as Partial<WaitingState>), read()), true],
@@ -170,5 +187,40 @@ describe('readArchived', () => {
     const pending = readArchived(service(() => new Promise(() => undefined)));
     await vi.advanceTimersByTimeAsync(5000);
     expect(await pending).toEqual({ sessions: [], complete: false });
+  });
+});
+
+describe('readWords (session and project remove, E27)', () => {
+  const other = { ...session, id: 'p2' } as Immutable<Session>;
+  function service(get: (id: string) => Promise<unknown>, listCounts = counts) {
+    const query = vi.fn(async ({ request, session: route }: { request: { command: string; params?: { project_id?: string | null } }; session: { session_id: string } | null }) => {
+      if (request.command === 'session_list') return { sessions: { items: [{ project_id: session.project_id, session_id: session.id, archived_at: null }, { project_id: session.project_id, session_id: 'p2', archived_at: 1 }], next_cursor: null, snapshot_revision: 1 }, counts: listCounts };
+      return get(route!.session_id);
+    });
+    return { query } as unknown as RendererService & { query: typeof query };
+  }
+  const reader = () => service(async id => ({ session: id === 'p2' ? other : session }));
+  const here = draft('typed and not sent', { topic_id: T10, item_id: null });
+
+  it('a session: every input with words in it and its drafts', async () => {
+    const read = await readWords(reader(), () => drafts(here), { kind: 'session', session: { project_id: session.project_id, session_id: session.id } });
+    expect(read.complete).toBe(true);
+    expect(read.words.map(entry => entry.key)).toEqual([...keys(sessionScope(session)), `draft:${here.draft.op_id}`]);
+  });
+
+  it('a project: every session of it, archived ones too, listed for that project', async () => {
+    const service = reader();
+    const read = await readWords(service, () => noDrafts, { kind: 'project', project_id: session.project_id });
+    expect(read.complete).toBe(true);
+    expect(read.words).toHaveLength(keys(sessionScope(session)).length * 2);
+    expect(service.query.mock.calls.find(([value]) => value.request.command === 'session_list')![0].request.params!.project_id).toBe(session.project_id);
+  });
+
+  it.each([
+    ['a session that can’t be read', () => service(async () => { throw new Error('denied'); })],
+    ['a project whose catalogue is partial', () => service(async () => ({ session }), { completeness: 'partial', unavailable_session_ids: [] })],
+  ])('is incomplete, with no words, after %s', async (_, make) => {
+    const target = _.startsWith('a session') ? { kind: 'session', session: { project_id: session.project_id, session_id: session.id } } as const : { kind: 'project', project_id: session.project_id } as const;
+    expect(await readWords(make(), () => noDrafts, target)).toEqual({ words: [], complete: false });
   });
 });

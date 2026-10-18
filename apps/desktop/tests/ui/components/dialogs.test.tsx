@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { NameSessionDialog } from '../../../src/ui/dialogs/NameSessionDialog';
 import { RegisterProjectDialog } from '../../../src/ui/dialogs/RegisterProjectDialog';
 import { RemoveProjectDialog } from '../../../src/ui/dialogs/RemoveProjectDialog';
+import { RemoveSessionDialog } from '../../../src/ui/dialogs/RemoveDialog';
+import type { WordsEntry } from '../../../src/ui/remove/words';
 
 afterEach(cleanup);
 
@@ -128,7 +130,7 @@ describe('RegisterProjectDialog', () => {
 });
 
 describe('RemoveProjectDialog', () => {
-  const base = { name: 'notes-api', path: '~/code/notes-api', sessionCount: 2, waitingCount: 2 };
+  const base = { name: 'notes-api', path: '~/code/notes-api', sessionCount: 2, waitingCount: 2, words: { words: [], complete: true } };
   const mount = (patch = {}) => {
     const h = { onRemove: vi.fn(), onCancel: vi.fn() };
     render(<RemoveProjectDialog {...base} {...h} {...patch} />);
@@ -176,5 +178,42 @@ describe('RemoveProjectDialog', () => {
     mount({ error: 'Ariadne couldn’t remove it. Nothing was changed.' });
     expect(screen.getByRole('alert').textContent).toBe('Ariadne couldn’t remove it. Nothing was changed.');
     expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+});
+
+// E27: a session or project removal deletes every word of the owner's in it. Each is quoted with Copy, and Remove waits
+// until they are all on screen: while reading, and when a session can't be read, it can't be pressed.
+const quoted: readonly WordsEntry[] = [
+  { kind: 'input', key: 'input:a', about: 'Retry plan', text: 'Use the slower queue.', intent: 'reply', state: 'queued' },
+  { kind: 'input', key: 'input:b', about: 'Retry plan', text: 'Never mind the cache.', intent: 'reply', state: 'cancelled' },
+  { kind: 'draft', key: 'draft:c', about: 'Sync fixes', text: 'Half a thought', intent: 'topic_reply' },
+];
+describe.each([
+  ['RemoveProjectDialog', 'Remove project', (words: unknown, h: { onRemove: () => void; onCancel: () => void }) =>
+    <RemoveProjectDialog name="notes-api" path="~/code/notes-api" sessionCount={2} waitingCount={0} words={words as never} onRemove={h.onRemove} onCancel={h.onCancel} />],
+  ['RemoveSessionDialog', 'Remove session', (words: unknown, h: { onRemove: () => void; onCancel: () => void }) =>
+    <RemoveSessionDialog subject={{ kind: 'session', agent: 'Codex', when: 'Yesterday', topics: 1, items: 2, shared: 0, waiting: 0 }} words={words as never} onConfirm={h.onRemove} onCancel={h.onCancel} />],
+] as const)('%s words', (_, confirm, dialog) => {
+  const mount = (words: unknown) => { const h = { onRemove: vi.fn(), onCancel: vi.fn() }; render(dialog(words, h)); return h; };
+  const button = () => screen.getByRole('button', { name: confirm }) as HTMLButtonElement;
+
+  it.each([
+    ['reading', null, 'Reading your words…', true],
+    ['a session could not be read', { words: [], complete: false }, /couldn’t read every session in it/, true],
+    ['nothing of yours in it', { words: [], complete: true }, null, false],
+    ['words in it', { words: quoted, complete: true }, null, false],
+  ] as const)('%s', (_, words, note, blocked) => {
+    const h = mount(words);
+    if (note) expect(screen.getByText(note)).toBeTruthy();
+    expect(button().disabled).toBe(blocked);
+    fireEvent.click(button());
+    expect(h.onRemove).toHaveBeenCalledTimes(blocked ? 0 : 1);
+  });
+
+  it('quotes every word with Copy, and says how many haven’t reached the agent', () => {
+    mount({ words: quoted, complete: true });
+    expect(screen.getAllByTestId('dialog-quote').map(quote => quote.querySelector('blockquote')!.textContent)).toEqual(quoted.map(entry => entry.text));
+    expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(3);
+    expect(screen.getByText(/1 of your messages hasn’t reached .* yet; removing cancels it; copy your words below first\./)).toBeTruthy();
   });
 });

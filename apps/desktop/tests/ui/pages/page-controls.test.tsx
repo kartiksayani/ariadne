@@ -13,7 +13,8 @@ afterEach(() => { cleanup(); discoveryControllers.splice(0).forEach(controller =
 function setup(disabled = false, discovery?: DiscoveryController) {
   const open = vi.fn(), register = vi.fn(), remove = vi.fn(async () => true), openSession = vi.fn();
   render(<ProjectsPage projects={projects.items.slice(0, 1) as ProjectSummary[]} sessions={sessions.items as SessionSummary[]} snapshots={new Map()} now={Date.now()}
-    disabled={disabled} discovery={discovery} onOpen={open} onOpenSession={openSession} onRegister={register} onRemove={remove} />);
+    disabled={disabled} discovery={discovery} onOpen={open} onOpenSession={openSession} onRegister={register} onRemove={remove}
+    onReadWords={async () => ({ words: [], complete: true })} />);
   return { open, register, remove, openSession };
 }
 const menuItem = (name: string) => screen.getByRole("menuitem", { name: new RegExp(`^${name}`) });
@@ -36,10 +37,12 @@ describe("Projects page controls", () => {
     expect(screen.queryByRole("dialog", { name: /^Remove/ })).toBeNull();
     expect(remove).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
   });
-  it("removes a project from its card's menu through the Remove project dialog", () => {
+  it("removes a project from its card's menu through the Remove project dialog", async () => {
     const { remove } = setup();
     fireEvent.click(screen.getByRole("button", { name: /^More for .*: remove project$/ }));
     fireEvent.click(menuItem("Remove project…"));
+    // Remove waits until the project's words are read and shown (E27).
+    await waitFor(() => expect((screen.getByRole("button", { name: /^Remove project/ }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /^Remove project/ }));
     expect(remove).toHaveBeenCalledWith({ kind: "project", project_id: projects.items[0].project_id }, expect.objectContaining({ kind: "project" }));
     expect(screen.queryByRole("dialog", { name: /^Remove/ })).toBeNull();

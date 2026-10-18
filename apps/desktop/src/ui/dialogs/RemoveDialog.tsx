@@ -7,10 +7,9 @@ import { STATUS, statusColor, statusKey, type StatusKey } from '../shared/status
 import { shortLabel } from '../shared/short';
 import { removedSubtree } from '../../selectors/removed';
 import type { Pinned } from '../remove/queue';
-import { wordsLabel, type FamilyCheck, type WordsEntry } from '../remove/words';
+import { wordsLabel, type FamilyCheck, type WordsEntry, type WordsRead } from '../remove/words';
 import { DialogActions, DialogButton, DialogFrame, DialogNote, DialogQuote, DialogText, DialogTitle, DialogWarn } from './DialogFrame';
-import { ConfirmDialog } from './ConfirmDialog';
-import { removeCopy, removePlacedCopy, type RemoveSubject, type RemoveTarget } from './remove';
+import { removePlacedCopy, removeSessionCopy, type RemoveSubject, type RemoveTarget } from './remove';
 import './remove-dialog.css';
 
 type Placed = Extract<RemoveTarget, { kind: 'item' | 'topic' }>;
@@ -22,6 +21,8 @@ export interface RemoveReview {
   readonly together: readonly TogetherRow[];
   readonly words: readonly WordsEntry[];
   readonly pinned: Pinned;
+  /** An archived topic (removed from the Archive page): it can't be archived instead. */
+  readonly archived: boolean;
 }
 
 /** "REMOVED TOGETHER": the item and everything below it, indented per level, with their statuses. */
@@ -74,19 +75,46 @@ export function RemoveDialog({ review, family = null, onConfirm, onCancel, onArc
         </section>}
         {words.map(entry => <DialogQuote key={entry.key} label={wordsLabel(entry)} text={entry.text} />)}
       </>}
-    {topic && <DialogNote icon="ph ph-archive">To keep it out of sight without losing anything, archive it instead.</DialogNote>}
+    {topic && !review.archived && <DialogNote icon="ph ph-archive">To keep it out of sight without losing anything, archive it instead.</DialogNote>}
     {checking && <DialogNote icon="ph ph-circle-notch">Checking other sessions…</DialogNote>}
     <DialogActions>
-      {topic && onArchiveInstead && <DialogButton kind="ghost" left icon="ph ph-archive" onClick={() => { onCancel(); onArchiveInstead(); }}>Archive instead</DialogButton>}
+      {topic && !review.archived && onArchiveInstead && <DialogButton kind="ghost" left icon="ph ph-archive" onClick={() => { onCancel(); onArchiveInstead(); }}>Archive instead</DialogButton>}
       <DialogButton kind="ghost" kbd="esc" onClick={onCancel}>Cancel</DialogButton>
       {!blocked && <DialogButton kind="danger" icon="ph ph-trash" disabled={checking} onClick={confirm}>{copy.confirm}</DialogButton>}
     </DialogActions>
   </DialogFrame>;
 }
 
-/** The plain danger confirmation the pages use for sessions, projects and archived topics. */
-export function ConfirmRemoveDialog({ subject, onConfirm, onCancel }: { readonly subject: RemoveSubject; readonly onConfirm: () => void; readonly onCancel: () => void }) {
-  const copy = removeCopy(subject);
-  return <ConfirmDialog danger title={copy.title} body={copy.body} warn={copy.warn || undefined} confirmLabel={copy.confirm}
-    onCancel={onCancel} onConfirm={() => { onCancel(); onConfirm(); }} />;
+/**
+ * The words a session or project removal deletes (E27), read fresh when its dialog opens: null while reading. Each is
+ * quoted with Copy; when a session couldn't be read the words can't be shown, so the removal can't go ahead.
+ */
+export function WholeWords({ read }: { readonly read: WordsRead | null }) {
+  if (!read) return <DialogNote icon="ph ph-circle-notch">Reading your words…</DialogNote>;
+  if (!read.complete) return <DialogWarn tone="danger">Ariadne couldn’t read every session in it, so your words there can’t be shown. Nothing is removed. Try again in a moment.</DialogWarn>;
+  return <>{read.words.map(entry => <DialogQuote key={entry.key} label={wordsLabel(entry)} text={entry.text} />)}</>;
+}
+/** The removal can go ahead: every session was read and its words are on screen. */
+export const wordsShown = (read: WordsRead | null) => !!read?.complete;
+/** The warning's words part for `read`: how many haven't reached the agent, and whether any are quoted. */
+export const wholeWords = (read: WordsRead | null) => ({ pending: read?.words.filter(entry => entry.kind === 'input' && entry.state !== 'cancelled').length ?? 0, any: !!read?.words.length });
+
+/** Remove an archived session (Archive page): what goes and what stays, every word that goes quoted with Copy (E27). */
+export function RemoveSessionDialog({ subject, words, onConfirm, onCancel }: {
+  readonly subject: Extract<RemoveSubject, { kind: 'session' }>;
+  readonly words: WordsRead | null;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}) {
+  const copy = removeSessionCopy(subject, wholeWords(words)), ready = wordsShown(words);
+  return <DialogFrame label={copy.title} onCancel={onCancel}>
+    <DialogTitle>{copy.title}</DialogTitle>
+    <DialogText>{copy.body}</DialogText>
+    {copy.warn && <DialogWarn tone="danger">{copy.warn}</DialogWarn>}
+    <WholeWords read={words} />
+    <DialogActions>
+      <DialogButton kind="ghost" kbd="esc" autoFocus onClick={onCancel}>Cancel</DialogButton>
+      <DialogButton kind="danger" icon="ph ph-trash" disabled={!ready} onClick={() => { if (!ready) return; onCancel(); onConfirm(); }}>{copy.confirm}</DialogButton>
+    </DialogActions>
+  </DialogFrame>;
 }

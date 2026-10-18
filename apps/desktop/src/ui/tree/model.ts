@@ -246,6 +246,8 @@ export interface PlaceStrip {
   readonly agent?: string;
   /** The row keys it stands for: the item and everything below it, or the topic and its items. */
   readonly covers: readonly string[];
+  /** A removed strip whose Undo window ended: its command is running, so it offers no Undo. */
+  readonly ended?: boolean;
 }
 /**
  * The Map's one strip row: a run of consecutive omitted siblings. Its reason is the first that applies, focus then

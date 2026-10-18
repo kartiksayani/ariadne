@@ -6,8 +6,8 @@ import type { Archived } from '../shared/useSessionLifecycle';
 // label and the row selected after an item goes. Nothing here touches React.
 import { indexSession, type Immutable } from '../../data';
 import type { SessionPreferences, SessionRef } from '../../generated/core';
-import type { Input, Item, Session, Topic } from '../../generated/domain/models';
-import type { RemoveSubject, RemoveTarget, RemoveTell, RemoveUnsent } from '../dialogs/remove';
+import type { Item, Session, Topic } from '../../generated/domain/models';
+import type { RemoveSubject, RemoveTarget, RemoveTell } from '../dialogs/remove';
 import { agentName, sessionPhrase } from '../shell/model';
 import { shortLabel } from '../shared/short';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
@@ -32,7 +32,8 @@ export const targetSession = (target: Exclude<RemoveTarget, { kind: 'project' }>
 
 /** What the pending removals hide until they run or are undone. */
 export class Hidden {
-  constructor(readonly keys: ReadonlySet<string> = new Set()) {}
+  /** `undoable`: the keys still in their Undo window; the others' commands are running. */
+  constructor(readonly keys: ReadonlySet<string> = new Set(), readonly undoable: ReadonlySet<string> = keys) {}
   get empty(): boolean { return this.keys.size === 0; }
   project(projectId: string): boolean { return this.keys.has(hiddenKey.project(projectId)); }
   session(route: SessionRef): boolean { return this.project(route.project_id) || this.keys.has(hiddenKey.session(route)); }
@@ -73,36 +74,19 @@ export function tellOf(session: Immutable<Session>): NonNullable<RemoveTell> {
 const waitingCount = (session: Immutable<Session>, items: readonly Immutable<Item>[]) => items.filter(item => waitingOnOwner(session, item)).length;
 const topicName = (topic: Immutable<Topic>) => topic.short?.trim() || topic.name;
 
-/** Queued messages are cancelled; words already cancelled by agent removal are permanently deleted. */
-export function unsentOf(sessions: readonly Immutable<Session>[], within: (input: Immutable<Input>) => boolean = () => true): RemoveUnsent {
-  const agents = new Set<string>();
-  let count = 0, cancelled = 0;
-  for (const session of sessions) for (const input of Object.values(session.inputs)) {
-    if (!input || !within(input)) continue;
-    if (input.kind !== 'removed' && input.state === 'cancelled' && input.cancel_cause === 'agent_removed') cancelled++;
-    if (input.state !== 'queued') continue;
-    count++;
-    const binding = session.bindings[input.binding_id];
-    agents.add(binding ? agentName(binding.adapter_id) : 'the agent');
-  }
-  return { count, agent: agents.size === 1 ? [...agents][0]! : 'the agent', ...(cancelled ? { cancelled } : {}) };
-}
-
 /** The Remove dialog subject of an item or topic in `session`; null when it is gone. */
 export function removeSubject(session: Immutable<Session>, target: Extract<RemoveTarget, { kind: 'item' | 'topic' }>): RemoveSubject | null {
   if (target.kind === 'item') {
     const item = session.items[target.item.item_id];
     if (!item) return null;
-    const items = subtree(session, item.id), ids = new Set(items.map(value => value.id)), removed = itemRemoved(session, item.id);
-    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(session, removed ? items : items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session), removed,
-      unsent: unsentOf([session], input => !!input.target.item_id && ids.has(input.target.item_id)) };
+    const items = subtree(session, item.id), removed = itemRemoved(session, item.id);
+    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(session, removed ? items : items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session), removed };
   }
   const topic = session.topics[target.topic_id];
   if (!topic) return null;
   const items = itemList(session).filter(item => item.topic_id === topic.id);
   const removed = !!topic.removed_at;
-  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(session, removed ? items : items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session), removed,
-    unsent: unsentOf([session], input => input.target.topic_id === topic.id) };
+  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(session, removed ? items : items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session), removed };
 }
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -158,7 +142,11 @@ export function placeStrips(session: Immutable<Session>, route: SessionRef, hidd
   const places: PlaceStrip[] = [];
   for (const topic of Object.values(session.topics)) {
     if (!topic) continue;
-    if (hidden.topic(route, topic.id)) { if (!hidden.session(route)) places.push(topicPlace(topic, 'removed')); continue; }
+    if (hidden.topic(route, topic.id)) {
+      const key = hiddenKey.topic(route, topic.id);
+      if (!hidden.session(route)) places.push({ ...topicPlace(topic, 'removed'), ...hidden.undoable.has(key) ? {} : { ended: true } });
+      continue;
+    }
     if (topic.removed_at) { if (!archivedView) places.push(topicPlace(topic, 'agent-removed')); continue; }
     if (archived?.topicId === topic.id && topic.archived_at !== null) { places.push(topicPlace(topic, 'archived')); continue; }
     if ((topic.archived_at !== null) !== archivedView) continue;
@@ -167,7 +155,7 @@ export function placeStrips(session: Immutable<Session>, route: SessionRef, hidd
     for (const item of topicItems(topic.id)) {
       if (itemRemoved(session, item.id) || !hidden.keys.has(hiddenKey.item(route, item.id))) continue;
       if (item.parent && hidden.item(route, session, item.parent)) continue;
-      places.push(itemPlace(item, 'removed'));
+      places.push({ ...itemPlace(item, 'removed'), ...hidden.undoable.has(hiddenKey.item(route, item.id)) ? {} : { ended: true } });
     }
   }
   return places;
