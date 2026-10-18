@@ -4,6 +4,7 @@ import { useDockInset } from './dockInset';
 import { SideCovered } from './sideCovered';
 import { DETAILS_RAIL, useDetailsColumn } from '../../state/details/column';
 import { Notices } from '../pages/notices';
+import { Toast } from './ToastView';
 
 /** Body state the dock and the Details column replace; until then the shell keeps today's layout. */
 export interface LegacyBody {
@@ -93,5 +94,6 @@ export function Body({ main, side, dock, conversation }: BodyProps) {
     {conversation && <div ref={view} className="shell-conversation" style={{ left: 0 }}>{conversation}</div>}
     {dock && <div className="shell-dock">{dock}</div>}
     <div ref={layer} className="shell-notices" data-conversation={conversation ? '' : undefined} style={{ left: 0, right: conversation ? 0 : sideWidth }}><Notices /></div>
+    <div className="shell-toast" style={{ left: 0, right: conversation ? 0 : sideWidth }}><Toast /></div>
   </div>;
 }

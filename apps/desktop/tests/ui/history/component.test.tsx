@@ -57,7 +57,8 @@ describe('item detail panel', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} earlierAgent="codex" />);
     await screen.findByRole('heading', { name: item.question });
     expect(screen.getByText(`Decision · raised by codex at ${clockTime(created.created_at)}`)).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`codex #${created.number}`).length).toBeGreaterThan(0);
+    // The conversation names things, not numbers: no message numbers in the chat.
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).queryByText(`codex #${created.number}`)).toBeNull();
   });
 
   it('reads every section from the session snapshot in the handoff order', async () => {
@@ -66,7 +67,7 @@ describe('item detail panel', () => {
     await screen.findByRole('heading', { name: item.question });
     const created = session.messages.find(message => message.id === item.created_message_id)!;
     expect(screen.getByText(`Decision · raised by the agent at ${clockTime(created.created_at)}`)).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`#${created.number}`).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).queryByText(`#${created.number}`)).toBeNull();
     expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toBe(`Done${item.outcome}`);
     expect(screen.getByText(item.why!)).toBeTruthy();
     // One transcript follows the item context; revisit actions sit in the dock.
@@ -98,7 +99,7 @@ describe('item detail panel', () => {
       (message.id === item.created_message_id || item.updated_message_ids.includes(message.id) || message.item_id === item.id || message.items_touched.includes(item.id)))
       .sort((a, b) => a.number - b.number);
     expect([...chat.querySelectorAll<HTMLElement>('li[data-message-id]')].map(entry => entry.dataset.messageId)).toEqual(expected.map(message => message.id));
-    expect(chat.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
+    expect(chat.querySelector('[data-testid="chat-label"]')!.firstElementChild!.textContent).toBe('Agent raised this');
     expect(screen.queryByRole('region', { name: 'Timeline' })).toBeNull();
     // Copy reference moved into the head's "…" menu (it is a row of the emitted actions list).
     expect(screen.queryByText('Copy reference')).toBeNull();
@@ -129,7 +130,7 @@ describe('item detail panel', () => {
     const waiting = () => within(chat).queryByText('Waiting on you');
     const bubble = () => chat.querySelector<HTMLElement>('[data-pending="00000000-0000-4000-8000-000000000945"]');
     // On its way, the answer counts: it ends the conversation as a pending bubble and the round no longer waits on the owner.
-    expect(bubble()!.textContent).toContain('Not sent yet');
+    expect(bubble()!.textContent).toMatch(/Sent at \d\d:\d\d · waiting for the agent/u);
     expect(bubble()!.textContent).toContain('You chose');
     expect(chat.querySelectorAll('.detail-msg-you')).toHaveLength(2);
     expect(waiting()).toBeNull();
@@ -160,7 +161,7 @@ describe('item detail panel', () => {
     const ids = new Set([...item.updated_message_ids.filter(id => value.transport.session.messages.some(message => message.id === id && !withdrawn(immutable(value.transport.session), immutable(message)))), ...replies]);
     const entries = [...timeline.querySelectorAll<HTMLElement>('li[data-message-id]')];
     expect(entries.map(entry => entry.dataset.messageId)).toEqual([...ids].sort((a, b) => value.transport.session.messages.find(message => message.id === a)!.number - value.transport.session.messages.find(message => message.id === b)!.number));
-    expect(timeline.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
+    expect(timeline.querySelector('[data-testid="chat-label"]')!.firstElementChild!.textContent).toBe('Agent raised this');
   });
   it('shows a short result only beneath the owner message with no full agent reply before the next owner message', async () => {
     const value = await ready(session => {
@@ -194,10 +195,12 @@ describe('item detail panel', () => {
     const value = await ready(), session = value.transport.session, item = session.items['1.1']!, open = vi.fn();
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={item.id} later={false} onOpenItem={open} />);
     const chat = await screen.findByRole('region', { name: 'Conversation' });
-    expect(within(chat).getByText('Parent raised here')).toBeTruthy();
+    // The parent's message is context, labelled like any agent message: no "Parent raised here" label (alpha.21 E12).
+    expect(within(chat).queryByText('Parent raised here')).toBeNull();
     expect(within(chat).getByText('Agent raised this')).toBeTruthy();
     const parent = session.items[item.parent!]!;
-    expect(chat.querySelector(`[data-message-id="${parent.created_message_id}"]`)!.textContent).toContain(parent.question);
+    const parentMessage = session.messages.find(message => message.id === parent.created_message_id)!;
+    expect(chat.querySelector(`[data-message-id="${parent.created_message_id}"]`)!.textContent).toContain(parentMessage.body);
     const raised = chat.querySelector(`[data-message-id="${item.created_message_id}"]`)!;
     expect(chat.querySelectorAll('li[data-message-id]')).toHaveLength(2);
     expect(within(raised as HTMLElement).getByRole('button', { name: 'Copy message' })).toBeTruthy();

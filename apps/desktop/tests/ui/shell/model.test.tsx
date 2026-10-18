@@ -7,8 +7,9 @@ const now = new Date(2026, 9, 7, 15, 30).getTime();
 const at = (daysAgo: number, hours: number, minutes: number) => new Date(2026, 9, 7 - daysAgo, hours, minutes).getTime();
 describe('shell model', () => {
   it('names agents and formats times as the handoff writes them', () => {
-    expect(agentName('claude_code_mod')).toBe('claude-code');
-    expect(agentName('codex')).toBe('codex');
+    expect(agentName('claude_code_mod')).toBe('Claude Code');
+    expect(agentName('codex')).toBe('Codex');
+    expect(agentName('some-other-adapter')).toBe('some-other-adapter');
     expect(hostApp('iTerm window 1')).toBe('iTerm');
     expect(hostApp('VS Code')).toBe('VS Code');
     expect(hostApp(null)).toBeNull();

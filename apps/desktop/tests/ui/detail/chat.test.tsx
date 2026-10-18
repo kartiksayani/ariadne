@@ -317,7 +317,7 @@ describe('the single item chat', () => {
     const ask = session.items['2']!.ask!;
     expect(chat.filter(entry => entry.message.body.includes(ask))).toHaveLength(1);
     expect(chat.flatMap(entry => entry.asks).some(value => value.text === ask)).toBe(false);
-    expect(model(session, '1.1').chat.some(entry => entry.marker.includes('Parent raised here'))).toBe(true);
+    expect(model(session, '1.1').chat.some(entry => entry.id === session.items['1']!.created_message_id)).toBe(true);
     expect(model(session).chat.flatMap(entry => entry.forks).map(fork => fork.id)).toEqual(['1.1']);
   });
 

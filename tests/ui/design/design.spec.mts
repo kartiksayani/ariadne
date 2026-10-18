@@ -611,14 +611,14 @@ for (const id of dockFrameIds) {
       return { height: element.getBoundingClientRect().height, minimum: parseFloat(style.minHeight), line: parseFloat(style.lineHeight),
         padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), border: parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) };
     });
-    expect(lines.height, 'resting composer is one line').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line + lines.padding + lines.border)));
+    expect(lines.height, 'resting composer is two rows (alpha.21 E15)').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line * 2 + lines.padding + lines.border)));
     await expect(dock.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeInViewport();
     await expect(dock.getByRole('button', { name: 'Reply', exact: true })).toBeInViewport();
     await expect(dock.getByRole('button', { name: 'Later', exact: true })).toBeInViewport();
     if (spec.dockState === 'pending') {
       const pending = pane.getByRole('region', { name: 'Conversation', exact: true }).locator('li[data-pending]');
       await expect(pending).toContainText('Keep the captions with the examples.');
-      await expect(pending).toContainText('On its way');
+      await expect(pending).toContainText(/✓ (Sent at|Picked up)/u);
       await expect(pending).toBeInViewport();
       await expect(dock.locator('.detail-delivery-hint')).toHaveText('Your reply was received · waiting for the agent');
       await expect(dock.getByRole('button', { name: 'Bring it up', exact: true })).toHaveCount(0);

@@ -83,6 +83,13 @@
   flex-shrink: 0;
 }
 
+/* A question waiting on the owner picks the composer out: a waiting-coloured top edge and a soft glow (SPEC 5.3). */
+.detail-dock-waiting {
+  border-top: 1.5px solid var(--st-waiting);
+  box-shadow: 0 -10px 24px color-mix(in srgb, var(--st-waiting) 8%, transparent);
+}
+
+
 /* The badge row and the title (SPEC 5.3 items 1 and 2). They scroll with the body: only the composer is pinned. */
 .detail-head {
   flex: none;
@@ -330,24 +337,39 @@
 
 .detail-composer-row {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 6px;
 }
 
 .detail-composer-row > textarea {
-  flex: 1;
   min-width: 0;
-  min-height: 34px;
   resize: none;
   font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
 }
 
-.detail-composer-row > .btn {
+/* The line under the box: where the words go, then Send. */
+.detail-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-composer-bar > .btn {
   flex: none;
-  height: 34px;
-  padding: 0 8px;
+  height: 30px;
+  padding: 0 10px;
   font-size: calc(12px * var(--text-scale));
+}
+
+/* Where the words came from: back after a restart, or taken back from the queue. */
+.detail-chip {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .detail-box-collapsed textarea {
@@ -391,6 +413,29 @@
 .detail-box-hint {
   font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-composer-bar > .detail-box-hint {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.detail-bar-short {
+  display: none;
+}
+
+@media (width < 1000px) {
+  .detail-bar-long {
+    display: none;
+  }
+
+  .detail-bar-short {
+    display: inline;
+  }
 }
 
 .detail-error {
@@ -684,8 +729,13 @@
 }
 
 /* You: right, tinted. */
+.detail-msg:not(.detail-msg-you) {
+  padding-right: 10%;
+}
+
 .detail-msg-you {
   justify-content: flex-end;
+  padding-left: 14%;
 }
 
 .detail-bubble-you {
@@ -714,7 +764,7 @@
 }
 
 /* A message still on its way: dashed, with where it stands under it. */
-.detail-turn-pending .detail-bubble-you {
+.detail-turn-pending:not(.detail-turn-status) .detail-bubble-you {
   outline: 1px dashed color-mix(in srgb, var(--color-accent) 50%, transparent);
   outline-offset: -1px;
 }
@@ -776,14 +826,74 @@
   text-wrap: pretty;
 }
 
-/* Quiet metadata within the single chat. */
-.detail-agent-meta,
-.detail-chat-marker {
+/* What a bubble is ("Agent raised this", "You replied") and when, above it. */
+.detail-chat-label {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-chat-label > span:first-child {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.detail-msg-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-msg-you .detail-msg-main {
+  align-items: flex-end;
+}
+
+/* The agent's round robot, beside the bubble's foot. */
+.detail-avatar {
+  display: flex;
+  flex: none;
+  align-self: flex-end;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: calc(13px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  background: color-mix(in srgb, var(--color-text) 9%, transparent);
+}
+
+/* Where an owner's message stands, under its bubble. */
+.detail-bubble-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.detail-bubble-status-problem {
+  color: var(--a-danger);
+}
+
+.detail-status-action {
+  min-height: 0;
+  padding: 0 2px;
+  font-size: inherit;
+  text-decoration: underline;
+}
+
+/* The divider before the first message the owner has not seen: an attention line and its text. */
+.detail-chat .conversation-unseen {
+  padding: 10px 0 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--attention) 60%, transparent);
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 500;
+  color: var(--attention);
 }
 
 .detail-related {

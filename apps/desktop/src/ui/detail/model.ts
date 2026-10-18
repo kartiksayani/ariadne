@@ -7,7 +7,7 @@ import type { SupervisorHealth } from '../../data/service';
 import type { Input, InputKind, Item, ItemOption, LinkKind, Message, PresenceObservation, Round, Session } from '../../generated/domain/models';
 import { connectionOf, reconnectingNote } from '../shared/connection';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
-import { agentName } from '../shell/model';
+import { agentName, clock } from '../shell/model';
 import { shortLabel } from '../shared/short';
 import { excerptView, type ExcerptView } from '../shared/excerpt';
 import { statusKey, type StatusKey } from '../shared/status';
@@ -18,6 +18,7 @@ import { agentReceived, counted, heldInput, notSent, stoppedAttempt, stuckInput,
 import { relatedItems, type LinkDirection } from '../../selectors/related';
 import { hiddenItems } from '../tree/hidden';
 import { clockTime } from '../changes/clock';
+import { editable } from '../answer/held';
 
 export { statusKey, type StatusKey };
 export const closedStatus: ReadonlySet<StatusKey> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -70,11 +71,22 @@ export interface PendingView {
   /** Why it hasn't reached the agent, with what fixes it (ui/answer/StuckNote); null while saving. */
   readonly stuck: Stuck | null;
 }
+/**
+ * Where an owner's message stands, as the status line under its bubble says it (alpha.21 E16). `sent`: it is queued
+ * ("Sent at 21:25 · waiting for the agent"; `undo` only while it can still be taken back) or on its way. `picked_up`: the
+ * agent has it. `not_sent`: a stopped delivery the agent never received, with a plain resend (Retry).
+ */
+export type BubbleStatus =
+  | { readonly kind: 'sent'; readonly input: Immutable<Input>; readonly at: string; readonly undo: boolean }
+  | { readonly kind: 'picked_up'; readonly at: string }
+  | { readonly kind: 'not_sent'; readonly input: Immutable<Input>; readonly stuck: Stuck };
 export interface ChatEntry {
   readonly id: string;
   readonly message: ExcerptView;
-  readonly marker: string;
-  readonly note: string;
+  /** What the bubble is, above it: "Agent raised this", "You replied" (alpha.21 E12). */
+  readonly label: string;
+  /** Under an owner bubble: where the message stands; null when the bubble has nothing to add (cancelled, settled, an agent bubble). */
+  readonly status: BubbleStatus | null;
   readonly asks: readonly { readonly text: string; readonly now: boolean; readonly ordinal: number }[];
   readonly you: Pick<PendingView, 'how' | 'text' | 'note'> | null;
   readonly pending: PendingView | null;
@@ -214,6 +226,47 @@ function metaLine(type: Item['type'], created: Immutable<Message> | undefined, w
   return `${TYPE[type]} · ${type === 'finding' ? 'by' : 'raised by'} ${who} at ${clockTime(created.created_at)}`;
 }
 
+const timeOf = (iso: string | null | undefined): string => {
+  const at = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(at) ? '' : clock(at);
+};
+/** When the agent took the message: its accepted attempt's receipt, else the turn that carried it. */
+const pickedUpAt = (input: Immutable<Input>): string => {
+  const attempt = input.attempts.find(value => value.id === input.active_attempt_id && agentReceived(value)) ?? [...input.attempts].reverse().find(value => agentReceived(value));
+  return timeOf(attempt?.acceptance_observed_at ?? attempt?.turn_observed_at);
+};
+/**
+ * The status line under an owner bubble (alpha.21 E16). A held message, a stopped one the agent already has, and anything else
+ * whose fix is StuckNote's keep their existing wording and controls (null here); Undo shows only while the message is queued
+ * and ready to go, because that is the only time taking it back cannot lose a delivery.
+ */
+export function bubbleStatus(input: Immutable<Input>, stuck: Stuck | null): BubbleStatus | null {
+  if (input.state === 'queued') return editable(input.kind) && (!stuck || stuck.kind === 'waiting' || stuck.kind === 'busy')
+    ? { kind: 'sent', input, at: timeOf(input.created_at), undo: true } : null;
+  if (input.state === 'in_flight') {
+    // Picked up once the agent's turn is running (the delivery line says "received"); a host that only accepted it has not got it yet.
+    const kind = deliveryEvidence(input, null).kind;
+    return kind === 'received' || kind === 'published' || kind === 'waiting_result' ? { kind: 'picked_up', at: pickedUpAt(input) }
+      : { kind: 'sent', input, at: timeOf(input.created_at), undo: false };
+  }
+  if (input.state === 'handled') return { kind: 'picked_up', at: pickedUpAt(input) };
+  if (input.state === 'needs_attention' && stuck?.retry && !agentReceived(input.attempts.find(value => value.id === input.active_attempt_id))) return { kind: 'not_sent', input, stuck };
+  return null;
+}
+
+/** "Agent raised this", "Agent updated", "You replied", … above a bubble (alpha.21 E12). */
+function chatLabel(session: Immutable<Session>, item: Immutable<Item>, message: Immutable<Message>, entry: Pick<ChatEntry, 'you'>): string {
+  if (message.author === 'owner') {
+    if (message.id === item.created_message_id) return 'You asked here';
+    const answered = entry.you?.how === 'chose' || entry.you?.how === 'action' || session.answers.some(answer => answer.message_id === message.id)
+      || Object.values(session.inputs).some(input => input?.message_id === message.id && input.kind === 'answer');
+    return answered ? 'You' : 'You replied';
+  }
+  if (message.author === 'system') return 'System';
+  if (message.id === item.created_message_id) return item.type === 'finding' ? 'Agent found this' : 'Agent raised this';
+  return item.updated_message_ids.includes(message.id) ? 'Agent updated' : 'Agent explained';
+}
+
 const kid = (item: Immutable<Item>): Kid => ({ id: item.id, question: item.question, status: statusKey[item.status], closed: closedStatus.has(statusKey[item.status]) });
 
 /** The breadcrumb above an item: its topic, then each ancestor, by short label. */
@@ -313,19 +366,17 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
 
   const rounds = Object.values(session.rounds).filter((round): round is Immutable<Round> => !!round && round.item_id === item.id).sort((a, b) => a.ordinal - b.ordinal);
   const entries = new Map<string, ChatEntry>();
-  const add = (id: string | undefined, marker = '', note = '') => {
+  const add = (id: string | undefined) => {
     const message = id ? byId.get(id) : undefined;
     if (!message || withdrawn(session, message)) return null;
-    const old = entries.get(message.id);
-    const entry: ChatEntry = old ? { ...old, marker: [old.marker, marker].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · '), note: note || old.note }
-      : { id: message.id, message: excerptView(message, now, earlierAgent), marker, note, asks: [], you: null, pending: null,
-        unsent: notSent(session, message), result: '', forks: [] };
+    const entry: ChatEntry = entries.get(message.id) ?? { id: message.id, message: excerptView(message, now, earlierAgent), label: '', status: null, asks: [], you: null,
+      pending: null, unsent: notSent(session, message), result: '', forks: [] };
     entries.set(message.id, entry);
     return entry;
   };
   const parent = item.parent ? session.items[item.parent] : undefined;
-  if (parent) add(parent.created_message_id, 'Parent raised here', `From: ${parent.question}`);
-  add(item.created_message_id, created?.author === 'owner' ? 'You asked here' : 'Agent raised this');
+  if (parent) add(parent.created_message_id);
+  add(item.created_message_id);
   item.updated_message_ids.forEach(id => add(id));
   session.messages.forEach(message => { if (message.item_id === item.id || message.items_touched.includes(item.id)) add(message.id); });
   rounds.forEach(round => {
@@ -366,7 +417,8 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
       || results.some(value => value.handled_through_message_number >= message.number);
     const pending = outbox.find(value => value.input.message_id === entry.id) ?? null;
     if (pending?.input.state === 'in_flight' && answeredAfter) kept.add(entry.id);
-    entries.set(entry.id, { ...entry, you, pending: kept.has(entry.id) ? null : pending, result: counted(session, message) && !fullReply ? result?.explanation ?? '' : '' });
+    const stuckNow = pending ? pending.stuck : null;
+    entries.set(entry.id, { ...entry, you, pending: kept.has(entry.id) ? null : pending, status: input ? bubbleStatus(input, stuckNow) : null, result: counted(session, message) && !fullReply ? result?.explanation ?? '' : '' });
   }
   const answered = active.some(input => (input.kind === 'answer' || input.kind === 'reply') && !heldInput(session, input));
   rounds.forEach((round, index) => {
@@ -398,7 +450,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     const anchor = [...ordered()].reverse().find(entry => entry.message.author === 'agent' && entry.message.body.includes(ask)) ?? entries.get(item.created_message_id);
     if (anchor) entries.set(anchor.id, { ...anchor, asks: [{ text: anchor.message.body.includes(ask) || ask === item.question ? '' : ask, now: !answered, ordinal: 1 }] });
   }
-  const chat = ordered();
+  const chat = ordered().map(entry => ({ ...entry, label: chatLabel(session, item, byId.get(entry.id)!, entry) }));
   const reopened = isClosed ? undefined : [...item.status_history].reverse().find(entry => closedStatus.has(statusKey[entry.old_status]) && !closedStatus.has(statusKey[entry.new_status]));
   const replacement = item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] : undefined;
   const kids = items.filter(value => value.parent === item.id).sort((a, b) => a.ordinal - b.ordinal);
@@ -434,7 +486,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
 
 /** The box texts per mode (Ariadne.dc.html:2012-2016). */
 export const boxText: Readonly<Record<'reply' | 'note' | 'followup', BoxText>> = {
-  reply: { label: 'Reply message', placeholder: 'Reply in your own words…', button: 'Send reply', hint: '⌘↵ sends · Esc cancels, keeps your draft' },
+  reply: { label: 'Reply message', placeholder: 'Reply about this item…', button: 'Send reply', hint: '⌘↵ sends · Esc cancels, keeps your draft' },
   note: { label: 'Note message', placeholder: 'Add a note, e.g. also cover the 429 case', button: 'Send note', hint: '⌘↵ sends · it stays In progress' },
   followup: { label: 'Follow-up message', placeholder: 'Follow up, e.g. Could we also add a test for this?', button: 'Send follow-up', hint: '⌘↵ sends · Esc cancels, keeps your draft' },
 };
@@ -444,15 +496,37 @@ export function actionText(kind: 'drop' | 'reopen', question: string, reason = '
   if (kind === 'reopen') return `Let’s reopen this: ${question}`;
   return `Let’s drop this${reason.trim() ? ` (${reason.trim()})` : ''}: ${question}`;
 }
-
 /**
- * The chat entries of a topic's own conversation: its messages (no item, this topic), oldest first. Still to come in this
- * function: the owner's pending topic replies that have no message row yet, and cancelled and taken-back states.
+ * The chat entries of a topic's own conversation (Details in topic mode, alpha.21 E5): the topic's messages (no item), oldest
+ * first, and the owner's topic replies that have no message row yet (an input can arrive before its message page, as
+ * `detailModel` handles for an item). Each owner reply carries its delivery state and status line like an item's does, so a
+ * cancelled or taken-back reply keeps its words visible with "Put back", and a stuck one its fix.
  */
-export function topicChat(session: Immutable<Session>, topicId: string, now: number): readonly ChatEntry[] {
-  return session.messages.filter(message => message.item_id === null && message.topic_id === topicId && !withdrawn(session, message))
-    .sort((a, b) => a.number - b.number)
-    .map(message => ({ id: message.id, message: excerptView(message, now), marker: '', note: '', asks: [],
-      you: message.author === 'owner' ? { how: 'said' as const, text: message.body, note: '' } : null,
-      pending: null, unsent: notSent(session, message), result: '', forks: [] }));
+export function topicChat(session: Immutable<Session>, topicId: string, now: number,
+  { presence = null, health = null }: { readonly presence?: Immutable<PresenceObservation> | null; readonly health?: SupervisorHealth | null } = {}): readonly ChatEntry[] {
+  const byId = new Map(session.messages.map(message => [message.id, message]));
+  const inputs = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.kind === 'topic_reply' && input.target.item_id === null && input.target.topic_id === topicId);
+  const inputOf = new Map(inputs.map(input => [input.message_id, input]));
+  let top = Math.max(0, ...session.messages.map(message => message.number));
+  // An input can arrive before its message page: show its words in order after the messages that are there.
+  for (const input of inputs.filter(value => ACTIVE_INPUT.has(value.state) && !byId.has(value.message_id)).sort((a, b) => a.seq - b.seq)) {
+    byId.set(input.message_id, { id: input.message_id, number: ++top, author: 'owner', kind: 'owner_input', body: input.payload.text, created_at: input.created_at,
+      item_id: null, topic_id: topicId, items_touched: [], binding_id: input.binding_id, input_id: input.id, attempt_id: null, host_turn_id: null, round_id: null, origin: null });
+  }
+  const messages = [...byId.values()].filter(message => message.item_id === null && message.topic_id === topicId && !withdrawn(session, message)).sort((a, b) => a.number - b.number);
+  return messages.map((message, index): ChatEntry => {
+    const input = inputOf.get(message.id);
+    const stuck = input && ACTIVE_INPUT.has(input.state) ? stuckInput(session, input, presence, health) : null;
+    const cancelled = !!input && input.state === 'cancelled';
+    const nextOwner = messages.slice(index + 1).find(value => value.author === 'owner');
+    const answeredInChat = messages.slice(index + 1).some(value => value.author === 'agent' && (!nextOwner || value.number < nextOwner.number));
+    const result = input && !cancelled && !answeredInChat ? input.attempts.flatMap(attempt => attempt.domain_result ? [attempt.domain_result] : [])
+      .filter(value => value.handled_through_message_number >= message.number && (!nextOwner || value.handled_through_message_number < nextOwner.number)).at(-1)?.explanation ?? '' : '';
+    return { id: message.id, message: excerptView(message, now),
+      label: message.author === 'owner' ? 'You replied' : message.author === 'system' ? 'System' : 'Agent',
+      status: input ? bubbleStatus(input, stuck) : null, asks: [],
+      you: message.author === 'owner' ? input ? sentView(input) : { how: 'said' as const, text: message.body, note: '' } : null,
+      pending: input && ACTIVE_INPUT.has(input.state) ? { input, ...sentView(input), caption: caption(input), stuck } : null,
+      unsent: notSent(session, message), result, forks: [] };
+  });
 }

@@ -356,16 +356,14 @@ describe('conversation control regressions', () => {
     expect(screen.queryByRole('dialog', { name: 'Current question' })).toBeNull();
   });
 
-  it('keeps the original pane owner caption after the reply while the larger view labels You before it', async () => {
+  it('labels the owner bubble above it, with its time, in the pane and in the larger view', async () => {
     const { props } = await setup();
     const pane = render(<ItemConversation {...props} itemId="1" />);
-    const paneCaption = document.querySelector('.detail-bubble-you .detail-pending-caption')!;
-    expect(paneCaption.textContent).toMatch(/^you · /);
-    expect(paneCaption.previousElementSibling).not.toBeNull();
+    const paneLabel = document.querySelector('.detail-msg-you [data-testid="chat-label"]')!;
+    expect(paneLabel.textContent).toMatch(/^You( replied)?.*\d\d:\d\d$/u);
+    expect(document.querySelector('.detail-bubble-you .detail-pending-caption')).toBeNull();
     pane.unmount();
     render(<ConversationView {...props} itemId="1" onClose={vi.fn()} />);
-    const viewCaption = document.querySelector('.detail-bubble-you .detail-pending-caption')!;
-    expect(viewCaption.textContent).toMatch(/^You · /);
-    expect(viewCaption.previousElementSibling).toBeNull();
+    expect(document.querySelector('.detail-msg-you [data-testid="chat-label"]')!.textContent).toMatch(/^You( replied)?.*\d\d:\d\d$/u);
   });
 });

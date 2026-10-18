@@ -613,7 +613,7 @@ describe('owner input component and durable draft controller', () => {
       expect(screen.queryByRole('textbox', { name: 'Note message' })).toBeNull();
       expect(screen.getByRole('button', { name: 'Send reply' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Send note' })).toBeNull();
-      expect(box.placeholder).toBe('Reply in your own words…');
+      expect(box.placeholder).toBe('Reply about this item…');
       expect(screen.queryByText(/It will be sent as a/)).toBeNull();
       expect(box.getAttribute('aria-describedby')).toBeNull();
     });
@@ -2025,13 +2025,14 @@ describe('the item detail reads like a chat', () => {
     expect(reply.title).toBeTruthy();
   });
 
-  it('keeps the words and Send in one row, with one short hint and Escape collapse', async () => {
+  it('keeps the words with Send in the bar under them, with one short bar text and Escape collapse', async () => {
     const user = userEvent.setup(), { dock, value } = await view('8');
     const box = within(dock!).getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
     const send = within(dock!).getByRole('button', { name: 'Send reply' });
-    expect(box.parentElement).toBe(send.parentElement);
+    expect(box.parentElement).toBe(send.closest('.detail-composer-row'));
+    expect(send.parentElement!.classList.contains('detail-composer-bar')).toBe(true);
     const hints = dock!.querySelectorAll('.detail-box-hint');
-    expect(hints).toHaveLength(1); expect(hints[0]!.textContent).toBe('⌘↵ sends · Esc keeps draft');
+    expect(hints).toHaveLength(1); expect(hints[0]!.textContent).toBe('Goes to the agent with this item’s name.');
     await user.type(box, 'Keep these exact words.');
     await user.keyboard('{Escape}');
     expect(box.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(true);
@@ -2054,7 +2055,7 @@ describe('the item detail reads like a chat', () => {
 
   it.each([
     { state: 'queued' as const, source: '76', caption: 'Not sent yet' },
-    { state: 'needs_attention' as const, source: '74', caption: 'Not delivered' },
+    { state: 'needs_attention' as const, source: '74', caption: '⚠ Not sent. Your words are kept.' },
   ])('keeps an Open item’s $state message evidence without an on-the-way dock claim', async ({ state, source, caption }) => {
     const { dock, chat } = await view('8', session => {
       const input = structuredClone(session.inputs[demoId(source)]!);
@@ -2072,24 +2073,122 @@ describe('the item detail reads like a chat', () => {
   });
 
   it.each([
-    { turn: 'unknown' as const, expected: 'Sending your reply…' },
-    { turn: 'running' as const, expected: 'Your reply was received · waiting for the agent' },
-  ])('uses the exact $turn attempt evidence for an in-flight reply’s hint', async ({ turn, expected }) => {
+    { turn: 'unknown' as const, expected: 'Sending your reply…', status: /✓ Sent at \d\d:\d\d · waiting for the agent/u },
+    { turn: 'running' as const, expected: 'Your reply was received · waiting for the agent', status: /✓ Picked up at \d\d:\d\d/u },
+  ])('uses the exact $turn attempt evidence for an in-flight reply’s dock hint and bubble status', async ({ turn, expected, status }) => {
     const { chat } = await view('8', session => {
       const input = structuredClone(session.inputs[demoId('72')]!);
       input.id = uuid(90); input.seq = 50; input.message_id = uuid(91); input.target.item_id = '8';
       input.attempts.find(attempt => attempt.id === input.active_attempt_id)!.turn_state = turn;
       session.inputs[input.id] = input;
     });
-    expect(chat()!.querySelector(`[data-pending="${uuid(90)}"]`)!.textContent).toContain('On its way');
+    expect(chat()!.querySelector(`[data-pending="${uuid(90)}"]`)!.textContent).toMatch(status);
     const hint = document.querySelector<HTMLElement>('.detail-body .detail-delivery-hint')!;
     expect(hint.textContent).toBe(expected); expect(hint.title).toBe(expected);
     expect(document.body.textContent).not.toContain('Your message is on its way. You can write another; it goes out after.');
   });
 
+  describe('the status line under an owner bubble (alpha.21 E16)', () => {
+    /** A reply input of item 8, cloned from a canonical one and put in `state`. */
+    const reply = (state: 'queued' | 'in_flight' | 'needs_attention', extra: (session: Session, input: Session['inputs'][string] & object) => void = () => {}) => (session: Session) => {
+      const input = structuredClone(session.inputs[demoId(state === 'queued' ? '76' : state === 'in_flight' ? '72' : '74')]!);
+      input.id = uuid(90); input.seq = 50; input.message_id = uuid(91); input.state = state; input.kind = 'reply';
+      input.target.item_id = '8'; input.payload.text = 'Exact words\n  keep the spaces ';
+      input.payload.target_snapshot.question_revision = session.items['8']!.question_revision;
+      input.binding_id = session.active_binding_id!;
+      session.inputs[input.id] = input;
+      extra(session, input);
+    };
+
+    it('Undo takes a queued reply back and puts its exact words in the composer, with the taken-back chip and bar', async () => {
+      const { value, chat } = await view('8', reply('queued', session => { for (const other of Object.values(session.inputs)) if (other && other.id !== uuid(90) && other.binding_id === session.active_binding_id && other.state !== 'handled') other.state = 'handled'; }));
+      const line = chat()!.querySelector<HTMLElement>('[data-status="sent"]')!;
+      expect(line.textContent).toMatch(/^✓ Sent at \d\d:\d\d · waiting for the agentUndo$/u);
+      fireEvent.click(within(line).getByRole('button', { name: 'Undo' }));
+      await waitFor(() => expect(value.calls.some(call => 'command' in call && call.command.command === 'input_cancel' && call.command.params.purpose === 'edit')).toBe(true));
+      const box = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
+      await waitFor(() => expect(box.value).toBe('Exact words\n  keep the spaces '));
+      expect(screen.getByTestId('composer-chip').textContent).toBe('✎ Taken back to edit');
+      expect(document.querySelector('.detail-box-hint')!.textContent).toBe('Taken back from the queue. It isn’t sent until you send it again.');
+      // Editing the words clears the mark.
+      fireEvent.change(box, { target: { value: 'Changed my mind' } });
+      await waitFor(() => expect(screen.queryByTestId('composer-chip')).toBeNull());
+    });
+
+    it.each([
+      ['in flight', reply('in_flight')],
+      ['stopped', reply('needs_attention')],
+      ['queued behind another message', reply('queued')],
+    ])('has no Undo while %s', async (_name, change) => {
+      const { chat } = await view('8', change);
+      const turn = chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
+      expect(within(turn).queryByRole('button', { name: 'Undo' })).toBeNull();
+    });
+
+    it('offers Retry on “Not sent” only for a delivery the agent never received', async () => {
+      const never = await view('8', reply('needs_attention'));
+      const line = never.chat()!.querySelector<HTMLElement>('[data-status="not_sent"]')!;
+      expect(line.textContent).toMatch(/^⚠ Not sent\. Your words are kept\.Retry$/u);
+      // StuckNote keeps its explanation and its other controls; the Retry is not shown twice.
+      const turn = never.chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
+      expect(within(turn).getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+      expect(turn.querySelector('.stuck-note')!.textContent).toContain('Ariadne isn’t sure it reached');
+    });
+
+    it('keeps StuckNote’s own wording and controls, and no “Not sent” line, once the agent has the message', async () => {
+      const { chat } = await view('8', reply('needs_attention', (_session, input) => {
+        const attempt = input.attempts.find(value => value.id === input.active_attempt_id)!;
+        attempt.acceptance = 'accepted'; attempt.host_turn_id = 'turn-x'; attempt.turn_state = 'completed'; attempt.result_state = 'missing'; attempt.sealed_at = null;
+      }));
+      const turn = chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
+      expect(turn.querySelector('[data-status]')).toBeNull();
+      expect(turn.querySelector('.stuck-note')).not.toBeNull();
+    });
+  });
+
+  describe('the composer after a restart and when the item starts waiting (alpha.21 E15, E18)', () => {
+    const saved = (patch: Partial<OwnerDraft> = {}): OwnerDraft => ({ ...attemptedDraft(), op_id: uuid(120), intent: 'reply', selected_option_id: null, text: ' Words from before the restart \n',
+      submission_attempted: false, target: { topic_id: attemptedDraft().target.topic_id, item_id: '8' }, ...patch });
+    const open = async (draft: OwnerDraft, itemId = '8') => {
+      const value = await setup([draft]);
+      render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+      await screen.findByRole('article');
+      return value;
+    };
+
+    it('shows the recovered chip and bar on words that came back unsent, until the owner edits them', async () => {
+      await open(saved());
+      const box = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
+      await waitFor(() => expect(box.value).toBe(' Words from before the restart \n'));
+      expect(screen.getByTestId('composer-chip').textContent).toBe('↺ Recovered after a restart');
+      expect(document.querySelector('.detail-box-hint')!.textContent).toBe('↺ Back as you left it before the restart. Not sent.');
+      fireEvent.change(box, { target: { value: 'Edited' } });
+      await waitFor(() => expect(screen.queryByTestId('composer-chip')).toBeNull());
+      expect(document.querySelector('.detail-bar-long')!.textContent).toBe('Draft kept. It stays here until you send it.');
+    });
+
+    it('marks no draft that was already attempted: its exact-operation recovery stays as it is', async () => {
+      await open(saved({ submission_attempted: true }));
+      await screen.findByRole('textbox', { name: 'Reply message' });
+      expect(screen.queryByTestId('composer-chip')).toBeNull();
+    });
+
+    it('keeps a non-empty reply draft, with its exact text, when the item becomes waiting; only a blank reply box hides', async () => {
+      const value = await open(saved(), '8');
+      expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(' Words from before the restart \n');
+      await act(async () => {
+        const item = value.session.items['8']!;
+        item.status = 'waiting_on_me'; item.ask = 'Which one?'; item.options = [{ id: 'a', label: 'A', consequence: 'x', recommended: false }];
+        value.session.revision++; await value.store.refresh();
+      });
+      const kept = await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
+      expect(kept.value).toBe(' Words from before the restart \n');
+    });
+  });
+
   it('puts the reference on top, the conversation after it and the composer docked below the scrolling body', async () => {
     const { pane, body, dock } = await view('2');
-    expect([...pane.children].map(element => element.className)).toEqual(['detail-body', 'detail-dock']);
+    expect([...pane.children].map(element => element.classList.contains('detail-dock') ? 'detail-dock' : element.className)).toEqual(['detail-body', 'detail-dock']);
     const labels = [...body.children].map(element => element.getAttribute('aria-label') ?? element.className);
     expect(labels[0]).toBe('detail-head');
     expect(labels.at(-1)).toBe('Conversation');
@@ -2217,9 +2316,10 @@ describe('the item detail reads like a chat', () => {
     });
     const list = turns(chat()!).filter(turn => turn.dataset.pending);
     expect(list.at(-1)!.dataset.pending).toBe(demoId('71'));
-    // The owner's own words can be taken back to edit, or deleted, right on the bubble.
-    expect(within(list.at(-1)!).getByRole('button', { name: 'Edit' })).toBeTruthy();
-    expect(within(list.at(-1)!).getByRole('button', { name: 'Delete' })).toBeTruthy();
+    // The owner's own words can be taken back to edit right under the bubble: "Sent at … · waiting for the agent  Undo".
+    expect(within(list.at(-1)!).getByRole('button', { name: 'Undo' })).toBeTruthy();
+    expect(list.at(-1)!.querySelector('[data-status="sent"]')!.textContent).toMatch(/^✓ Sent at \d\d:\d\d · waiting for the agentUndo$/u);
+    expect(within(list.at(-1)!).queryByRole('button', { name: 'Delete' })).toBeNull();
     expect(chat()!.querySelectorAll('[data-pending]')).toHaveLength(1);
     expect(within(chat()!).queryByText('Waiting on you')).toBeNull();
   });
@@ -2334,10 +2434,10 @@ describe('the item detail reads like a chat', () => {
     const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? contentHeight : 0; });
     try {
       await view(itemId);
-      // An answer's own-words box opens from "Write my own answer"; it is two rows, a reply box one.
+      // An answer's own-words box opens from "Write my own answer"; both it and a reply box are two rows (alpha.21 E15).
       const box = itemId === '2' ? editor() : screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement;
       expect(box.getAttribute('aria-label')).toBe(label);
-      expect(box.rows).toBe(itemId === '2' ? 2 : 1); expect(box.value).toBe('');
+      expect(box.rows).toBe(2); expect(box.value).toBe('');
       expect(box.style.height).toBe('auto'); expect(box.style.overflowY).toBe('hidden');
       fireEvent(window, new Event('resize'));
       expect(box.style.height).toBe('auto');

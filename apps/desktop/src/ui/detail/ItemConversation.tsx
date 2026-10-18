@@ -116,6 +116,8 @@ export interface ItemDetailProps extends ItemActionsProps {
   readonly expanded?: boolean;
   readonly onOpenConversation?: () => void;
   readonly dividerId?: string | null;
+  /** When the owner last looked, for the divider's "New since you last looked at 20:40". */
+  readonly dividerAt?: number | null;
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
@@ -203,7 +205,7 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, onHide, onRemove, onActions, onMarkSeen }: ItemDetailProps) {
+export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, dividerAt, onHide, onRemove, onActions, onMarkSeen }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
@@ -510,7 +512,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
   const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale);
-  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
+  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} expanded={expanded} sending={submit.saving !== null} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
     sendOff={sendOff} closable={closable} register={(key, element) => { if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
     onEdit={(slot, value) => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey} onSend={sendWords} onCancel={closeBox}
     onReview={slot => submit.review(slot)}
@@ -642,9 +644,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
 
 
     {(model.chat.length > 0 || onOpenConversation) && <Chat entries={model.chat} session={session} itemId={itemId} expanded={expanded} dividerId={dividerId}
-      drafts={drafts} draftState={draftState} actions={actions} onOpenItem={onOpenItem}
-      onOpenEditor={target => { if (target !== 'answer' && target !== 'topic_reply') openBox(target); }}
+      drafts={drafts} draftState={draftState} actions={actions} dividerAt={dividerAt}
       after={entryId => entryId === becauseAt && becauseInput ? <AnswerChanges session={session} inputId={becauseInput} onOpenItem={onOpenItem} /> : null}
+      onOpenEditor={target => { if (target !== 'answer' && target !== 'topic_reply') openBox(target); }}
       header={!expanded && <div className="detail-label detail-label-row"><span>Conversation</span>
         {onOpenConversation && <button type="button" className="btn btn-ghost btn-icon" aria-label="Open the conversation in a bigger view"
           title="Open the conversation in a bigger view" onClick={onOpenConversation}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M14 3h7v7M21 3l-8 8M10 21H3v-7M3 21l8-8" /></svg></button>}
@@ -653,7 +655,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     {changes('history')}
     </div>
 
-    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
+    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}${answerState.live ? ' detail-dock-waiting' : ''}`}>
     {expanded && model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)

@@ -1,21 +1,22 @@
-// The conversation list of Details: the agent's and the owner's messages in saved order, with each owner message's delivery
-// state (not sent, stuck) and the answer's changes under it. It serves an item's conversation today and a topic's next
-// (`topicChat` in ./model builds the entries for a topic). The owner's boxes live in ./Composer, not here.
-import type { ReactNode } from 'react';
+// The conversation list of Details: the agent's and the owner's messages in saved order, each under its label ("Agent raised
+// this", "You replied"), with where an owner's message stands under its bubble (queued, picked up, not sent) and its fix when
+// it is stuck. It serves an item's conversation and a topic's (`topicChat` in ./model builds the entries for a topic). The
+// owner's boxes live in ./Composer, not here.
+import { useState, type ReactNode } from 'react';
 import type { Immutable } from '../../data';
-import type { Session } from '../../generated/domain/models';
+import type { Input, Session } from '../../generated/domain/models';
 import type { SessionActions } from '../../components/bindings/actions';
 import type { DraftState, OwnerDraftStore } from '../../state/drafts/store';
-import { AnswerChanges } from '../changes/AnswerChanges';
-import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain, type EditTarget } from '../answer/held';
+import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain, type EditTarget, type ReviewOutcome } from '../answer/held';
 import { NotSentLine } from '../answer/NotSentLine';
-import { StuckNote } from '../answer/StuckNote';
+import { ReviewResult, StuckNote, useStuckRetry } from '../answer/StuckNote';
 import { peekNames } from '../peek/names';
 import { ItemReference, ItemRefs, Markdown, singleParagraph } from '../shared/MarkdownText';
 import { STATUS } from '../shared/status';
 import { StatusBadge } from '../shared/StatusBadge';
+import { clock } from '../shell/model';
 import { CopyMessage } from './CopyMessage';
-import type { ChatEntry, PendingView } from './model';
+import type { BubbleStatus, ChatEntry, PendingView } from './model';
 
 export interface ChatProps {
   /** The messages, oldest first (`detailModel(...).chat` for an item, `topicChat(...)` for a topic). */
@@ -25,28 +26,28 @@ export interface ChatProps {
   readonly itemId?: string;
   /** The topic the conversation belongs to; absent for an item's conversation. */
   readonly topicId?: string;
-  /** The bigger view: wider labels, arrow keys walk the messages. */
+  /** The bigger view: arrow keys walk the messages. */
   readonly expanded?: boolean;
   /** The entry that starts the "New since you last looked" divider. */
   readonly dividerId?: string | null;
+  /** When the owner last looked (epoch ms): the divider reads "New since you last looked at 20:40". */
+  readonly dividerAt?: number | null;
   /** Content above the list inside the section (the item conversation's label row). */
   readonly header?: ReactNode;
   readonly drafts: OwnerDraftStore;
   readonly draftState: DraftState;
   /** The session's write barrier: StuckNote's Resume, Cancel and Retry go through it. */
   readonly actions: SessionActions;
-  readonly onOpenItem: (itemId: string) => void;
-  /** A message was taken back (Edit) or put back: the editor named by `target` now holds its words and is worth opening. */
+  /** A message was taken back (Undo, Edit) or put back: the editor named by `target` now holds its words and is worth opening. */
   readonly onOpenEditor: (target: EditTarget) => void;
   /** Extra content under one entry (the Because card, W3). */
   readonly after?: (entryId: string) => ReactNode;
 }
 
-/** "You replied: “…”" for a one-paragraph reply; a longer reply keeps its paragraphs and lists below the words. */
+/** The owner's own words: a one-paragraph reply reads inline; a longer one keeps its paragraphs and lists. The label above says who. */
 function OwnerReply({ text }: { readonly text: string }) {
-  return <ItemRefs.Provider value={null}>{singleParagraph(text)
-    ? <span>You replied: “<Markdown text={text} inline />”</span>
-    : <div className="detail-reply"><span>You replied:</span><Markdown text={text} /></div>}</ItemRefs.Provider>;
+  return <ItemRefs.Provider value={null}>{singleParagraph(text) ? <span><Markdown text={text} inline /></span>
+    : <div className="detail-reply"><Markdown text={text} /></div>}</ItemRefs.Provider>;
 }
 
 /** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
@@ -57,8 +58,47 @@ function YouSaid({ how, text, note = '' }: { readonly how: PendingView['how']; r
   </>;
 }
 
-export function Chat({ entries, session, expanded = false, dividerId, header, drafts, draftState, actions, onOpenItem, onOpenEditor, after }: ChatProps) {
+interface StatusLineProps {
+  readonly status: BubbleStatus;
+  readonly actions: SessionActions;
+  /** Undo: take the queued message back and put its words in the editor (held.ts `editQueued`). */
+  readonly onUndo: (input: Immutable<Input>) => Promise<ReviewOutcome>;
+}
+
+/** Retry on a stopped delivery the agent never received: one resend of the same message (StuckNote's own Retry, lifted). */
+function NotSentRetry({ status, actions }: { readonly status: Extract<BubbleStatus, { kind: 'not_sent' }>; readonly actions: SessionActions }) {
+  const retry = useStuckRetry(actions, status.input, status.stuck);
+  return retry && <button type="button" className="btn btn-ghost detail-status-action" disabled={retry.disabled} title={retry.title} onClick={retry.run}>Retry</button>;
+}
+
+/** Under an owner bubble: "✓ Sent at 21:25 · waiting for the agent Undo", "✓ Picked up at 21:26" or "⚠ Not sent. Your words are kept. Retry". */
+function StatusLine({ status, actions, onUndo }: StatusLineProps) {
+  const [undoing, setUndoing] = useState(false);
+  const [result, setResult] = useState<ReviewOutcome | null>(null);
+  if (status.kind === 'picked_up') return <div className="detail-bubble-status" data-status="picked_up" role="status">{`✓ Picked up${status.at ? ` at ${status.at}` : ''}`}</div>;
+  if (status.kind === 'not_sent') return <div className="detail-bubble-status detail-bubble-status-problem" data-status="not_sent" role="status">
+    <span>⚠ Not sent. Your words are kept.</span><NotSentRetry status={status} actions={actions} /></div>;
+  const undo = () => {
+    if (undoing) return;
+    setUndoing(true);
+    void onUndo(status.input).then(outcome => { setUndoing(false); setResult(outcome); }, () => { setUndoing(false); setResult({ kind: 'unavailable' }); });
+  };
+  return <>
+    <div className="detail-bubble-status" data-status="sent" role="status">
+      <span>{`✓ Sent${status.at ? ` at ${status.at}` : ''} · waiting for the agent`}</span>
+      {status.undo && <button type="button" className="btn btn-ghost detail-status-action" disabled={undoing} title="Take it back to edit; it isn’t sent until you send it again" onClick={undo}>Undo</button>}
+    </div>
+    {result && <ReviewResult outcome={result} />}
+  </>;
+}
+
+export function Chat({ entries, session, expanded = false, dividerId, dividerAt, header, drafts, draftState, actions, onOpenEditor, after }: ChatProps) {
   const relatedLabels = peekNames(session);
+  const edit = async (input: Immutable<Input>) => {
+    const outcome = await editQueued(drafts, session, input, actions);
+    if (inEditor(outcome)) onOpenEditor(outcome.intent);
+    return outcome;
+  };
   return <section className="detail-section detail-chat" aria-label="Conversation">
     {header}
     <ol className="detail-chat-list" onKeyDown={event => {
@@ -73,31 +113,28 @@ export function Chat({ entries, session, expanded = false, dividerId, header, dr
       {entries.map(entry => <li key={entry.id} tabIndex={expanded ? -1 : undefined} data-message-id={entry.id} data-pending={entry.pending?.input.id}
         data-round={entry.asks[0]?.ordinal}
         data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-        className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}`}>
-        {entry.id === dividerId && <div className="conversation-unseen">New since you last looked</div>}
-        {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
+        className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${entry.status ? ' detail-turn-status' : ''}`}>
+        {entry.id === dividerId && <div className="conversation-unseen" data-testid="new-divider">{`New since you last looked${dividerAt ? ` at ${clock(dividerAt)}` : ''}`}</div>}
         <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
-          <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
-            {entry.you ? <>{expanded && <span className="detail-pending-caption">You · {entry.message.when}</span>}<YouSaid {...entry.you} />
-              {!expanded && <span className="detail-pending-caption">you · {entry.message.when}</span>}
-              {entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
-              : <><div className="detail-agent-meta">{expanded ? <span>Agent</span> : <><span>{entry.message.number}</span><span>{entry.message.who}</span></>}<span>{entry.message.when}</span></div>
-                <Markdown text={entry.message.body} />
-                {entry.asks.filter(ask => !ask.text && ask.now).map(ask => <span key={ask.ordinal} className="tag tag-accent detail-waiting-tag">Waiting on you</span>)}</>}
-          </div><CopyMessage text={entry.message.body} />
+          {!entry.you && <span className="detail-avatar" aria-hidden="true"><i className="ph ph-robot" /></span>}
+          <div className="detail-msg-main">
+            <div className="detail-chat-label" data-testid="chat-label"><span>{entry.label}</span><span className="detail-chat-time">{entry.message.when}</span></div>
+            <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
+              {entry.you ? <><YouSaid {...entry.you} />
+                {!entry.status && entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
+                : <><Markdown text={entry.message.body} />
+                  {entry.asks.filter(ask => !ask.text && ask.now).map(ask => <span key={ask.ordinal} className="tag tag-accent detail-waiting-tag">Waiting on you</span>)}</>}
+            </div>
+            {entry.status && <StatusLine status={entry.status} actions={actions} onUndo={edit} />}
+          </div>
+          <CopyMessage text={entry.message.body} />
         </div>
         {entry.asks.filter(ask => ask.text || entry.you && ask.now).map(ask => <div className="detail-msg" key={ask.ordinal}>
+          <span className="detail-avatar" aria-hidden="true"><i className="ph ph-robot" /></span>
           <div className="detail-bubble detail-bubble-agent">{ask.text && <Markdown text={ask.text} />}
             {ask.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>
           {ask.text && <CopyMessage text={ask.text} />}
         </div>)}
-        {entry.you && (() => {
-          const input = Object.values(session.inputs).find(value => value?.message_id === entry.id);
-          const answer = session.answers.find(value => value.message_id === entry.id);
-          const inputId = input?.id ?? answer?.input_id;
-          return inputId ? <AnswerChanges session={session} inputId={inputId} onOpenItem={onOpenItem} /> : null;
-        })()}
-        {entry.note && <div className="detail-chat-marker">{entry.note}</div>}
         {entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
           restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
           onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
@@ -105,12 +142,8 @@ export function Chat({ entries, session, expanded = false, dividerId, header, dr
             if (inEditor(outcome)) onOpenEditor(outcome.intent);
             return outcome;
           }} />}
-        {entry.pending?.stuck && <StuckNote actions={actions} input={entry.pending.input} stuck={entry.pending.stuck}
-          onEdit={async () => {
-            const outcome = await editQueued(drafts, session, entry.pending!.input, actions);
-            if (inEditor(outcome)) onOpenEditor(outcome.intent);
-            return outcome;
-          }} />}
+        {entry.pending?.stuck && !(entry.status?.kind === 'sent' && entry.status.undo) && <StuckNote actions={actions} input={entry.pending.input} stuck={entry.pending.stuck}
+          retryAbove={entry.status?.kind === 'not_sent'} onEdit={() => edit(entry.pending!.input)} />}
         {entry.result && <div className="detail-msg detail-msg-result"><span aria-hidden="true">↳</span><Markdown className="detail-msg-text" text={entry.result} inline /><CopyMessage text={entry.result} /></div>}
         {entry.forks.map(fork => <ItemReference itemId={fork.id} className="detail-fork" key={fork.id} preserveContent title={fork.question}
           ariaLabel={`Branched into ${relatedLabels.get(fork.id)} · ${STATUS[fork.status].label}`}>
