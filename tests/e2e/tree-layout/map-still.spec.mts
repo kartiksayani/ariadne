@@ -907,13 +907,16 @@ test.describe('strips hold the removed row\'s place', () => {
       await settle(page);
       const read = await readingRow(page);
       await ownerRemoves(page, read.key);
-      await expect(page.locator('.tree-place', { hasText: /^Removed “/ })).toBeVisible();
+      const strip = page.locator('.tree-place', { hasText: /^Removed “/ });
+      await expect(strip).toBeVisible();
       await settle(page);
-      const now = await readingRow(page), y = (await windowTop(page, now.key))!;
+      const now = await readingRow(page), y = (await windowTop(page, now.key))!, height = (await strip.boundingBox())!.height;
       await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
-      await expect(page.locator('.tree-place', { hasText: /^Removed “/ })).toHaveCount(0);
+      await expect(strip).toHaveCount(0);
       await settle(page);
-      await expect.poll(async () => Math.abs((await windowTop(page, now.key))! - y), `${now.key} keeps its window place`).toBeLessThanOrEqual(3);
+      // At the top the Map has no room above to scroll into, so the rows close the strip's gap and nothing more.
+      const room = where === 'top' ? height + 2 : 0;
+      await expect.poll(async () => Math.abs((await windowTop(page, now.key))! - y), `${now.key} keeps its window place`).toBeLessThanOrEqual(3 + room);
     }));
   }
   test('Undo on the strip puts the row back where the strip was', ({ page }) => served(page, async () => {
