@@ -612,7 +612,7 @@ describe('owner input component and durable draft controller', () => {
       expect(screen.queryByRole('textbox', { name: 'Note message' })).toBeNull();
       expect(screen.getByRole('button', { name: 'Send reply' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Send note' })).toBeNull();
-      expect(box.placeholder).toBe('Reply in your own words…');
+      expect(box.placeholder).toBe('Reply about this item…');
       expect(screen.queryByText(/It will be sent as a/)).toBeNull();
       expect(box.getAttribute('aria-describedby')).toBeNull();
     });
@@ -2023,13 +2023,14 @@ describe('the item detail reads like a chat', () => {
     expect(reply.title).toBeTruthy();
   });
 
-  it('keeps the words and Send in one row, with one short hint and Escape collapse', async () => {
+  it('keeps the words with Send in the bar under them, with one short bar text and Escape collapse', async () => {
     const user = userEvent.setup(), { dock, value } = await view('8');
     const box = within(dock!).getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
     const send = within(dock!).getByRole('button', { name: 'Send reply' });
-    expect(box.parentElement).toBe(send.parentElement);
+    expect(box.parentElement).toBe(send.closest('.detail-composer-row'));
+    expect(send.parentElement!.classList.contains('detail-composer-bar')).toBe(true);
     const hints = dock!.querySelectorAll('.detail-box-hint');
-    expect(hints).toHaveLength(1); expect(hints[0]!.textContent).toBe('⌘↵ sends · Esc keeps draft');
+    expect(hints).toHaveLength(1); expect(hints[0]!.textContent).toBe('Goes to the agent with this item’s name.');
     await user.type(box, 'Keep these exact words.');
     await user.keyboard('{Escape}');
     expect(box.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(true);
@@ -2052,7 +2053,7 @@ describe('the item detail reads like a chat', () => {
 
   it.each([
     { state: 'queued' as const, source: '76', caption: 'Not sent yet' },
-    { state: 'needs_attention' as const, source: '74', caption: 'Not delivered' },
+    { state: 'needs_attention' as const, source: '74', caption: '⚠ Not sent. Your words are kept.' },
   ])('keeps an Open item’s $state message evidence without an on-the-way dock claim', async ({ state, source, caption }) => {
     const { dock, chat } = await view('8', session => {
       const input = structuredClone(session.inputs[demoId(source)]!);
@@ -2070,16 +2071,16 @@ describe('the item detail reads like a chat', () => {
   });
 
   it.each([
-    { turn: 'unknown' as const, expected: 'Sending your reply…' },
-    { turn: 'running' as const, expected: 'Your reply was received · waiting for the agent' },
-  ])('uses the exact $turn attempt evidence for an in-flight reply’s dock hint', async ({ turn, expected }) => {
+    { turn: 'unknown' as const, expected: 'Sending your reply…', status: /✓ Sent at \d\d:\d\d · waiting for the agent/u },
+    { turn: 'running' as const, expected: 'Your reply was received · waiting for the agent', status: /✓ Picked up at \d\d:\d\d/u },
+  ])('uses the exact $turn attempt evidence for an in-flight reply’s dock hint and bubble status', async ({ turn, expected, status }) => {
     const { dock, chat } = await view('8', session => {
       const input = structuredClone(session.inputs[demoId('72')]!);
       input.id = uuid(90); input.seq = 50; input.message_id = uuid(91); input.target.item_id = '8';
       input.attempts.find(attempt => attempt.id === input.active_attempt_id)!.turn_state = turn;
       session.inputs[input.id] = input;
     });
-    expect(chat()!.querySelector(`[data-pending="${uuid(90)}"]`)!.textContent).toContain('On its way');
+    expect(chat()!.querySelector(`[data-pending="${uuid(90)}"]`)!.textContent).toMatch(status);
     const hint = dock!.querySelector<HTMLElement>('.detail-delivery-hint')!;
     expect(hint.textContent).toBe(expected); expect(hint.title).toBe(expected);
     expect(dock!.textContent).not.toContain('Your message is on its way. You can write another; it goes out after.');
@@ -2215,9 +2216,10 @@ describe('the item detail reads like a chat', () => {
     });
     const list = turns(chat()!).filter(turn => turn.dataset.pending);
     expect(list.at(-1)!.dataset.pending).toBe(demoId('71'));
-    // The owner's own words can be taken back to edit, or deleted, right on the bubble.
-    expect(within(list.at(-1)!).getByRole('button', { name: 'Edit' })).toBeTruthy();
-    expect(within(list.at(-1)!).getByRole('button', { name: 'Delete' })).toBeTruthy();
+    // The owner's own words can be taken back to edit right under the bubble: "Sent at … · waiting for the agent  Undo".
+    expect(within(list.at(-1)!).getByRole('button', { name: 'Undo' })).toBeTruthy();
+    expect(list.at(-1)!.querySelector('[data-status="sent"]')!.textContent).toMatch(/^✓ Sent at \d\d:\d\d · waiting for the agentUndo$/u);
+    expect(within(list.at(-1)!).queryByRole('button', { name: 'Delete' })).toBeNull();
     expect(chat()!.querySelectorAll('[data-pending]')).toHaveLength(1);
     expect(within(chat()!).queryByText('Waiting on you')).toBeNull();
   });
@@ -2332,10 +2334,10 @@ describe('the item detail reads like a chat', () => {
     const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? contentHeight : 0; });
     try {
       await view(itemId);
-      // An answer's own-words box opens from "Write my own answer"; it is two rows, a reply box one.
+      // An answer's own-words box opens from "Write my own answer"; both it and a reply box are two rows (alpha.21 E15).
       const box = itemId === '2' ? editor() : screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement;
       expect(box.getAttribute('aria-label')).toBe(label);
-      expect(box.rows).toBe(itemId === '2' ? 2 : 1); expect(box.value).toBe('');
+      expect(box.rows).toBe(2); expect(box.value).toBe('');
       expect(box.style.height).toBe('auto'); expect(box.style.overflowY).toBe('hidden');
       fireEvent(window, new Event('resize'));
       expect(box.style.height).toBe('auto');
