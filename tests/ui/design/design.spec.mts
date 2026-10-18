@@ -120,7 +120,7 @@ async function changesFit(surface: Locator) {
 
 /** Opens the band's What changed popover (D18) over the Map and returns it. */
 async function openChanges(page: Page) {
-  await page.getByRole('button', { name: /new|changed|changes since/ }).first().click();
+  await page.getByRole('button', { name: /new|changed|\d+ changes/ }).first().click();
   const popover = page.getByRole('dialog', { name: 'What changed', exact: true });
   await expect(popover).toBeVisible();
   return popover;
@@ -322,14 +322,15 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
       const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       // The answer dock floats over the foot of the Map: a chip under it is covered by the dock, not by the rail.
       const dockTop = document.querySelector('.answer-dock')?.getBoundingClientRect().top ?? innerHeight;
-      return { opaque: chip.every((value, at) => value === over[at]), contrast: (high + 0.05) / (low + 0.05), caret: parseFloat(caret.fontSize),
+      return { opaque: chip.every((value, at) => value === over[at]), contrast: (high + 0.05) / (low + 0.05), caret: parseFloat(caret.fontSize), topic: !!button.closest('.tree-topic'),
         width: box.width, height: box.height, covers: !!centre?.closest('.tree-chevron'), hidden: box.bottom < 0 || box.bottom > dockTop };
     }));
     for (const fact of facts.filter(value => !value.hidden)) {
       expect(fact.opaque, 'the chip hides the rail behind it').toBe(true);
       expect(fact.contrast, 'the caret reads against its chip').toBeGreaterThanOrEqual(4.5);
-      expect(fact.caret).toBeGreaterThanOrEqual(14);
-      expect(fact.width).toBe(16);
+      // The topic band's chevron is the board's: an 18px chip with a 12px caret (SPEC 2.2); the rows' are 16px chips with a 14px one.
+      expect(fact.caret).toBeGreaterThanOrEqual(fact.topic ? 12 : 14);
+      expect(fact.width).toBe(fact.topic ? 18 : 16);
       expect(fact.covers, 'the chip paints over the rail').toBe(true);
     }
     // Hover keeps a visible state.

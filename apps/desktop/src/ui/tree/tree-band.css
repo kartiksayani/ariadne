@@ -7,7 +7,7 @@
   z-index: 3;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   padding: 10px 10px 10px 12px;
   border-top: 1px solid var(--color-divider);
   border-bottom: 1px solid var(--color-divider);
@@ -54,7 +54,8 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  padding-left: 4px;
+  position: relative;
+  top: -1px; /* The board sets the name a pixel above the buttons' middle. */
   font-size: calc(15.5px * var(--text-scale));
   font-weight: 500;
   line-height: calc(22px * var(--text-scale));
@@ -352,6 +353,8 @@
 }
 
 .tree-band-menu i {
+  position: relative;
+  top: 1px; /* The board sets the dots a pixel lower. */
   font-size: calc(14px * var(--text-scale));
 }
 
@@ -382,11 +385,13 @@
   padding: 12px;
   border-radius: 8px;
   background: var(--a-card);
-  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  box-shadow: var(--shadow-lg);
 }
 
 .ack-all-title {
-  margin: 0;
+  margin: 0 0 1.5px;
+  line-height: 1.45;
+  letter-spacing: normal; /* The shared heading rule's -0.015em is not the board's. */
   font-size: calc(14px * var(--text-scale));
   font-weight: 500;
 }
@@ -436,12 +441,52 @@
   gap: 6px;
 }
 
+/* The review's two buttons are the board's (SPEC 4.3): 28px, Cancel in plain text, Ack all solid. */
+.ack-all-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  font-size: calc(12.5px * var(--text-scale));
+  box-shadow: none;
+}
+
+.ack-all-actions .btn-ghost {
+  color: var(--color-text);
+  background: transparent;
+}
+
+.ack-all-actions .btn-ghost:hover {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.ack-all-actions .btn-primary {
+  gap: 6px;
+  padding: 0 11px 0 9px;
+  font-weight: 500;
+  color: var(--a-bg);
+  background: var(--a-acc-text);
+}
+
 .ack-all-progress {
   font-size: calc(12px * var(--text-scale));
 }
 
-/* Narrow band (its own width, D10): the counts say "2 waiting", the opener drops "since …", and Continue is its icon. */
+/* Narrow band (D10): the counts say "2 waiting", the opener drops "since …", and Continue is its icon. Two things make a band narrow:
+   its own width (Details squeezing the Map to 520px or less, at any window), and a window of 900px or less. The board draws these
+   forms in its 900px window whatever the Map's width (900px with nothing selected, 560px with Details open) and the wide ones at
+   a Map of 880px, so the window decides there; the container query keeps the buttons in reach when Details is dragged wide. */
 @container band (max-width: 520px) {
+  .tree-wide-only,
+  .tree-topic-counts .changes-since,
+  .tree-band-continue-label {
+    display: none;
+  }
+}
+
+@media (width <= 900px) {
   .tree-wide-only,
   .tree-topic-counts .changes-since,
   .tree-band-continue-label {
@@ -522,6 +567,7 @@
 /* The shared menu panel makes its buttons flex rows; these are grids that fill the panel. */
 .action-menu-options > .tree-menu-row {
   display: grid;
+  gap: 1px 7px; /* The shared menu's own gap (8px, from a more specific rule) would put the detail 7px under the title. */
   box-sizing: border-box;
   width: 100%;
   align-items: start;
@@ -530,6 +576,9 @@
 
 .tree-menu-icon {
   grid-row: 1;
+
+  /* No taller than the label's line, so the detail sits right under the title (SPEC 10.12). */
+  line-height: calc(17.5px * var(--text-scale));
   font-size: calc(15px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 70%, transparent);
 }

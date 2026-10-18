@@ -25,7 +25,8 @@ export type Step =
   | { readonly click: string }
   | { readonly hover: string }
   | { readonly type: string }
-  /** The Map's own scroller, moved to its top (8.5: the selected row is out of view below). */
+  /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
+   * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
   | { readonly scroll: 'top' };
 
 /** Fields of a world item (final-world.ts) a state changes. */
@@ -140,6 +141,9 @@ export interface FrameRegion {
   readonly threshold?: number;
   /** The sizes the rectangle applies to (the narrow frame lays out differently). Default: all three. */
   readonly variants?: readonly Variant[];
+  /** The rectangle is where the app draws it, and the board draws it `dy` rows lower (a negative `dy`: higher). For a layer the app sits lower under the
+   * band's second line (ALPHA20-REPLAN §3a, D10 follow-on): the same pixels are compared, not a bigger tolerance. */
+  readonly dy?: number;
 }
 
 /** The regions of a state that apply to one size. */
@@ -236,13 +240,13 @@ const stateList: readonly FinalState[] = [
 // numbered like the board; the three whose board state already has an entry above end in `m` ("Map body").
 // Their `act` steps name the built controls by role and accessible name ("Brief by the agent", "More actions for", "Filter by status").
 // A region that fails is a real difference a piece should fix, or a harness problem; a (b) deviation or data difference is left out of the
-// region with a comment (`titleLineOnly` below).
+// region with a comment (`bandPieces` below).
 const marked = (marks: MarkSet, rest: Omit<NonNullable<AppFixture['map']>, 'marks'> = {}): NonNullable<AppFixture['map']> => ({ marks, ...rest });
-/** The topic band's "What changed" opener: "5 new 5 changed since 20:40" (D18). */
-const openChanges: Step = { click: 'changed since' };
+/** The topic band's "What changed" opener: "5 new 5 changed since 20:40" (D18). Named by its counts: at a narrow band it drops "since …" (D10). */
+const openChanges: Step = { click: '5 changed' };
 const mapStateList: readonly FinalState[] = [
   { id: '1.3m', part: 'Window', sid: 'b-graph', owner: 'graph', pending: false, title: 'Graph: the Map body',
-    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
   { id: '3.1m', part: 'Conversation', sid: 'c-details', owner: 'rows', pending: false, title: 'Details beside the Map: the Map body',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: {} } },
   { id: '3.6m', part: 'Conversation', sid: 'c-fold', owner: 'rows', pending: false, title: 'Details folded, dock open: the Map body',
@@ -263,14 +267,14 @@ const mapStateList: readonly FinalState[] = [
   { id: '5.4', part: 'Changes', sid: 'w-caught', owner: 'changes', pending: false, title: 'All caught up: the markers clear, Undo stays for a few seconds',
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Mark all caught up' }] } },
   { id: '5.5', part: 'Changes', sid: 'w-long', owner: 'changes', pending: false, title: 'Back after two days: a calm summary first',
-    app: { view: { selected: null, dock: 'line' }, map: marked('long'), act: [{ click: 'changes since' }] } },
+    app: { view: { selected: null, dock: 'line' }, map: marked('long'), act: [{ click: '30 changes' }] } },
   { id: '5.6', part: 'Changes', sid: 'w-because', owner: 'changes', pending: false, title: 'After I answer: Because you chose…',
     app: { items: { afterAnswer: true, edit: { [Q2]: { s: 'decided', o: 'Bump it in this release, and warm the cache from the deploy job.' } } },
       view: { selected: 'a5.1', details: 'open', dock: 'line' }, map: marked('because') } },
   { id: '5.7', part: 'Changes', sid: 'w-item', owner: 'changes', pending: false, title: 'On an item: what changed and why, with older history',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
   { id: '7.2', part: 'Related', sid: 'r-graph', owner: 'graph', pending: false, title: 'In the Graph: related items as dashed lines',
-    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
   { id: '8.2', part: 'Find', sid: 'f-filter', owner: 'filter', pending: false, title: 'Filter by status, Waiting on me first',
     app: { view: { selected: null, dock: 'line' }, map: { filter: ['waiting_on_me', 'open'] }, act: [{ click: 'Filter by status' }] } },
   { id: '8.3', part: 'Find', sid: 'f-recent', owner: 'changes', pending: false, title: 'Recent: what I viewed and what changed lately',
@@ -282,7 +286,7 @@ const mapStateList: readonly FinalState[] = [
   { id: '9.2', part: 'Markers', sid: 'm-next', owner: 'band', pending: false, title: 'n, or Next on the topic band, outlines the next unseen item',
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
   { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: false, title: 'On Graph cards: the diamond alone, same shapes',
-    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
   { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: false, title: 'The topic’s … menu',
     // The board's R4 file draws this menu over the same marked Map as 5.1.
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'More actions for' }] } }
@@ -371,6 +375,15 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
 const MAP: Limits = [0.01, 0.01], TEXT: Limits = [0.02, 0.02];
 /** A region that applies to the wide sizes only (a narrow Map that Details squeezes lays its first row out differently). */
 const wideOnly = (name: string, rect: Rect, limit: number): FrameRegion => ({ name, rect, variants: WIDE, threshold: limit });
+/** ALPHA20-REPLAN §3a (D10 follow-on): a popover that hangs under the band sits lower where the app's band is taller than the board's. `rect` is the board's;
+ * the app's region is `shift` lower, held against the board's pixels (`dy`). Ack all hangs off the band's buttons: 20px lower at 1280 (the board's band is one
+ * line, the app's two), level at 900. What changed hangs off the band's bottom edge: 18px lower at 1280 (the band is 20px taller, the board sets the popover
+ * 2px under it), 2px lower at 900 (62px against the board's 60). */
+const BAND_SECOND_LINE = 20;
+const underBand = (name: string, wide: Rect, narrow: Rect, limits: Limits, shift: readonly [wide: number, narrow: number] = [BAND_SECOND_LINE, 0]): FrameRegion[] => [
+  { name, rect: [wide[0], wide[1] + shift[0], wide[2], wide[3]], variants: WIDE, threshold: limits[0], dy: -shift[0] },
+  { name: `${name} (narrow)`, rect: [narrow[0], narrow[1] + shift[1], narrow[2], narrow[3]], variants: NARROW, threshold: limits[1], ...(shift[1] ? { dy: -shift[1] } : {}) }];
+const underBandEdge = [18, 2] as const;
 const graph = box('graph canvas', [0, 40, 1244, 720], [0, 40, 864, 570], MAP);
 const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '1.3m': graph, '7.2': graph, '9.9': graph,
@@ -378,25 +391,30 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '3.6m': box('topic band', [0, 40, 1244, 42], [0, 40, 864, 62], MAP),
   '4.1': box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP),
   // ALPHA20-REPLAN §3a D10: the band is two fixed lines in the app and one when wide on the board, so the Ack all popover that hangs from it
-  // sits 20px lower at 1280 and only the narrow frame (both two lines) compares it.
-  '4.3': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), { name: 'Ack all popover (narrow)', rect: [549, 106, 341, 187], variants: NARROW, threshold: TEXT[1] },
+  // sits 20px lower at 1280: the wide frame compares it 20px lower (`underBand`).
+  '4.3': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...underBand('Ack all popover', [929, 86, 341, 187], [549, 106, 341, 187], TEXT),
     ...box('first row', [0, 82, 925, 66], [0, 102, 545, 66], MAP)],
-  '4.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
+  // The held "Acked N results Undo" takes Ack all's place, so the board draws the counts on the title line at 900 as well (see `bandPieces`).
+  '4.4': [{ name: 'topic band', rect: [0, 40, 1280, 42], variants: WIDE, threshold: MAP[0] },
+    { name: 'topic band (narrow, counts on the title line)', rect: [0, 40, 900, 62], variants: NARROW, threshold: MAP[1] }, ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
   '5.1': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
   // The What changed popover covers the band's counts line and the first row's left part: the band is compared down to the popover's top edge.
-  '5.2': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 662], [12, 100, 540, 497], TEXT),
+  // The popover is compared at its head and its "Brief" line (the first 64px): below it the brief's items, the since-you-were-here rows and
+  // the summary are the fixture's own data (the brief's length, the change records: ALPHA20-REPLAN §3a "data, not deviations").
+  '5.2': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head and brief line)', [12, 84, 540, 64], [12, 100, 540, 64], TEXT, underBandEdge),
     ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
-  '5.3': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 662], [12, 100, 540, 497], TEXT),
+  '5.3': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head and brief line)', [12, 84, 540, 64], [12, 100, 540, 64], TEXT, underBandEdge),
     ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
   '5.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
-  '5.5': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 330], [12, 100, 540, 330], TEXT),
+  '5.5': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 60], MAP), ...underBand('What changed popover (title)', [12, 84, 130, 40], [12, 100, 130, 40], TEXT, underBandEdge),
     ...box('first row (right of the popover)', [556, 82, 724, 66], [556, 102, 344, 66], MAP)],
   '5.6': box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP),
   '5.7': [...box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP), wideOnly('first row', [0, 133, 880, 66], 0.01)],
   // The filter row is compared through its first two chips ("Waiting on me 2", "To ack 3"). From the third on the app's world differs: "Open 8" where the
-  // board counts 5 (the three findings to ack count as open in the app), and the app's Blocked chip moves every chip after it (at 900 it wraps the row, so the narrow region stops above the second row).
-  '8.2': [...box('filter row (first two chips)', [0, 40, 212, 40], [0, 40, 212, 34], TEXT), ...box('topic band', [0, 80, 1280, 42], [0, 80, 900, 62], MAP)],
-  '8.3': [...box('topic band (left of the popover)', [0, 40, 800, 42], [0, 40, 562, 62], MAP), ...box('Recent popover', [802, 44, 340, 430], [566, 44, 300, 430], TEXT),
+  // board counts 5 (the three findings to ack count as open in the app), and the app's Blocked chip moves every chip after it (at 900 it wraps the row, so the narrow region stops above the second row, and the band under the wrapped row sits 34px lower than the board's: a data difference, so the narrow band is not compared).
+  '8.2': [...box('filter row (first two chips)', [0, 40, 212, 40], [0, 40, 212, 34], TEXT), wideOnly('topic band', [0, 80, 1280, 42], MAP[0])],
+  // 8.3 compares the popover's head and its Viewed group. "Changed lately" below it is the fixture's data (the world's own change records), so its rows differ.
+  '8.3': [...box('topic band (left of the popover)', [0, 40, 800, 42], [0, 40, 562, 62], MAP), ...box('Recent popover (head and Viewed)', [802, 44, 340, 212], [566, 44, 300, 212], TEXT),
     ...box('first row (left of the popover)', [0, 82, 800, 66], [0, 102, 562, 66], MAP)],
   // The band only (ends above the first strip). The board draws no "N outside the focus" strips in 8.4; the app keeps them, with "· N waiting",
   // so no question outside the focus goes unseen: an approved deviation (ALPHA20-REPLAN §3a). It sits below this region, so none is masked here.
@@ -417,8 +435,26 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
  * go to the side-by-side PNGs. The title line is 30px from the band's top edge.
  */
 const BAND_TITLE_HEIGHT = 30;
-const titleLineOnly = (region: FrameRegion): FrameRegion => region.name.startsWith('topic band') && region.rect[3] > BAND_TITLE_HEIGHT
-  ? { ...region, rect: [region.rect[0], region.rect[1], region.rect[2], BAND_TITLE_HEIGHT] } : region;
+/**
+ * (c) ALPHA20-REPLAN §3a D10 (two fixed lines): the title line is held to the board where the two draw it alike, and only there.
+ * - A wide Map (1244 or 1280 px, the popover frames' 800): the board puts the counts on the title line, between the name and the buttons
+ *   (x 440 to 870). The app keeps them on the second line. The region is the chevron and name (x 0 to 400), and the buttons (from x 870, or 1000 when no item is selected and Focus is not drawn).
+ * - A narrow Map (560 px, 900 px window with Details open): the board wraps a long name over two lines where the app ends it in "…".
+ *   The region is the chevron (36 px) and the buttons (from x 290).
+ * - A Map of 900 px (900 px window, nothing selected) and 880 px (1280 px window with Details open): the title line is the same in both.
+ */
+const bandPieces = (region: FrameRegion): FrameRegion[] => {
+  if (!region.name.startsWith('topic band')) return [region];
+  const [x, y, width, height] = region.rect, line = Math.min(height, BAND_TITLE_HEIGHT);
+  const piece = (label: string, left: number, span: number): FrameRegion => ({ ...region, name: `${region.name} (${label})`, rect: [x + left, y, span, line] });
+  const onTitleLine = region.name.includes('counts on the title line');
+  const wideMap = onTitleLine || (region.variants?.includes('light') && (width >= 1200 || region.name.includes('left of the popover')));
+  // Where the buttons start: right of the counts' end (x 870 with Details folded; with no item selected, no Focus, so x 1000 in a 1280 Map).
+  const buttons = onTitleLine && width < 1000 ? 735 : width >= 1270 ? 1000 : 870;
+  if (wideMap) return [piece('chevron and name', 0, 400), ...(width >= 1200 || onTitleLine ? [piece('buttons', buttons, width - buttons)] : [])];
+  if (region.variants?.includes('narrow') && width <= 600) return [piece('chevron', 0, 36), piece('buttons', 290, width - 290)];
+  return [{ ...region, rect: [x, y, width, line] }];
+};
 
 /**
  * (a) The first row is left out of every Map state: ALPHA20-REPLAN §3a D1 (the app drops the board's +7/+4 per-box row padding, so the row's text sits
@@ -428,7 +464,7 @@ const titleLineOnly = (region: FrameRegion): FrameRegion => region.name.startsWi
 const withoutFirstRow = (region: FrameRegion): boolean => !region.name.startsWith('first row');
 
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
-  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).map(titleLineOnly) }))];
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) }))];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 

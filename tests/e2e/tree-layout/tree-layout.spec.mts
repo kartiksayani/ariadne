@@ -695,12 +695,19 @@ async function readingSetup(page: Page, origin: string) {
     const row = wanted ? rows.find(element => element.dataset.itemId === wanted)! : rows.find(element => element.getBoundingClientRect().bottom > edge + bar + 1)!;
     return { id: row.dataset.itemId!, top: row.getBoundingClientRect().top - edge - bar };
   }, id);
+  /** The height of every topic band in the DOM, by its topic's name: two fixed lines whatever the Map's width (D10). */
+  const bandHeights = () => scroller.evaluate(box => Object.fromEntries([...box.querySelectorAll<HTMLElement>('.tree-topic')]
+    .map(header => [header.querySelector('.tree-topic-name')?.textContent ?? '', Math.round(header.getBoundingClientRect().height * 10) / 10])));
   /** Runs a change to the column; the Map's width changes, and the row the owner was reading stays where it was. */
   const holds = async (change: () => Promise<void>) => {
-    const width = (await scroller.boundingBox())!.width, before = await reading();
+    const width = (await scroller.boundingBox())!.width, before = await reading(), heights = await bandHeights();
+    expect(Object.keys(heights).length).toBeGreaterThan(0);
     await change();
     await settle();
     await expect.poll(async () => (await scroller.boundingBox())!.width).not.toBe(width);
+    // The band keeps its height when Details opens, closes or is dragged: it never re-wraps, so no row below it moves.
+    const after = await bandHeights();
+    for (const [name, height] of Object.entries(heights)) if (name in after) expect(after[name], `the band of "${name}" keeps its height`).toBe(height);
     await expect.poll(async () => Math.abs((await reading(before.id)).top - before.top)).toBeLessThanOrEqual(3);
     // The body never scrolls sideways.
     expect(await page.locator('.shell-body').evaluate(element => element.scrollLeft + element.scrollWidth - element.clientWidth)).toBe(0);

@@ -89,11 +89,11 @@ async function perform(page: Page, step: Step): Promise<void> {
   }
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else if ('scroll' in step) {
-    // The Map's scroller is the nearest ancestor of the item tree that scrolls.
-    await page.getByRole('tree', { name: 'Session items' }).evaluate(tree => {
+    // The Map's scroller is the nearest ancestor of the item tree (or of the Graph's topic) that scrolls.
+    await page.locator('.graph-topic, [role="tree"][aria-label="Session items"]').first().evaluate(tree => {
       let scroller = tree.parentElement;
-      while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement;
-      if (scroller) scroller.scrollTop = 0;
+      while (scroller && scroller.scrollHeight <= scroller.clientHeight && scroller.scrollWidth <= scroller.clientWidth) scroller = scroller.parentElement;
+      if (scroller) { scroller.scrollTop = 0; scroller.scrollLeft = 0; }
     });
   }
   else await page.keyboard.type(step.type);
@@ -134,13 +134,14 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
  * state's regions that apply to this size, each against its own threshold; the whole frame's ratio is written, never asserted.
  * `recordOnly` (a pending state) asserts nothing and still writes every ratio.
  */
-function scoring(state: Pick<FinalState, 'id' | 'regions'>, variant: Variant, recordOnly: boolean): Pick<CaptureInput, 'threshold' | 'regions' | 'regionThresholds'> & { report: (result: CompareResult) => object } {
+function scoring(state: Pick<FinalState, 'id' | 'regions'>, variant: Variant, recordOnly: boolean): Pick<CaptureInput, 'threshold' | 'regions' | 'regionThresholds' | 'shifts'> & { report: (result: CompareResult) => object } {
   const scored = regionsFor(state, variant);
   if (!scored.length) return { threshold: recordOnly ? null : threshold(state.id, variant), report: () => ({}) };
   const limits = scored.map(region => recordOnly ? null : region.threshold ?? 0);
   return {
     threshold: null, regionThresholds: limits,
     regions: scored.map(({ name, rect: [x, y, width, height] }) => ({ name, x, y, width, height })),
+    shifts: scored.flatMap(({ name, rect: [x, y, width, height], dy }) => dy ? [{ name, x, y, width, height, dy }] : []),
     report: result => ({ regions: scored.map((region, at) => ({ name: region.name, rect: region.rect, ratio: Number(result.regions[at]!.toFixed(4)), threshold: limits[at] })) })
   };
 }

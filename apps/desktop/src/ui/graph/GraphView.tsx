@@ -125,7 +125,7 @@ function Legend({ drawn }: { readonly drawn: boolean }) {
   return <div className="graph-legend" role="group" aria-label="Graph legend">
     <span className="graph-legend-key"><span className="graph-legend-branch" aria-hidden="true" />Branch</span>
     <span className="graph-legend-key"><span className="graph-legend-path" aria-hidden="true" />Path to the selected item</span>
-    <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg>Related</span>
+    <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H20" /></svg>Related</span>
     <span className="graph-legend-note">Lines show for the selected item and the one under the pointer.</span>
   </div>;
 }

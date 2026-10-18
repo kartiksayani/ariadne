@@ -62,7 +62,7 @@ function AckAllReview({ anchor, label, topicName, items, error, onConfirm, onCan
     <h2 className="ack-all-title">Ack {items.length} results in “{topicName}”?</h2>
     <p className="ack-all-text">They stay in the Map, marked as read. Questions and open items aren’t touched.</p>
     <ul className="ack-all-list">{items.map(item => <li key={item.id}>
-      <StatusBadge status="done" variant="icon" size={12} /><span className="ack-all-name">{shortLabel(item)}</span></li>)}</ul>
+      <StatusBadge status="done" variant="icon" size={12.5} /><span className="ack-all-name">{shortLabel(item)}</span></li>)}</ul>
     {error && <p className="ack-all-error" role="alert">{error}</p>}
     <div className="ack-all-actions">
       <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>

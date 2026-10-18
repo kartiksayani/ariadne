@@ -59,8 +59,8 @@ export function RecentPopover({ session, entries, onReveal, onClose }: {
     onKeyDown={event => { if (!event.metaKey && !event.ctrlKey && event.key !== 'Escape' && event.key !== 'F6') event.stopPropagation(); }}>
     <div className="recent-head">
       <i className="ph ph-clock-counter-clockwise" aria-hidden="true" />
-      <h2>Recent<span className="recent-sub"> · viewed and changed</span></h2>
-      <button type="button" className="btn btn-ghost recent-close" aria-label="Close recent" title="Close ( esc )" onClick={() => onClose(true)}>×</button>
+      <h2>Recent<span className="recent-sub"><span className="recent-dot"> · </span>viewed and changed</span></h2>
+      <button type="button" className="btn btn-ghost recent-close" aria-label="Close recent" title="Close ( esc )" onClick={() => onClose(true)}><i className="ph ph-x" aria-hidden="true" /></button>
     </div>
     <section className="recent-section" aria-label="Viewed">
       <h3 className="p-label">Viewed</h3>
@@ -68,7 +68,7 @@ export function RecentPopover({ session, entries, onReveal, onClose }: {
         <button type="button" className="recent-item" title={item.question} {...hover(item.id)} onClick={() => open(item.id)}>
           {status(item)}
           <span className="recent-name">{labels.get(item.id)}</span>
-          <small>· {entry.action}</small>
+          <small data-quiet={entry.action === 'viewed' || undefined}>· {entry.action}</small>
           <time dateTime={entry.visited_at}>{clockTime(entry.visited_at)}</time>
         </button></li>)}</ul> : <p className="recent-empty">Open or peek at an item to start your recent trail.</p>}
     </section>

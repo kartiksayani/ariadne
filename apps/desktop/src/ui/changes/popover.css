@@ -70,7 +70,7 @@
   background: var(--a-side);
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
   font-size: calc(12.5px * var(--text-scale));
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .changes-popover:focus-visible {
@@ -80,25 +80,44 @@
 .changes-head {
   display: flex;
   flex: none;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 10px 8px 4px 14px;
 }
 
 .changes-head > i {
-  align-self: center;
+  font-size: calc(14px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
 }
 
 .changes-head h2 {
   margin: 0;
   font-size: calc(13px * var(--text-scale));
   font-weight: 500;
+  line-height: inherit;
+  letter-spacing: normal; /* The shared heading rule's -0.015em is not the board's. */
 }
 
-.changes-close {
-  align-self: center;
+.changes-head > .change-muted {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-head .changes-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
   margin-left: auto;
-  padding: 0 8px;
+  padding: 0;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .changes-body {
@@ -130,14 +149,37 @@
 }
 
 .changes-brief-head {
+  align-items: center;
   width: 100%;
-  padding: 2px 0;
+  padding: 0;
   border: 0;
   background: transparent;
-  color: inherit;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
   font: inherit;
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: .07em;
   text-align: left;
+  text-transform: uppercase;
   cursor: pointer;
+}
+
+/* SPEC 5.2: the head is one small-caps line: the word, then the agent's note in plain type, all at the label's size. */
+.changes-brief-head > i {
+  font-size: 11px;
+}
+
+.changes-brief-head .changes-label-caps {
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.changes-brief-head .change-muted {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: inherit;
 }
 
 .changes-brief-counts {
