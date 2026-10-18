@@ -37,8 +37,8 @@ it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts
   expect(fireEvent.keyDown(row, { key: '/' })).toBe(false); expect(document.activeElement).toBe(search);
   // ⌫ on the selected row asks to remove it (handoff README "Keyboard"); Cancel leaves everything as it was.
   row.focus(); expect(fireEvent.keyDown(row, { key: 'Backspace' })).toBe(false);
-  const asking = screen.getByRole('alertdialog'); expect(within(asking).getByRole('button', { name: /^Remove/ })).toBeTruthy();
-  fireEvent.click(within(asking).getByRole('button', { name: 'Cancel' })); expect(screen.queryByRole('alertdialog')).toBeNull();
+  const asking = screen.getByRole('dialog', { name: /^Remove “/ }); expect(within(asking).getByRole('button', { name: /^Remove (item|\d+ items)$/ })).toBeTruthy();
+  fireEvent.click(within(asking).getByRole('button', { name: /^Cancel/ })); expect(screen.queryByRole('dialog', { name: /^Remove “/ })).toBeNull();
   fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Item actions' });
   const pause = connection(); pause.focus(); fireEvent.click(pause);
   fireEvent.click(await screen.findByRole('button', { name: 'Close session' }));

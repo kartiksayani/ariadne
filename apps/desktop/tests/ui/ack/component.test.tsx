@@ -556,6 +556,9 @@ describe('local acknowledgement', () => {
     const band = screen.getByText('Archived notes', { selector: '.tree-topic-name' }).closest('[role="treeitem"]') as HTMLElement;
     fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
     await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: /^Archive topic/ })); });
+    // Archive always asks (E33); the refusal shows in its dialog.
+    const asking = within(await screen.findByRole('dialog', { name: 'Archive the “Archived notes” topic?' }));
+    await act(async () => { fireEvent.click(asking.getByRole('button', { name: 'Archive topic' })); });
     expect(await screen.findByText('This changed while you were working. Look at it as it is now, then try again.')).toBeTruthy();
     expect(screen.getByText(refusal)).toBeTruthy();
   });
