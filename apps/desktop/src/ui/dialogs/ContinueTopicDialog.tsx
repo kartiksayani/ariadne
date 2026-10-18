@@ -37,9 +37,6 @@ export function openContinueTopic(request: ContinueRequest): void { publish(requ
 /** A session that can take a topic over. */
 export interface ContinueTarget { readonly route: SessionRef; readonly label: string; readonly detail: string }
 
-/** An agent as the owner reads it in this dialog (SPEC 10.7, 10.8): "Claude Code", "Codex". */
-const agentLabel = (adapterId: string): string => adapterId === 'claude_code_mod' ? 'Claude Code' : adapterId === 'codex' ? 'Codex' : agentName(adapterId);
-
 /** The sessions a topic of `source` can continue in: the other active sessions, those of its own project first. */
 export function continueTargets(source: SessionRef, sessions: readonly Immutable<SessionSummary>[], projects: readonly Immutable<ProjectSummary>[] = []): ContinueTarget[] {
   const own = (session: Immutable<SessionSummary>) => session.project_id === source.project_id;
@@ -49,7 +46,7 @@ export function continueTargets(source: SessionRef, sessions: readonly Immutable
     .sort((a, b) => Number(own(b)) - Number(own(a)))
     .map(session => {
       const binding = session.active_binding;
-      const agent = binding ? agentLabel(binding.adapter_id) : 'No agent connected';
+      const agent = binding ? agentName(binding.adapter_id) : 'No agent connected';
       const running = binding?.connection_state === 'connected' ? 'running' : 'not running, so the summary queues';
       return { route: { project_id: session.project_id, session_id: session.session_id }, label: ownerName(session) ?? session.title,
         detail: [binding ? `${agent} · ${running}` : agent, ownerDescription(session), where(session)].filter(Boolean).join(' · ') };
@@ -84,7 +81,7 @@ export function ContinuePicker({ topicName, targets, unlisted, onPick, onCancel 
 interface Prepared { readonly preview: Immutable<ContinuePreview>; readonly source: Immutable<Session>; readonly targetRevision: number }
 const agentOf = (session: Immutable<Session> | undefined) => {
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  return binding ? agentLabel(binding.adapter_id) : 'the agent';
+  return binding ? agentName(binding.adapter_id) : 'the agent';
 };
 const blockedWords: Record<string, string> = {
   source_archived: 'the source session is archived; restore it before continuing',
