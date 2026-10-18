@@ -104,7 +104,7 @@ async function changesFit(surface: Locator) {
   const layout = await surface.evaluate(element => {
     const card = element.getBoundingClientRect();
     return { overflow: element.scrollWidth - element.clientWidth,
-      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-line, .change-comparison, .changes-seen')].map(child => {
+      children: [...element.querySelectorAll('.change-name, .because-read, .brief-line, .change-comparison, .changes-seen')].map(child => {
         const rect = child.getBoundingClientRect();
         return { text: child.textContent, left: rect.left - card.left, right: rect.right - card.right,
           overflow: child.scrollWidth - child.clientWidth };
@@ -159,25 +159,28 @@ for (const theme of ['dark', 'light'] as const) {
     await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
     const answer = page.getByRole('region', { name: 'What your answer changed', exact: true });
     await answer.scrollIntoViewIfNeeded();
-    await expect(answer.locator('.change-owner-words')).toHaveText(ownerWords);
-    await expect(answer.locator('.change-read-as')).toHaveText(interpretation);
-    const words = await answer.locator('.change-owner-words').boundingBox(), read = await answer.locator('.change-read-as').boundingBox();
+    // The Because card (SPEC 6.8): "You wrote" above "Read as", then the effects as a ruled list, five of them before "and N more".
+    await expect(answer.locator('.because-words')).toHaveText(ownerWords);
+    await expect(answer.locator('.because-read')).toHaveText(interpretation.replace(/^Read as:\s*/, ''));
+    const words = await answer.locator('.because-words').boundingBox(), read = await answer.locator('.because-read').boundingBox();
     expect(words).not.toBeNull(); expect(read).not.toBeNull();
     expect(words!.y + words!.height).toBeLessThanOrEqual(read!.y);
-    expect(await answer.locator('.change-owner-words').evaluate(element => getComputedStyle(element).whiteSpace)).toBe('pre-wrap');
-    await expect(answer.locator('.change-name')).toHaveText(changeNames.slice(0, 5));
-    await expect(answer.getByRole('heading', { name: 'New', exact: true })).toHaveCount(0);
-    await answer.getByRole('button', { name: 'and 3 more: 3 new', exact: true }).click();
-    await expect(answer.locator('.change-name')).toHaveText(changeNames);
-    await expect(answer.getByRole('heading', { name: 'New', exact: true })).toBeVisible();
+    expect(await answer.locator('.because-words').evaluate(element => getComputedStyle(element).whiteSpace)).toBe('pre-wrap');
+    await expect(answer.locator('.because-effect')).toHaveCount(5);
+    await answer.getByRole('button', { name: 'and 3 more', exact: true }).click();
+    await expect(answer.locator('.because-effect')).toHaveCount(8);
+    expect(await answer.locator('.change-name').allTextContents()).toEqual(expect.arrayContaining(changeNames));
     await changesFit(answer);
     const answerControl = await compactCompare(answer);
-    const current = page.getByRole('region', { name: 'What changed', exact: true });
-    const currentControl = await compactCompare(current);
-    await page.locator('.change-history > summary').click();
-    const older = page.locator('.change-history-entry').first();
-    await expect(older).toContainText('Rewording');
-    const historyControl = await compactCompare(older);
+    // The change box on the item itself draws before → after inline, and its older history is a timeline behind one toggle.
+    const current = page.getByTestId('change-box');
+    await current.scrollIntoViewIfNeeded();
+    await expect(current.locator('.change-row del').first()).toBeVisible();
+    await changesFit(current);
+    await current.getByRole('button', { name: /^Older history/ }).click();
+    const older = current.locator('.change-event').first();
+    await expect(older).toContainText('not counted as a change');
+    await expect(older.getByRole('button', { name: 'Before → after', exact: true })).toBeVisible();
     await openChanges(page);
     const sinceCard = page.getByRole('dialog', { name: 'What changed', exact: true }).getByTestId('changes-row')
       .filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
@@ -190,7 +193,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(sinceComparison.locator('mark').first()).toBeVisible();
     await expect(sinceCard.getByRole('button', { name: 'Hide before → after', exact: true })).toBeVisible();
     await changesFit(sinceCard);
-    expect([currentControl, historyControl]).toEqual([answerControl, answerControl]);
+    expect(answerControl.width).toBeGreaterThanOrEqual(24);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 
@@ -198,8 +201,8 @@ for (const theme of ['dark', 'light'] as const) {
     await openApp(page, origin, { ...frameSpec('changes-choice'), theme });
     const answer = page.getByRole('region', { name: 'What your answer changed', exact: true });
     await answer.scrollIntoViewIfNeeded();
-    await expect(answer).toContainText('Because you chose Keep retries quiet:');
-    await expect(answer.locator('.change-owner-words, .change-read-as')).toHaveCount(0);
+    await expect(answer).toContainText('Because you chose “Keep retries quiet”');
+    await expect(answer.locator('.because-words, .because-read')).toHaveCount(0);
     await changesFit(answer);
     const brief = (await openChanges(page)).getByRole('region', { name: 'Topic brief', exact: true });
     await brief.getByRole('button', { name: /Brief/ }).click();
@@ -612,17 +615,21 @@ for (const id of dockFrameIds) {
         padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), border: parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) };
     });
     expect(lines.height, 'resting composer is two rows (alpha.21 E15)').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line * 2 + lines.padding + lines.border)));
-    await expect(dock.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeInViewport();
-    await expect(dock.getByRole('button', { name: 'Reply', exact: true })).toBeInViewport();
-    await expect(dock.getByRole('button', { name: 'Later', exact: true })).toBeInViewport();
+    // The actions sit in the body, in one row under the outcome (SPEC 5.3 item 5): they scroll with it, so the resting view (open at the end of the
+    // conversation) has them above the fold; the pinned dock holds only the composer.
+    const actions = pane.getByRole('group', { name: 'Item actions', exact: true });
+    await expect(actions.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeVisible();
+    await expect(actions.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+    await expect(actions.getByRole('button', { name: 'Later', exact: true })).toBeVisible();
     if (spec.dockState === 'pending') {
       const pending = pane.getByRole('region', { name: 'Conversation', exact: true }).locator('li[data-pending]');
       await expect(pending).toContainText('Keep the captions with the examples.');
       await expect(pending).toContainText(/✓ (Sent at|Picked up)/u);
       await expect(pending).toBeInViewport();
-      await expect(dock.locator('.detail-delivery-hint')).toHaveText('Your reply was received · waiting for the agent');
-      await expect(dock.getByRole('button', { name: 'Bring it up', exact: true })).toHaveCount(0);
-      await expect(dock.getByRole('button', { name: 'Drop', exact: true })).toHaveCount(0);
+      await expect(pane.locator('.detail-delivery-hint')).toHaveText('Your reply was received · waiting for the agent');
+      // While a message is on its way the row keeps Bring it up and Drop, greyed, so the row never changes shape under the pointer.
+      await expect(actions.getByRole('button', { name: 'Bring it up', exact: true })).toBeDisabled();
+      await expect(actions.getByRole('button', { name: 'Drop', exact: true })).toBeDisabled();
     }
     const geometry = await pane.evaluate(element => {
       const pane = element.getBoundingClientRect(), body = element.querySelector('.detail-body')!.getBoundingClientRect();

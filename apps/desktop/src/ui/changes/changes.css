@@ -22,9 +22,6 @@
 
 .change-surface p { margin: 6px 0; }
 .change-muted { color: var(--a-label); }
-.change-group { margin-top: 8px; }
-.change-owner-words { margin: 6px 0; }
-.change-owner-words, .change-read-as { white-space: pre-wrap; }
 
 .change-name, .change-link {
   border: 0;
