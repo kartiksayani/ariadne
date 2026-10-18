@@ -83,6 +83,8 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   const view = render(<Harness />);
   return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
 }
+/** SPEC 11.4: the notice for an item the filter would leave out. */
+const outsideNotice = /^Showing “.+”, which is outside your filter \(Waiting on me\)\.$/;
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
 /** An entry of a topic band's "…" menu (Reply to topic, Open the bin, Archive topic…, Remove topic…). */
@@ -1371,16 +1373,18 @@ describe('session tree filters', () => {
       viewOf(transport).filters.statuses = ['waiting_on_me']; viewOf(transport).expanded_item_ids = [];
     } });
     expect(ids()).toEqual(['2']);
+    render(<Notices />);
     const reveal: RevealedItem = { kind: 'item', route: { ...route, item_id: '1.1' }, store, temporaryExpandedItemIds: ['1'] };
     rerender({ reveal, selectedId: '1.1' });
-    expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    expect(within(row('1.1')).getByText('Outside filter')).toBeTruthy();
     expect(ids()).toEqual(['1', '1.1', '2']);
     expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('64%');
-    fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide it again' }));
     expect(calls.resumed).toBe(1);
     await waitFor(() => expect(viewOf(transport).selected_item_id).toBeNull());
     rerender({ reveal: null, selectedId: null });
-    expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull(); expect(ids()).toEqual(['2']);
+    await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull()); expect(ids()).toEqual(['2']);
   });
   it('holds the chips while a preference write is unconfirmed', async () => {
     const { transport } = await mount();
@@ -2764,15 +2768,16 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
-  it.each(['fold topic', 'collapse item', 'status chip', 'Resume filtered view'])(
+  it.each(['fold topic', 'collapse item', 'status chip', 'Hide it again'])(
   'never scrolls when %s dismisses the active tree reveal', async path => {
     const view = await opened();
+    render(<Notices />);
     fireEvent.click(row('8'));
     await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('8'));
     const reveal = view.calls.selected[0];
     view.rerender({ reveal, selectedId: '8', detailOpen: true });
     // A status filter that leaves the revealed item out (a search no longer filters the Map).
-    if (path === 'Resume filtered view') await act(async () => { const saved = structuredClone(viewOf(view.transport));
+    if (path === 'Hide it again') await act(async () => { const saved = structuredClone(viewOf(view.transport));
       await view.navigation.saveSessionView({ ...saved, filters: { ...saved.filters, statuses: ['decided'] } }, view.transport.preferences.revision); });
     const readingPosition = path === 'collapse item' ? 0 : 150;
     scroller().scrollTop = readingPosition;
@@ -2787,11 +2792,11 @@ describe('scrolling the tree', () => {
       case 'status chip':
         fireEvent.click(chip('Open'));
         break;
-      case 'Resume filtered view':
-        fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+      case 'Hide it again':
+        fireEvent.click(await screen.findByRole('button', { name: 'Hide it again' }));
         break;
     }
-    await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    await waitFor(() => expect(path === 'Hide it again' ? view.calls.resumed : view.calls.dismissed).toBe(1));
     // A chip removes rows above the reading row, and the Map's hold (D24) moves the scroll to keep that row in place; every
     // other path leaves the scroll where the owner put it. Either way, dismissing the reveal moves nothing further.
     const settledAt = scroller().scrollTop;

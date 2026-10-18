@@ -676,9 +676,9 @@ describe('agent removal receipts in the composed app', () => {
     const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.2"]' });
     expect(within(detail).getByRole('heading', { name: 'Other child' })).toBeTruthy();
     await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2', '2', '8']));
-    fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide it again' }));
     await waitFor(() => expect(rows()).toEqual(['1', '1.1', '2', '8']));
-    expect(screen.queryByRole('button', { name: 'Resume filtered view' })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Hide it again' })).toBeNull());
     expect(searchValue()).toBe('Matching');
   });
 

@@ -5,6 +5,7 @@ import { SideCovered } from './sideCovered';
 import { DETAILS_RAIL, useDetailsColumn } from '../../state/details/column';
 import { Notices } from '../pages/notices';
 import { Toast } from './ToastView';
+import { useMapNoticeTop } from './noticeTop';
 
 /** Body state the dock and the Details column replace; until then the shell keeps today's layout. */
 export interface LegacyBody {
@@ -78,6 +79,7 @@ function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTM
 export function Body({ main, side, dock, conversation }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
   useNoticeBand(view, layer, !!conversation);
+  const mapTop = useMapNoticeTop(ref, !conversation);
   const width = useWidth(ref);
   // No dock (a page), no room under it.
   const dockInset = useDockInset(), inset = dock ? dockInset : 0;
@@ -93,7 +95,8 @@ export function Body({ main, side, dock, conversation }: BodyProps) {
     </div>
     {conversation && <div ref={view} className="shell-conversation" style={{ left: 0 }}>{conversation}</div>}
     {dock && <div className="shell-dock">{dock}</div>}
-    <div ref={layer} className="shell-notices" data-conversation={conversation ? '' : undefined} style={{ left: 0, right: conversation ? 0 : sideWidth }}><Notices /></div>
+    <div ref={layer} className="shell-notices" data-placement={conversation ? 'conversation' : mapTop !== null ? 'map' : undefined}
+      style={{ left: 0, right: conversation ? 0 : sideWidth, ...(mapTop !== null ? { '--notice-top': `${mapTop}px` } : {}) } as CSSProperties}><Notices /></div>
     <div className="shell-toast" style={{ left: 0, right: conversation ? 0 : sideWidth }}><Toast /></div>
   </div>;
 }

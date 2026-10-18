@@ -121,7 +121,7 @@ describe('Map change markers and next unseen navigation', () => {
     const saved = structuredClone(view.transport.preferences.sessions[0]);
     expect(row('1.1')).toBeNull(); next();
     expect(target()).toBe(row('1.1')); expect(row('1')).not.toBeNull();
-    expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
+    expect(within(row('1.1')).getByText('Outside filter')).toBeTruthy();
     expect(view.transport.preferences.sessions[0]).toEqual(saved);
     // A deliberate owner fold overrides the temporary N reveal.
     fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));

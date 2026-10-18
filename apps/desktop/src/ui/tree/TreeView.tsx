@@ -39,7 +39,7 @@ import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner } from './Banner';
-import { FilterRow } from './FilterRow';
+import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
@@ -1303,6 +1303,22 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
+  // SPEC 11.4: an item shown only because it was opened. The notice floats, so the Map never moves; the row carries the tag.
+  const outsideRow = model?.rows.find(row => row.kind === 'item' && row.outside);
+  const outsideName = outsideRow?.kind === 'item' ? names.get(outsideRow.item.id) ?? shortLabel(outsideRow.item) : null;
+  const outsideFilter = scope ? pickedChips(scope).map(chipLabel).join(', ') : '';
+  const outsideNoticeId = JSON.stringify(['tree-outside-filter', route.project_id, route.session_id]);
+  const outsideCallbacks = useRef({ resume, clearChips });
+  outsideCallbacks.current = { resume, clearChips };
+  useEffect(() => () => noticeStore.dismiss(outsideNoticeId), [outsideNoticeId]);
+  useEffect(() => {
+    if (outsideName === null) { noticeStore.dismiss(outsideNoticeId); return; }
+    noticeStore.push({ id: outsideNoticeId, icon: 'ph ph-funnel', tone: 'neutral',
+      text: `Showing “${outsideName}”, which is outside your filter${outsideFilter ? ` (${outsideFilter})` : ''}.`,
+      actions: [{ label: 'Hide it again', dismissOnRun: true, run: () => { outsideCallbacks.current.resume(); } },
+        { label: 'Clear filter', dismissOnRun: true, run: () => { outsideCallbacks.current.clearChips(); } }] });
+  }, [outsideNoticeId, outsideName, outsideFilter]);
+
   // "↓ Back to “name” ." (SPEC §5.8 8.5): floats over the Map while the selected row is out of view, at the top or above the
   // dock by the side it went; `.` does the same. It covers rows rather than moving them. Not in the Graph.
   const selectedItem = selectedId ? session?.items[selectedId] : undefined;
@@ -1323,8 +1339,6 @@ export function TreeView(props: TreeViewProps) {
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
     {filterRow}
-    {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
-      Showing an item outside your current filters.</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>

@@ -274,7 +274,8 @@ it('keeps the dismissal pending and retries a failed save without losing the wor
   const button = await screen.findByRole('button', { name: 'Put back in reply box' });
   fireEvent.click(within(button.closest('[data-notice-id]') as HTMLElement).getByRole('button', { name: 'Dismiss' }));
   expect(screen.getByText(/Saving dismissal/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  // × stays on every notice; pressing it while the save is in flight never starts a second one.
+  fireEvent.click(within(screen.getByText(/Saving dismissal/).closest('[data-notice-id]') as HTMLElement).getByRole('button', { name: 'Dismiss' }));
   expect(resolve).toHaveBeenCalledTimes(1);
   await act(async () => { complete(false); });
   await screen.findByText(/Couldn’t save the dismissal/);

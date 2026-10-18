@@ -349,3 +349,15 @@
 .tree-item-hidden {
   opacity: .58;
 }
+
+/* "Outside filter" (SPEC 11.4): the filter would leave this item out; it shows because it was opened. */
+.tree-outside-tag {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}

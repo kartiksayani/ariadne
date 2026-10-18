@@ -206,6 +206,8 @@ export interface ItemRow {
   readonly hasKids: boolean;
   readonly expanded: boolean;
   readonly context: boolean;
+  /** Shown only because it was revealed or selected: the filter would leave it out (SPEC 11.4). */
+  readonly outside?: boolean;
   readonly guides: readonly Guide[];
   readonly later: boolean;
   readonly hidden: boolean;
@@ -423,7 +425,7 @@ export function treeModel(input: TreeInput): TreeModel {
         if (holdsTerms(item.question, terms)) matches.push('question');
         if (outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms)) matches.push('outcome');
         built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
-          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked,
+          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), outside: filtering && forced.has(item.id) && !matched.has(item.id), later: parked,
           segments: matches.includes('question') ? hitSegments(item.question, terms) : [{ text: item.question, hit: false }], matches,
           replacedBy,
           relatedCount: connectedItems(session, item.id).length,

@@ -171,6 +171,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         <ClampBlock text={details?.text} open={unfolded} onToggle={() => onUnfold(item.id)}>{details?.node}</ClampBlock>
       </MarkdownHighlight.Provider>
       {delivery(row, fix)}
+      {row.outside && <span className="tree-outside-tag" title="The filter would hide this item; it is shown because you opened it">Outside filter</span>}
       {note && <Strip variant="inside" text={note} depth={row.depth} onClick={() => onToggle(item.id)} />}
     </div>
     {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). The hover
