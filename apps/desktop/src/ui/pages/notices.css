@@ -72,11 +72,18 @@
 }
 
 .pw-notices .pw-note[data-tone="problem"] {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-warn) 50%, var(--color-divider)), var(--a-lift);
+  background: color-mix(in srgb, var(--a-danger) 6%, var(--a-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-danger) 32%, transparent), var(--shadow-md);
+}
+
+.pw-notices .pw-note[data-tone="warn"] {
+  background: color-mix(in srgb, var(--a-warn) 7%, var(--a-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-warn) 34%, transparent), var(--shadow-md);
 }
 
 .pw-notices .pw-note > i { margin-top: 3px; }
-.pw-notices .pw-note[data-tone="problem"] > i { color: var(--a-warn); }
+.pw-notices .pw-note[data-tone="problem"] > i { color: var(--a-danger); }
+.pw-notices .pw-note[data-tone="warn"] > i { color: var(--a-warn); }
 
 .pw-notices .pw-note-text {
   flex-basis: 0;
