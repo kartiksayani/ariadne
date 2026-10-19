@@ -284,17 +284,16 @@ for (const theme of ['dark', 'light'] as const) {
     const toggle = card.getByRole('button', { name: 'Before → after', exact: true });
     const toggleBox = await box(toggle);
     expect(toggleBox.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
-    const tint = () => card.evaluate(element => getComputedStyle(element).backgroundColor);
-    expect(await tint()).toBe('rgba(0, 0, 0, 0)');
+    await expect(card).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await toggle.click();
-    expect(await tint()).not.toBe('rgba(0, 0, 0, 0)');
+    await expect(card).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     const comparison = page.locator(`[id="${await card.getByRole('button', { name: 'Hide before → after', exact: true }).getAttribute('aria-controls')}"]`);
     const label = await box(comparison.getByText('Before', { exact: true }).first()), value = await box(comparison.locator('del').first());
     expect(value.x).toBeGreaterThan(label.x + label.width - 1);
     expect(Math.abs(value.y - label.y)).toBeLessThan(6);
     // Seen: the row dims to half.
     await card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }).click();
-    expect(await card.locator('time').evaluate(element => getComputedStyle(element).opacity)).toBe('0.5');
+    await expect(card.locator('time')).toHaveCSS('opacity', '0.5');
   });
 
   test(`M2 long absence leads with a calm summary, then the brief, and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
