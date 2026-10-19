@@ -422,11 +422,10 @@ fn project_recovery_with(
             }
         } else {
             validate(&record).map_err(|_| corrupt(&file.path()))?;
-            if let Err(error) = confirm(file, &pending.operation_id) {
-                return match mode {
-                    ProjectionMode::Read => Ok((original, empty_recovery())),
-                    ProjectionMode::Patch => Err(error.into()),
-                };
+            // The main file already carries this receipt, published after the
+            // companion. A read takes it as is; only a patch re-confirms it.
+            if matches!(mode, ProjectionMode::Patch) {
+                confirm(file, &pending.operation_id)?;
             }
         }
     }
@@ -1020,5 +1019,74 @@ mod recovery_retry_tests {
             pending.assert_preserved();
         }
         pending.assert_retry_completes();
+    }
+
+    fn load_counting(
+        pending: &PendingMarker,
+        mode: ProjectionMode,
+        confirms: &std::cell::Cell<usize>,
+    ) -> (Record, RecoveryRecord) {
+        pending
+            .registry
+            .with_ui_file(|mut file| {
+                load_with(&mut file, |file, record, recovery| {
+                    project_recovery_with(
+                        file,
+                        record,
+                        recovery,
+                        mode,
+                        |file, operation| {
+                            confirms.set(confirms.get() + 1);
+                            file.confirm_recovery(operation)
+                        },
+                        |file, bytes, operation| file.publish_current(bytes, operation),
+                    )
+                })
+            })
+            .map_err(failure)
+            .unwrap()
+    }
+
+    #[test]
+    fn preferences_reads_confirm_only_the_one_time_repair_and_patches_still_confirm() {
+        let pending = PendingMarker::new();
+        let confirms = std::cell::Cell::new(0);
+        for _ in 0..3 {
+            let (record, recovery) = load_counting(&pending, ProjectionMode::Read, &confirms);
+            assert_eq!(record.snapshot.revision.value(), 4);
+            assert_eq!(
+                record.snapshot.resolved_unsent_input_ids,
+                vec![id(90), id(91), id(92)]
+            );
+            assert_eq!(recovery.operations.last().unwrap().operation_id, id(102));
+        }
+        // The interrupted projection was repaired once; later reads never sync.
+        assert_eq!(confirms.get(), 1);
+        let service = PreferencesService::new(&pending.registry);
+        for _ in 0..3 {
+            assert_eq!(
+                service.get(&owner()).unwrap().resolved_unsent_input_ids,
+                vec![id(90), id(91), id(92)]
+            );
+        }
+        load_counting(&pending, ProjectionMode::Patch, &confirms);
+        assert_eq!(confirms.get(), 2);
+        assert_eq!(
+            fs::read(pending.home.path().join(".ariadne/ui-recovery.json")).unwrap(),
+            pending.companion
+        );
+    }
+
+    #[test]
+    fn busy_markers_are_worded_try_again_and_lasting_refusals_are_not() {
+        let busy = failure(Failure::Store(StoreError::Busy));
+        assert_eq!(busy.code, CoreErrorCode::StoreBusy);
+        assert!(busy.retryable);
+        assert!(busy.hint.contains("try again"));
+        let refused = failure(Failure::Store(StoreError::UnsafePath {
+            path: "ui-recovery.json".into(),
+        }));
+        assert_eq!(refused.code, CoreErrorCode::PermissionDenied);
+        assert!(!refused.retryable);
     }
 }

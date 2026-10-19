@@ -84,6 +84,43 @@ fn open_created(create: bool, mut open: impl FnMut() -> libc::c_int) -> libc::c_
     }
 }
 
+/// A failed filesystem step, and whether the OS called it transient: EIO,
+/// EINTR, EAGAIN or ETIMEDOUT say nothing about the entry or its bytes.
+#[derive(Debug)]
+pub(crate) struct IoFailure {
+    pub(crate) error: StoreError,
+    pub(crate) transient: bool,
+}
+
+impl IoFailure {
+    pub(crate) fn os(action: &'static str, path: &Path, error: io::Error) -> Self {
+        Self {
+            transient: transient(&error),
+            error: StoreError::io(action, path, error),
+        }
+    }
+}
+
+impl From<StoreError> for IoFailure {
+    fn from(error: StoreError) -> Self {
+        Self {
+            error,
+            transient: false,
+        }
+    }
+}
+
+pub(crate) fn transient(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::EIO | libc::EINTR | libc::EAGAIN | libc::ETIMEDOUT)
+    )
+}
+
+fn same_entry(left: &libc::stat, right: &libc::stat) -> bool {
+    left.st_dev == right.st_dev && left.st_ino == right.st_ino
+}
+
 impl Directory {
     pub fn root(path: &Path) -> Result<Self, StoreError> {
         let path = path
@@ -146,6 +183,11 @@ impl Directory {
     }
 
     pub(crate) fn open(&self, name: &str, create: bool) -> Result<File, StoreError> {
+        self.open_noting_transient(name, create)
+            .map_err(|failure| failure.error)
+    }
+
+    fn open_noting_transient(&self, name: &str, create: bool) -> Result<File, IoFailure> {
         let path = self.path.join(name);
         component(name, &path)?;
         let name = c_name(name.as_bytes(), &path)?;
@@ -161,14 +203,23 @@ impl Directory {
             // SAFETY: parent descriptor is live; name is a generated single component.
             unsafe { libc::openat(self.file.as_raw_fd(), name.as_ptr(), flags, 0o600) }
         });
-        checked_file(fd, &path, false, true)
+        if fd == -1 {
+            return Err(IoFailure::os("open", &path, io::Error::last_os_error()));
+        }
+        Ok(checked_file(fd, &path, false, true)?)
     }
 
     pub(crate) fn read(&self, name: &str) -> Result<Vec<u8>, StoreError> {
-        let mut file = self.open(name, false)?;
+        self.read_noting_transient(name)
+            .map_err(|failure| failure.error)
+    }
+
+    /// `read`, also saying whether a failed open or read was transient.
+    pub(crate) fn read_noting_transient(&self, name: &str) -> Result<Vec<u8>, IoFailure> {
+        let mut file = self.open_noting_transient(name, false)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
-            .map_err(|error| StoreError::io("read", &self.path.join(name), error))?;
+            .map_err(|error| IoFailure::os("read", &self.path.join(name), error))?;
         Ok(bytes)
     }
 
@@ -275,6 +326,13 @@ impl Directory {
 
     /// File type of one direct entry without following a final symlink.
     fn entry_type(&self, name: &str) -> Result<Option<libc::mode_t>, StoreError> {
+        self.entry_stat(name)
+            .map(|stat| stat.map(|stat| stat.st_mode & libc::S_IFMT))
+            .map_err(|failure| failure.error)
+    }
+
+    /// Status of one direct entry without following a final symlink.
+    fn entry_stat(&self, name: &str) -> Result<Option<libc::stat>, IoFailure> {
         let path = self.path.join(name);
         component(name, &path)?;
         let c = c_name(name.as_bytes(), &path)?;
@@ -293,11 +351,11 @@ impl Directory {
             return if error.kind() == io::ErrorKind::NotFound {
                 Ok(None)
             } else {
-                Err(StoreError::io("stat", &path, error))
+                Err(IoFailure::os("stat", &path, error))
             };
         }
         // SAFETY: fstatat succeeded and initialized stat.
-        Ok(Some(unsafe { stat.assume_init() }.st_mode & libc::S_IFMT))
+        Ok(Some(unsafe { stat.assume_init() }))
     }
 
     /// Unlink one direct non-directory entry (a symlink itself, never its target).
@@ -383,11 +441,12 @@ impl Directory {
     /// Move one entry under its resource lock without following final links or
     /// replacing evidence at the destination. Unreadable regular files and
     /// symlinks can be preserved; directories are outside this operation.
+    /// A copy is removed only while another copy is confirmed present.
     pub(crate) fn rename_entry_no_replace(
         &self,
         source: &str,
         target: &str,
-    ) -> Result<(), StoreError> {
+    ) -> Result<(), IoFailure> {
         self.rename_entry_no_replace_with(source, target, |source, target| {
             // SAFETY: both checked single-component names are relative to this
             // live directory. Exclusive rename never follows a link target.
@@ -419,26 +478,36 @@ impl Directory {
         source: &str,
         target: &str,
         rename: impl FnOnce(&CString, &CString) -> libc::c_int,
-    ) -> Result<(), StoreError> {
-        self.rename_entry_no_replace_with_unlink(source, target, rename, |source| {
-            // SAFETY: the checked source name is anchored to this live directory.
-            unsafe { libc::unlinkat(self.file.as_raw_fd(), source.as_ptr(), 0) }
-        })
+    ) -> Result<(), IoFailure> {
+        self.rename_entry_no_replace_with_faults(
+            source,
+            target,
+            rename,
+            |name| {
+                // SAFETY: the checked name is anchored to this live directory.
+                unsafe { libc::unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) }
+            },
+            || self.entry_stat(source),
+        )
     }
 
-    fn rename_entry_no_replace_with_unlink(
+    /// `unlink` removes the source, then (only on rollback) the new link;
+    /// `recheck` stats the source after its unlink reported an error.
+    fn rename_entry_no_replace_with_faults(
         &self,
         source: &str,
         target: &str,
         rename: impl FnOnce(&CString, &CString) -> libc::c_int,
-        unlink: impl FnOnce(&CString) -> libc::c_int,
-    ) -> Result<(), StoreError> {
+        mut unlink: impl FnMut(&CString) -> libc::c_int,
+        recheck: impl FnOnce() -> Result<Option<libc::stat>, IoFailure>,
+    ) -> Result<(), IoFailure> {
         let path = self.path.join(source);
         let target_path = self.path.join(target);
         component(target, &target_path)?;
-        let source_type = self.entry_type(source)?;
+        let before = self.entry_stat(source)?;
+        let source_type = before.map(|stat| stat.st_mode & libc::S_IFMT);
         if source_type == Some(libc::S_IFDIR) {
-            return Err(StoreError::UnsafePath { path });
+            return Err(StoreError::UnsafePath { path }.into());
         }
         let source = c_name(source.as_bytes(), &path)?;
         let target = c_name(target.as_bytes(), &self.path)?;
@@ -451,39 +520,52 @@ impl Directory {
             error.raw_os_error(),
             Some(libc::ENOTSUP | libc::EINVAL | libc::ENOSYS)
         ) {
-            return Err(StoreError::io("rename", &path, error));
+            return Err(IoFailure::os("rename", &path, error));
         }
-        if !matches!(source_type, Some(libc::S_IFREG | libc::S_IFLNK)) {
-            return Err(StoreError::UnsafePath { path });
-        }
+        let Some(before) =
+            before.filter(|_| matches!(source_type, Some(libc::S_IFREG | libc::S_IFLNK)))
+        else {
+            return Err(StoreError::UnsafePath { path }.into());
+        };
         // Some filesystems or kernels lack exclusive rename. Linking with flags=0
         // preserves symlinks themselves and refuses an existing destination.
         // SAFETY: both names remain anchored to this live directory descriptor.
-        os_result(
-            unsafe {
-                libc::linkat(
-                    self.file.as_raw_fd(),
-                    source.as_ptr(),
-                    self.file.as_raw_fd(),
-                    target.as_ptr(),
-                    0,
-                )
-            },
-            "link",
-            &path,
-        )?;
-        if unlink(&source) == -1 {
-            // Roll back only the link just created under the resource lock, so
-            // retries do not accumulate another preserved name on every read.
-            // SAFETY: the destination was exclusively linked immediately above.
-            os_result(
-                unsafe { libc::unlinkat(self.file.as_raw_fd(), target.as_ptr(), 0) },
-                "unlink",
-                &target_path,
-            )?;
-            return Err(StoreError::CommitUncertain { operation_id: None });
+        let linked = unsafe {
+            libc::linkat(
+                self.file.as_raw_fd(),
+                source.as_ptr(),
+                self.file.as_raw_fd(),
+                target.as_ptr(),
+                0,
+            )
+        };
+        if linked == -1 {
+            return Err(IoFailure::os("link", &path, io::Error::last_os_error()));
         }
-        Ok(())
+        if unlink(&source) != -1 {
+            return Ok(());
+        }
+        let unlinked = io::Error::last_os_error();
+        let uncertain = |retry| IoFailure {
+            error: StoreError::CommitUncertain { operation_id: None },
+            transient: retry,
+        };
+        // An unlink can report an error after removing the name, so the new
+        // link may be the only copy. It goes only while the original source is
+        // confirmed present; anything less keeps both names.
+        match recheck() {
+            Ok(None) => Ok(()),
+            Ok(Some(now)) if same_entry(&now, &before) => {
+                // Roll back only the link just created under the resource lock, so
+                // retries do not accumulate another preserved name on every read.
+                if unlink(&target) == -1 {
+                    return Err(uncertain(transient(&io::Error::last_os_error())));
+                }
+                Err(uncertain(transient(&unlinked)))
+            }
+            Ok(Some(_)) => Err(uncertain(false)),
+            Err(failure) => Err(uncertain(failure.transient)),
+        }
     }
 
     pub fn temp(&self, stem: &str, bytes: &[u8]) -> Result<Temporary<'_>, StoreError> {
@@ -593,9 +675,14 @@ impl Directory {
     }
 
     pub fn sync(&self) -> Result<(), StoreError> {
+        self.sync_noting_transient()
+            .map_err(|failure| failure.error)
+    }
+
+    pub(crate) fn sync_noting_transient(&self) -> Result<(), IoFailure> {
         self.file
             .sync_all()
-            .map_err(|error| StoreError::io("sync_directory", &self.path, error))
+            .map_err(|error| IoFailure::os("sync_directory", &self.path, error))
     }
 }
 
@@ -779,7 +866,10 @@ mod tests {
                         "moved-directory",
                         |_, _| panic!("directory must be rejected before rename")
                     ),
-                    Err(StoreError::UnsafePath { .. })
+                    Err(IoFailure {
+                        error: StoreError::UnsafePath { .. },
+                        ..
+                    })
                 ));
                 assert!(root.path().join("directory").is_dir());
                 assert!(!root.path().join("moved-directory").exists());
@@ -787,54 +877,234 @@ mod tests {
         }
     }
 
-    #[test]
-    fn failed_source_unlink_rolls_back_preserved_link_on_every_retry() {
-        for code in [libc::ENOTSUP, libc::EINVAL, libc::ENOSYS] {
-            for link in [false, true] {
-                let root = tempfile::tempdir().unwrap();
-                let directory = Directory::root(root.path()).unwrap();
-                let source = root.path().join("source");
-                let outside = root.path().join("outside");
-                std::fs::write(&outside, b"untouched link target").unwrap();
-                if link {
-                    symlink(&outside, &source).unwrap();
-                } else {
-                    std::fs::write(&source, b"source evidence").unwrap();
-                }
-                let original = std::fs::symlink_metadata(&source).unwrap();
-                for attempt in 0..3 {
-                    let target = format!("preserved-{attempt}");
-                    let result = directory.with_lock("ui.lock", true, || {
-                        directory.rename_entry_no_replace_with_unlink(
-                            "source",
-                            &target,
-                            unsupported_rename(code),
-                            |_| {
-                                // SAFETY: errno is this thread's writable OS error slot.
-                                unsafe { *errno() = libc::EACCES };
-                                -1
-                            },
-                        )
-                    });
-                    assert!(matches!(result, Err(StoreError::CommitUncertain { .. })));
-                    let retained = std::fs::symlink_metadata(&source).unwrap();
-                    assert_eq!(retained.ino(), original.ino());
-                    assert_eq!(retained.nlink(), original.nlink());
-                    assert!(std::fs::symlink_metadata(root.path().join(&target)).is_err());
-                    assert_eq!(std::fs::read(&outside).unwrap(), b"untouched link target");
-                    if link {
-                        assert_eq!(std::fs::read_link(&source).unwrap(), outside);
-                    } else {
-                        assert_eq!(std::fs::read(&source).unwrap(), b"source evidence");
-                    }
-                }
-                assert!(!std::fs::read_dir(root.path()).unwrap().any(|entry| entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("preserved-")));
+    struct Fallback {
+        root: tempfile::TempDir,
+        directory: Directory,
+        source: PathBuf,
+        outside: PathBuf,
+        original: std::fs::Metadata,
+        link: bool,
+    }
+
+    impl Fallback {
+        fn new(link: bool) -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let directory = Directory::root(root.path()).unwrap();
+            let source = root.path().join("source");
+            let outside = root.path().join("outside");
+            std::fs::write(&outside, b"untouched link target").unwrap();
+            if link {
+                symlink(&outside, &source).unwrap();
+            } else {
+                std::fs::write(&source, b"source evidence").unwrap();
+            }
+            let original = std::fs::symlink_metadata(&source).unwrap();
+            Self {
+                root,
+                directory,
+                source,
+                outside,
+                original,
+                link,
             }
         }
+
+        /// Exclusive rename is unsupported; `unlink` and `recheck` are the faults.
+        fn rename(
+            &self,
+            target: &str,
+            unlink: impl FnMut(&CString) -> libc::c_int,
+            recheck: impl FnOnce() -> Result<Option<libc::stat>, IoFailure>,
+        ) -> Result<(), IoFailure> {
+            self.directory.with_lock("ui.lock", true, || {
+                self.directory.rename_entry_no_replace_with_faults(
+                    "source",
+                    target,
+                    unsupported_rename(libc::ENOTSUP),
+                    unlink,
+                    recheck,
+                )
+            })
+        }
+
+        fn real_unlink(&self, name: &CString) -> libc::c_int {
+            // SAFETY: the test name is anchored to this live directory.
+            unsafe { libc::unlinkat(self.directory.file.as_raw_fd(), name.as_ptr(), 0) }
+        }
+
+        fn real_recheck(&self) -> Result<Option<libc::stat>, IoFailure> {
+            self.directory.entry_stat("source")
+        }
+
+        /// The original entry, under every name in `names`, and nothing else.
+        fn assert_only(&self, names: &[&str]) {
+            for name in ["source", "preserved"] {
+                let metadata = std::fs::symlink_metadata(self.root.path().join(name));
+                if !names.contains(&name) {
+                    assert!(metadata.is_err(), "{name} should be gone");
+                    continue;
+                }
+                let metadata = metadata.unwrap();
+                assert_eq!(metadata.ino(), self.original.ino());
+                assert_eq!(metadata.nlink(), names.len() as u64);
+                let path = self.root.path().join(name);
+                if self.link {
+                    assert_eq!(std::fs::read_link(path).unwrap(), self.outside);
+                } else {
+                    assert_eq!(std::fs::read(path).unwrap(), b"source evidence");
+                }
+            }
+            assert_eq!(
+                std::fs::read(&self.outside).unwrap(),
+                b"untouched link target"
+            );
+        }
+    }
+
+    fn fail(code: libc::c_int) -> libc::c_int {
+        // SAFETY: errno is this thread's writable OS error slot.
+        unsafe { *errno() = code };
+        -1
+    }
+
+    fn is_source(name: &CString) -> bool {
+        name.as_bytes() == b"source"
+    }
+
+    fn uncertain(result: Result<(), IoFailure>) -> bool {
+        match result {
+            Err(IoFailure {
+                error: StoreError::CommitUncertain { operation_id: None },
+                transient,
+            }) => transient,
+            other => panic!("expected CommitUncertain, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn failed_source_unlink_rolls_back_preserved_link_on_every_retry() {
+        for code in [libc::EACCES, libc::EIO] {
+            for link in [false, true] {
+                let fallback = Fallback::new(link);
+                for attempt in 0..3 {
+                    let target = format!("preserved-{attempt}");
+                    let result = fallback.rename(
+                        &target,
+                        |name| {
+                            if is_source(name) {
+                                fail(code)
+                            } else {
+                                fallback.real_unlink(name)
+                            }
+                        },
+                        || fallback.real_recheck(),
+                    );
+                    assert_eq!(uncertain(result), code == libc::EIO);
+                    fallback.assert_only(&["source"]);
+                    assert!(std::fs::symlink_metadata(fallback.root.path().join(&target)).is_err());
+                }
+                assert!(!std::fs::read_dir(fallback.root.path())
+                    .unwrap()
+                    .any(|entry| entry
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("preserved-")));
+            }
+        }
+    }
+
+    #[test]
+    fn source_unlink_error_after_removal_keeps_the_only_copy() {
+        for link in [false, true] {
+            let fallback = Fallback::new(link);
+            let result = fallback.rename(
+                "preserved",
+                |name| {
+                    assert!(is_source(name), "the only copy must not be unlinked");
+                    assert_eq!(fallback.real_unlink(name), 0);
+                    fail(libc::EIO)
+                },
+                || fallback.real_recheck(),
+            );
+            result.unwrap();
+            fallback.assert_only(&["preserved"]);
+        }
+    }
+
+    #[test]
+    fn source_unlink_error_with_a_failed_source_check_keeps_both_names() {
+        for code in [libc::EIO, libc::EACCES] {
+            for link in [false, true] {
+                let fallback = Fallback::new(link);
+                let result = fallback.rename(
+                    "preserved",
+                    |name| {
+                        assert!(is_source(name), "an unconfirmed copy must not be unlinked");
+                        fail(libc::EACCES)
+                    },
+                    || {
+                        Err(IoFailure::os(
+                            "stat",
+                            &fallback.source,
+                            io::Error::from_raw_os_error(code),
+                        ))
+                    },
+                );
+                assert_eq!(uncertain(result), code == libc::EIO);
+                fallback.assert_only(&["source", "preserved"]);
+            }
+        }
+    }
+
+    #[test]
+    fn source_unlink_error_with_a_different_source_entry_keeps_both_names() {
+        for link in [false, true] {
+            let fallback = Fallback::new(link);
+            let result = fallback.rename(
+                "preserved",
+                |name| {
+                    assert!(is_source(name), "an unconfirmed copy must not be unlinked");
+                    fail(libc::EACCES)
+                },
+                || fallback.directory.entry_stat("outside"),
+            );
+            assert!(!uncertain(result));
+            fallback.assert_only(&["source", "preserved"]);
+        }
+    }
+
+    #[test]
+    fn failed_rollback_of_the_preserved_link_keeps_both_names() {
+        for code in [libc::EACCES, libc::EIO] {
+            for link in [false, true] {
+                let fallback = Fallback::new(link);
+                let result = fallback.rename(
+                    "preserved",
+                    |name| fail(if is_source(name) { libc::EACCES } else { code }),
+                    || fallback.real_recheck(),
+                );
+                assert_eq!(uncertain(result), code == libc::EIO);
+                fallback.assert_only(&["source", "preserved"]);
+            }
+        }
+    }
+
+    #[test]
+    fn only_eio_eintr_eagain_and_etimedout_are_transient() {
+        for code in [libc::EIO, libc::EINTR, libc::EAGAIN, libc::ETIMEDOUT] {
+            assert!(transient(&io::Error::from_raw_os_error(code)));
+        }
+        for code in [
+            libc::EACCES,
+            libc::ENOENT,
+            libc::ELOOP,
+            libc::EISDIR,
+            libc::ENOSPC,
+        ] {
+            assert!(!transient(&io::Error::from_raw_os_error(code)));
+        }
+        assert!(!transient(&io::Error::other("no errno")));
     }
 
     #[test]
@@ -848,9 +1118,12 @@ mod tests {
                 "preserved",
                 unsupported_rename(libc::EACCES)
             ),
-            Err(StoreError::Io {
-                kind: io::ErrorKind::PermissionDenied,
-                ..
+            Err(IoFailure {
+                error: StoreError::Io {
+                    kind: io::ErrorKind::PermissionDenied,
+                    ..
+                },
+                transient: false,
             })
         ));
         assert_eq!(
