@@ -34,11 +34,11 @@ export async function connectionCardButton(label) {
   await click(await card.$(`button=${label}`));
 }
 
-/** Opens the "Sending to <agent>" dialog: the card's Sending… button. */
+/** Opens the "Connection to <agent>" dialog: the card's Sending… button. */
 export async function openSendingDialog() {
   await connectionCardButton('Sending…');
   const dialog = await browser.$('[role="dialog"]');
-  await browser.waitUntil(async () => (await dialog.getText()).includes('Sending to'), { timeout: 60000, interval: 100, timeoutMsg: 'Sending dialog did not open' });
+  await browser.waitUntil(async () => (await dialog.getText()).includes('Connection to'), { timeout: 60000, interval: 100, timeoutMsg: 'Sending dialog did not open' });
   return dialog;
 }
 

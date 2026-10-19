@@ -116,7 +116,7 @@ export function cardActions(view: ConnectionView, a: ConnectionCardActions): Con
   const own: ConnAction[] = ({
     live: sending,
     none: make('connect', 'ph ph-info', 'How to connect', a.onHowToConnect),
-    off: sending,
+    off: make('sending', 'ph ph-paper-plane-tilt', 'Connection…', a.onSending),
     closed: comeBack(view, a.onReopen),
     loading: [],
     reconnect: make('again', 'ph ph-arrows-clockwise', 'Try now', a.onTryAgain),
@@ -133,7 +133,7 @@ export function cardActions(view: ConnectionView, a: ConnectionCardActions): Con
 /** The buttons of the line above the Map. */
 export function lineActions(view: ConnectionView, a: ConnectionCardActions): ConnAction[] {
   switch (view.kind) {
-    case 'off': return make('sending', 'ph ph-paper-plane-tilt', 'Sending…', a.onSending);
+    case 'off': return make('sending', 'ph ph-paper-plane-tilt', 'Connection…', a.onSending);
     case 'closed': return comeBack(view, a.onReopen);
     case 'reconnect': return make('again', 'ph ph-arrows-clockwise', 'Try now', a.onTryAgain);
     case 'unreadable': return [...make('again', 'ph ph-arrows-clockwise', 'Try again', a.onTryAgain), ...make('file', 'ph ph-folder-simple', 'Show the file', a.onShowFile)];

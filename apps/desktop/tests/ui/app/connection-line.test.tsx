@@ -179,7 +179,7 @@ describe('a save Ariadne isn’t sure of', () => {
     transport.failNext = 'binding_pause';
     fireEvent.click(dot());
     fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
     const shown = await screen.findByRole('status', { name: 'Connection' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
@@ -219,7 +219,7 @@ describe('a write in flight is not an unsure save (SPEC 12.9)', () => {
     transport.holdWrites('binding_pause');
     fireEvent.click(dot());
     fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
     await waitFor(() => expect(transport.held).toBe(1));
     expect(line()).toBeNull();
@@ -250,7 +250,7 @@ describe('a write in flight is not an unsure save (SPEC 12.9)', () => {
     transport.failNext = 'binding_pause';
     fireEvent.click(dot());
     fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
     await waitFor(() => expect(unsure()).not.toBeNull());
     expect(dot().getAttribute('aria-label')).toMatch(/^Live/);

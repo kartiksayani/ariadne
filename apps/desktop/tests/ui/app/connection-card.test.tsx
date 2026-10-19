@@ -171,7 +171,7 @@ describe('connection card session actions (were the session bar’s)', () => {
     const transport = await setup();
     const view = await openCard();
     fireEvent.click(view.getByRole('button', { name: 'Sending…' }));
-    const sending = await screen.findByRole('dialog', { name: /^Sending to / });
+    const sending = await screen.findByRole('dialog', { name: /^Connection to / });
     await act(async () => { fireEvent.click(within(sending).getByRole('button', { name: 'Pause sending' })); });
     expect(transport.mutations.map(request => request.command.command)).toContain('binding_pause');
     await waitFor(() => expect(sending.querySelector('dd[data-dispatch]')?.textContent).toBe('Paused (by you)'));

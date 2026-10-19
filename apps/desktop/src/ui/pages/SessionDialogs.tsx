@@ -1,4 +1,4 @@
-// The session's "Sending and connection" and Close dialogs, in the owner's
+// The session's "Connection to {agent}" and Close dialogs, in the owner's
 // words. Sending reads like the session bar's chip (components/bindings/dispatch);
 // Reconnect checks the same agent session again on the project-scoped path.
 // Close is one confirmation: it says what stays open and which unsent messages
@@ -14,6 +14,8 @@ import { connectionOf } from '../shared/connection';
 import { sessionPhrase, sessionWhen } from '../shell/model';
 import { Dialog } from '../dialogs/Dialog';
 import { notices } from './notices';
+import { copySessionReference } from '../shared/CopySessionId';
+import { agentProduct } from '../../state/navigation/switcher';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
 
 /** A confirmation owns its wait; closing it cancels admission, never a saved write. */
@@ -70,25 +72,67 @@ export function reconnectCommand(session: Immutable<Session>, binding: NonNullab
 
 const connectionWords = { connected: 'Connected', reconnecting: 'Reconnecting…', not_running: 'Not running', none: 'Not connected' } as const;
 
+const notSavedText = 'That didn’t go through. Try again.';
+
+/** True when the last saved receipt says this binding is now Disconnected (a confirmed Disconnect, not a retry still in doubt). */
+function disconnectConfirmed(actions: SessionActions, bindingId: string): boolean {
+  const receipt = actions.getSnapshot().receipt;
+  const data = receipt && 'data' in receipt ? receipt.data : undefined;
+  return data?.kind === 'binding_state' && data.binding_id === bindingId && data.connection_state === 'disconnected';
+}
+
+/**
+ * After a confirmed Disconnect: one notice, in the agent's own words for connecting again. Claude's has Copy session ID,
+ * because the command it names takes that ID; Codex connects from a list, so there is nothing to copy.
+ */
+export function announceDisconnected(actions: SessionActions, adapterId: string): void {
+  const route = actions.session.getSnapshot().route, id = `session-disconnected:${route.project_id}:${route.session_id}`;
+  const claude = agentProduct(adapterId) === 'Claude Code', codex = adapterId === 'codex';
+  notices.push({ id, icon: 'ph ph-plugs', text: claude
+    ? 'Disconnected. Run /ariadne-connect followed by the session ID in Claude to connect again.'
+    : codex ? 'Disconnected. Use Connect existing session to connect again.' : 'Disconnected.',
+  ...claude ? { actions: [{ label: 'Copy session ID', dismissOnRun: true, run: () => { void copySessionReference(route.session_id); } }] } : {} }, 12_000);
+}
+
 /** Pause or resume sending, reconnect or disconnect the session's agent. */
 export function DispatchDialog({ store, actions, agent, onClose, onSaved }: {
   readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly onClose: () => void; readonly onSaved?: () => void;
 }) {
   const state = useSession(store), operation = useSessionActions(actions), control = useDispatch(actions);
+  // `execute` answers false without an error when it refuses to start; the owner still gets a line, in the error's place.
+  const [notSaved, setNotSaved] = useState(false);
   const session = state.snapshot?.session;
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const disabled = !session || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const settled = (saved: boolean) => { if (!saved && !actions.getSnapshot().error) setNotSaved(true); };
   const reconnect = () => {
     if (!session || !binding || disabled) return;
-    void actions.execute(reconnectCommand(session, binding), session.revision);
+    setNotSaved(false);
+    void actions.execute(reconnectCommand(session, binding), session.revision).then(settled);
   };
   const disconnect = () => {
     if (!session || !binding || disabled) return;
-    void actions.execute({ command: 'binding_disconnect', api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } }, session.revision);
+    setNotSaved(false);
+    const { id, generation, adapter_id: adapterId } = binding;
+    void actions.execute({ command: 'binding_disconnect', api_version: 1, op_id: '', params: { binding_id: id, expected_generation: generation } }, session.revision)
+      .then(saved => {
+        if (saved && disconnectConfirmed(actions, id)) { announceDisconnected(actions, adapterId); onClose(); } else settled(saved);
+      });
+  };
+  // Check again retries whatever was pending: only a Disconnect that confirmed closes the dialog with the notice.
+  const checkAgain = () => {
+    const retried = operation.pending?.command, adapterId = binding?.adapter_id ?? '';
+    setNotSaved(false);
+    void actions.retry().then(saved => {
+      if (saved) onSaved?.();
+      if (saved && retried?.command === 'binding_disconnect' && disconnectConfirmed(actions, retried.params.binding_id)) {
+        announceDisconnected(actions, adapterId); onClose();
+      }
+    });
   };
   const button = (label: string, icon: string, run: () => void, off = false) => <button type="button" className="btn btn-secondary"
     disabled={disabled || off} onClick={run}><i className={icon} aria-hidden="true" />{label}</button>;
-  const title = `Sending to ${agent}`;
+  const title = `Connection to ${agent}`;
   return <Dialog label={title} width={520} onCancel={() => { if (!operation.writing) onClose(); }}>
     <div className="dialog-title">{title}</div>
     {!session && <div className="pw-dialog-body" role="status">Reading the session…</div>}
@@ -101,16 +145,17 @@ export function DispatchDialog({ store, actions, agent, onClose, onSaved }: {
       <div className="pw-dialog-body">Pause stops Ariadne sending anything more to {agent}. Work already sent keeps running; interrupt it in the terminal. Reconnect checks the same {agent} session again.</div>
       <div className="pw-dialog-buttons">
         {/* Pausing while something blocks sending keeps it paused once the blocker clears. */}
-        {button('Pause sending', 'ph ph-pause', () => { void control.pause(); }, binding.owner_paused || session.state === 'closed'
+        {button('Pause sending', 'ph ph-pause', () => { setNotSaved(false); void control.pause(); }, binding.owner_paused || session.state === 'closed'
           || binding.dispatch_state === 'paused' || binding.dispatch_state === 'disconnected')}
-        {button('Resume sending', 'ph ph-play', () => { void control.resume(); }, control.status.action !== 'resume')}
+        {button('Resume sending', 'ph ph-play', () => { setNotSaved(false); void control.resume(); }, control.status.action !== 'resume')}
         {button('Reconnect', 'ph ph-arrows-clockwise', reconnect)}
         {button('Disconnect', 'ph ph-plugs', disconnect)}
       </div>
     </>}
     <Failure actions={actions} />
+    {notSaved && !operation.error && <div className="pw-dialog-error" role="alert">{notSavedText}</div>}
     <div className="dialog-actions">
-      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry().then(saved => { if (saved) onSaved?.(); }); }}>Check again</button>}
+      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={checkAgain}>Check again</button>}
       <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Done</button>
     </div>
   </Dialog>;

@@ -745,7 +745,7 @@ describe('Session archive cards', () => {
     const undo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
     await act(async () => { undo(); undo(); });
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
-    const dialog = await screen.findByRole('dialog', { name: /^Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /^Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Check again' })); });
     expect(transport.requests).toHaveLength(2);
     expect(transport.requests[1]).toEqual(transport.requests[0]);

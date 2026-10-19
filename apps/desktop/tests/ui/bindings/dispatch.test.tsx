@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDesktopService, validHealth, type SupervisorHealth } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { SessionActionControllers, sessionActionsFor } from '../../../src/components/bindings/actions';
@@ -7,10 +7,14 @@ import { dispatchStatus, healthReason, pausedNote } from '../../../src/component
 import { PausedNote } from '../../../src/components/bindings/DispatchChip';
 import { DispatchDialog } from '../../../src/ui/pages/SessionDialogs';
 import { SupervisorHealthStore } from '../../../src/components/bindings/health';
+import { copyText } from '../../../src/ui/shared/clipboard';
+import { notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route } from '../app/transport';
 
+vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn() }));
+
 const opened: OpenSessions[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); });
+afterEach(() => { cleanup(); notices.clear(); vi.resetAllMocks(); opened.splice(0).forEach(sessions => sessions.closeAll()); });
 
 const generation = '00000000-0000-4000-8000-000000000022', bindingId = '00000000-0000-4000-8000-000000000020';
 const binding = (update: Partial<Parameters<typeof dispatchStatus>[0]['binding'] & object> = {}) => ({ generation, dispatch_state: 'enabled' as const,
@@ -113,14 +117,34 @@ describe('supervisor health', () => {
   });
 });
 
-async function mount() {
-  const transport = new AppTransport(), service = createDesktopService(transport), sessions = new OpenSessions(service); opened.push(sessions);
+/** The mock core has no Disconnect: this one saves it the way the real one does (connection and dispatch both Disconnected). */
+class DisconnectingTransport extends AppTransport {
+  override async invoke<T>(name: string, input: Parameters<AppTransport['invoke']>[1]): Promise<T> {
+    const request = input.request;
+    if ('command' in request && request.command.command === 'binding_disconnect') {
+      this.mutations.push(structuredClone(request));
+      if (name === this.failNext) { this.failNext = null; throw new Error('Lost response'); }
+      const session = this.sessions.get(request.session!.session_id)!, binding = session.bindings[request.command.params.binding_id]!;
+      binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; ++session.revision;
+      this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+      return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
+        data: { kind: 'binding_state', binding_id: binding.id, generation: binding.generation, owner_paused: binding.owner_paused,
+          dispatch_state: 'disconnected', pause_reason: binding.pause_reason, connection_state: 'disconnected' } } } as T;
+    }
+    return super.invoke<T>(name, input);
+  }
+}
+
+async function mount(adapter?: string) {
+  const transport = adapter ? new DisconnectingTransport() : new AppTransport();
+  if (adapter) for (const session of transport.sessions.values()) for (const binding of Object.values(session.bindings)) binding!.adapter_id = adapter;
+  const service = createDesktopService(transport), sessions = new OpenSessions(service); opened.push(sessions);
   const store = sessions.open(route); await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store);
   return { transport, service, store, actions };
 }
 // The session bar's chip is gone: its Sending state and Pause / Resume live in the dialog the connection card's "Sending" opens.
-const dialog = () => within(screen.getByRole('dialog', { name: 'Sending to claude-code' }));
+const dialog = () => within(screen.getByRole('dialog', { name: 'Connection to claude-code' }));
 const sending = () => document.querySelector<HTMLElement>('dd[data-dispatch]')!;
 
 describe('Sending dialog (was the session bar’s dispatch chip)', () => {
@@ -163,5 +187,69 @@ describe('Sending dialog (was the session bar’s dispatch chip)', () => {
   it('reaches the application’s controller for a session from anywhere in the view', async () => {
     const { service, store, actions } = await mount();
     expect(sessionActionsFor(service, store)).toBe(actions);
+  });
+});
+
+describe('Connection dialog: Disconnect says what happened (E5)', () => {
+  const noticeTexts = () => notices.getSnapshot().map(notice => notice.text);
+  const disconnect = async () => { await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Disconnect' })); }); };
+  const mountDialog = async (adapter: string, onClose = vi.fn(), onSaved = vi.fn()) => {
+    const { transport, store, actions } = await mount(adapter);
+    render(<DispatchDialog store={store} actions={actions} agent="claude-code" onClose={onClose} onSaved={onSaved} />);
+    return { transport, actions, onClose, onSaved };
+  };
+  it('a confirmed Disconnect on Claude closes the dialog with one notice that names /ariadne-connect and offers Copy session ID', async () => {
+    const { transport, onClose } = await mountDialog('claude_code_mod');
+    await disconnect();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(transport.mutations.filter(value => value.command.command === 'binding_disconnect')).toHaveLength(1);
+    expect(noticeTexts()).toEqual(['Disconnected. Run /ariadne-connect followed by the session ID in Claude to connect again.']);
+    const copy = notices.getSnapshot()[0]!.actions!;
+    expect(copy.map(action => action.label)).toEqual(['Copy session ID']);
+    vi.mocked(copyText).mockResolvedValue(undefined);
+    copy[0]!.run();
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(route.session_id));
+  });
+  it('a confirmed Disconnect on Codex says to use Connect existing session and has nothing to copy', async () => {
+    const { onClose } = await mountDialog('codex');
+    await disconnect();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(noticeTexts()).toEqual(['Disconnected. Use Connect existing session to connect again.']);
+    expect(notices.getSnapshot()[0]!.actions).toBeUndefined();
+  });
+  it('a lost Disconnect reply keeps the dialog and says nothing is confirmed; Check again then closes it with the notice, sending the same write', async () => {
+    const { transport, onClose, onSaved } = await mountDialog('claude_code_mod');
+    transport.failNext = 'binding_disconnect';
+    await disconnect();
+    expect(dialog().getByRole('alert').textContent).toContain('Ariadne isn’t sure the change was saved.');
+    expect(onClose).not.toHaveBeenCalled(); expect(noticeTexts()).toEqual([]);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Check again' })); });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    const sent = transport.mutations.filter(value => value.command.command === 'binding_disconnect');
+    expect(sent).toHaveLength(2); expect(sent[1]).toEqual(sent[0]);
+    expect(noticeTexts()).toHaveLength(1);
+  });
+  it('Check again that retries a Pause keeps its outcome: the dialog stays and no Disconnected notice appears', async () => {
+    const { transport, onClose, onSaved } = await mountDialog('claude_code_mod');
+    transport.failNext = 'binding_pause';
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Pause sending' })); });
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Check again' })); });
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled(); expect(noticeTexts()).toEqual([]);
+  });
+  it('a false result with no error shows "That didn’t go through. Try again." in the error spot, and the next try clears it', async () => {
+    const { actions, onClose } = await mountDialog('claude_code_mod');
+    const execute = vi.spyOn(actions, 'execute').mockResolvedValue(false);
+    await disconnect();
+    expect(dialog().getByRole('alert').textContent).toBe('That didn’t go through. Try again.');
+    expect(onClose).not.toHaveBeenCalled(); expect(noticeTexts()).toEqual([]);
+    execute.mockImplementation(() => new Promise<boolean>(() => {}));
+    await disconnect();
+    expect(dialog().queryByRole('alert')).toBeNull();
+    // Reconnect refused the same way says the same.
+    execute.mockResolvedValue(false);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Reconnect' })); });
+    expect(dialog().getByRole('alert').textContent).toBe('That didn’t go through. Try again.');
   });
 });

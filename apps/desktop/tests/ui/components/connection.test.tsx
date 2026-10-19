@@ -122,6 +122,9 @@ describe('connection actions', () => {
   it('puts the state\'s own button first', () => {
     const a = everything();
     expect(cardActions(view('live'), a)[0]!.label).toBe('Sending…');
+    // Off has no sending to speak of: its button opens the Connection dialog, on the card and on the line.
+    expect(cardActions(view('off'), a)[0]!.label).toBe('Connection…');
+    expect(lineActions(view('off'), a).map(action => action.label)).toEqual(['Connection…']);
     expect(cardActions(view('none'), a)[0]!.label).toBe('How to connect');
     expect(cardActions(view('reconnect'), a)[0]!.label).toBe('Try now');
     expect(cardActions(view('unreadable'), a).slice(0, 2).map(action => action.label)).toEqual(['Try again', 'Show the file']);
@@ -184,7 +187,7 @@ describe('ConnectionLine', () => {
     const line = screen.getByRole('status');
     expect(line.textContent).toContain('Claude Code isn’t running for this session.');
     expect(line.textContent).toContain('What you send is queued and goes out once, when it runs again.');
-    fireEvent.click(screen.getByRole('button', { name: 'Sending…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connection…' }));
     expect(a.onSending).toHaveBeenCalledTimes(1);
   });
 

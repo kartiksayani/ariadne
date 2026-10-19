@@ -251,7 +251,7 @@ describe('explicit binding lifecycle', () => {
     const text = screen.getByRole('dialog').textContent!;
     expect(text).not.toContain(currentBinding(transport.session).external_session_id);
     expect(text).not.toMatch(/dispatch|recovery_required|uncertain\b/i);
-    expect(screen.getByRole('dialog', { name: 'Sending to claude-code' })).toBeDefined();
+    expect(screen.getByRole('dialog', { name: 'Connection to claude-code' })).toBeDefined();
   });
 });
 
