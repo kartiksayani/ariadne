@@ -481,6 +481,24 @@ describe('detail actions while the owner view is stale', () => {
     expect(drafts.getSnapshot().entries[id]!.uncertain).toBe(true);
   });
 
+  it('holds Check delivery while the item is being removed and gives it back on Undo', async () => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'Keep this unconfirmed answer.' });
+    transport.failNext = 'input_submit';
+    expect(await drafts.submit(id)).toBe(false);
+    const props = { drafts, store, itemId: '2', onEscape: vi.fn() };
+    const view = render(<AnswerSlot {...props} removing />);
+    const check = await screen.findByRole<HTMLButtonElement>('button', { name: 'Check delivery' });
+    expect(check.disabled).toBe(true);
+    expect(check.title).toBe('Being removed · Undo first');
+    fireEvent.click(check);
+    expect(sends(transport)).toHaveLength(1);
+    view.rerender(<AnswerSlot {...props} removing={false} />);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Check delivery' }).disabled).toBe(false);
+    expect(drafts.getSnapshot().entries[id]!.draft.text).toBe('Keep this unconfirmed answer.');
+  });
+
   it.each(['decided', 'done', 'dropped'] as const)('keeps an undelivered answer visible beside the %s outcome and actions', async status => {
     const { transport, store, drafts } = await setup();
     const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;

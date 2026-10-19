@@ -355,7 +355,7 @@ fn run<R: tauri::Runtime>(
                     writer.pin(service.native_preferences()?, op_id)?;
                     writer.confirm(|request| service.native_preferences_write(request))?;
                     if let Some(window) = app.try_state::<crate::native::window::NativeWindow>() {
-                        window.reconcile(app.clone(), false);
+                        window.reconcile(app.clone(), crate::native::window::Fit::Keep);
                     }
                     Ok::<(), CoreError>(())
                 })();

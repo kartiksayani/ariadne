@@ -133,10 +133,14 @@ pub(crate) fn show_after<R: tauri::Runtime>(
         eprintln!("Ariadne could not start its window launch fallback.");
     }
 }
-fn restore_geometry<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
-    saved: &WindowGeometry,
-) -> Result<(), CoreError> {
+/// The monitors' work areas (primary first) and the window's chrome, in
+/// logical pixels.
+struct Screen {
+    areas: Vec<WorkArea>,
+    /// Whole frame minus content: the title bar's height, any side borders.
+    chrome: MinimumSize,
+}
+fn screen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<Screen, CoreError> {
     let primary = window.primary_monitor().map_err(|_| unavailable())?;
     let mut monitors = window.available_monitors().map_err(|_| unavailable())?;
     let primary_id = primary.as_ref().map(monitor_id);
@@ -163,30 +167,88 @@ fn restore_geometry<R: tauri::Runtime>(
     let outer = window.outer_size().map_err(|_| unavailable())?;
     let inner = window.inner_size().map_err(|_| unavailable())?;
     // Saved dimensions cover the whole frame; set_size sets the inner content.
-    let chrome_width = f64::from(outer.width.saturating_sub(inner.width)) / scale;
-    let chrome_height = f64::from(outer.height.saturating_sub(inner.height)) / scale;
-    let content = content_minimum(window);
-    let minimum = MinimumSize {
-        width: content.width + chrome_width,
-        height: content.height + chrome_height,
+    Ok(Screen {
+        areas,
+        chrome: MinimumSize {
+            width: f64::from(outer.width.saturating_sub(inner.width)) / scale,
+            height: f64::from(outer.height.saturating_sub(inner.height)) / scale,
+        },
+    })
+}
+/// Sets the window's live minimum for the screen `frame` is on (the configured
+/// minimum, but never more than the work area leaves after the chrome), then
+/// fits `frame` through `clamp_geometry` with that same minimum. With
+/// `only_if_needed`, a frame that is on screen and reachable is left alone.
+fn fit_window<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    frame: &WindowGeometry,
+    only_if_needed: bool,
+) -> Result<(), CoreError> {
+    let screen = screen(window)?;
+    let plan = super::geometry::plan_fit(
+        frame,
+        &screen.areas,
+        screen.chrome,
+        content_minimum(window),
+        only_if_needed,
+    )?;
+    let minimum = plan.content_minimum;
+    window
+        .set_min_size(Some(tauri::LogicalSize::new(minimum.width, minimum.height)))
+        .map_err(|_| unavailable())?;
+    let Some(fitted) = plan.frame else {
+        return Ok(());
     };
-    let saved = super::geometry::clamp_geometry(saved, &areas, minimum)?;
     window
         .set_size(tauri::LogicalSize::new(
-            (saved.width - chrome_width).max(1.0),
-            (saved.height - chrome_height).max(1.0),
+            (fitted.width - screen.chrome.width).max(1.0),
+            (fitted.height - screen.chrome.height).max(1.0),
         ))
         .map_err(|_| unavailable())?;
     window
-        .set_position(tauri::LogicalPosition::new(saved.x, saved.y))
+        .set_position(tauri::LogicalPosition::new(fitted.x, fitted.y))
         .map_err(|_| unavailable())
+}
+/// What a reconcile does with the window's frame, after applying the pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    /// Leave the frame alone (a pin change).
+    Keep,
+    /// Launch: place the saved frame, or fit the default frame on first launch,
+    /// always inside a work area.
+    Launch,
+    /// Wake or scale change: re-fit only a frame that no longer fits its screen
+    /// or whose title bar is unreachable; never move a reachable window.
+    IfNeeded,
+}
+/// Applies `fit` to the main window. A window that is minimized or full screen
+/// keeps its frame: its size is not a resting one.
+fn fit_main<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    fit: Fit,
+    saved: Option<&WindowGeometry>,
+) -> Result<(), CoreError> {
+    if fit == Fit::Keep
+        || window.is_minimized().unwrap_or(true)
+        || window.is_fullscreen().unwrap_or(true)
+    {
+        return Ok(());
+    }
+    match (fit, saved) {
+        (Fit::Launch, Some(saved)) => fit_window(window, saved, false),
+        _ => fit_window(
+            window,
+            &geometry(&window.as_ref().window())?,
+            fit == Fit::IfNeeded,
+        ),
+    }
 }
 
 impl NativeWindow {
     /// The existing synchronous preferences backend runs off the UI executor.
     /// A saved receipt remains saved even if an OS window action fails.
-    pub(crate) fn reconcile<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>, restore: bool) {
-        self.reconcile_then(app, restore, None);
+    pub(crate) fn reconcile<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>, fit: Fit) {
+        self.reconcile_then(app, fit, None);
     }
 
     /// `then` runs on the UI thread after the saved preferences are applied,
@@ -194,7 +256,7 @@ impl NativeWindow {
     fn reconcile_then<R: tauri::Runtime>(
         &self,
         app: tauri::AppHandle<R>,
-        restore: bool,
+        fit: Fit,
         then: Option<AfterReconcile<R>>,
     ) {
         let service = app.state::<DesktopService>().inner().clone();
@@ -206,22 +268,26 @@ impl NativeWindow {
                 tauri::async_runtime::spawn_blocking(move || service.native_preferences()).await;
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || {
-                if let Ok(Ok(snapshot)) = result {
-                    let observed = snapshot.revision.value();
-                    if observed >= revision.load(Ordering::Acquire) {
-                        revision.fetch_max(observed, Ordering::AcqRel);
-                        if let Some(window) = handle.get_webview_window("main") {
+                if let Some(window) = handle.get_webview_window("main") {
+                    // A failed or stale read still fits the window; only the
+                    // saved frame and the pin need a current snapshot.
+                    let mut saved = None;
+                    if let Ok(Ok(snapshot)) = result {
+                        let observed = snapshot.revision.value();
+                        if observed >= revision.load(Ordering::Acquire) {
+                            revision.fetch_max(observed, Ordering::AcqRel);
                             if window.set_always_on_top(snapshot.global.pinned).is_err() {
-                                eprintln!("Ariadne could not apply the saved native pin preference.");
+                                eprintln!(
+                                    "Ariadne could not apply the saved native pin preference."
+                                );
                             }
-                            if restore && movement.load(Ordering::Acquire) == captured_movement {
-                                if let Some(saved) = snapshot.global.window {
-                                    if restore_geometry(&window, &saved).is_err() {
-                                        eprintln!("Ariadne could not restore the saved native window geometry.");
-                                    }
-                                }
-                            }
+                            saved = snapshot.global.window;
                         }
+                    }
+                    if movement.load(Ordering::Acquire) == captured_movement
+                        && fit_main(&window, fit, saved.as_ref()).is_err()
+                    {
+                        eprintln!("Ariadne could not fit the native window to its screen.");
                     }
                 }
                 if let Some(then) = then {
@@ -237,7 +303,7 @@ impl NativeWindow {
     pub(crate) fn launch<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>) {
         let show = first_show::<R>();
         show_after(app.clone(), show.clone(), LAUNCH_FALLBACK);
-        self.reconcile_then(app, true, Some(Box::new(show)));
+        self.reconcile_then(app, Fit::Launch, Some(Box::new(show)));
     }
 
     pub(crate) fn moved<R: tauri::Runtime>(&self, window: &tauri::Window<R>) {

@@ -11,7 +11,11 @@ export function QueueAnnouncements({ state }: { state: WaitingState }) {
   const history = useRef({ seeded: false, episodes: new Set<string>(), inputs: new Map<string, InputState>(), announced: new Set<string>() });
   const [announcement, setAnnouncement] = useState({ sequence: 0, text: '' });
   useEffect(() => {
-    if (state.status !== 'ready' || state.error) return;
+    // A stale or errored reader still lists the sessions it last read: those are announced from. Only a reader with nothing yet
+    // (loading, or unavailable with no data) is skipped. Nothing is announced before the first complete read (ready, no error) has
+    // seeded the known set, so a half-loaded list at startup does not read out as new questions.
+    const noData = (state.status === 'loading' || state.status === 'unavailable') && !state.counts && !state.waiting.length && !state.sessions.length;
+    if (noData) return;
     const previous = history.current;
     let waiting = 0, completed = 0;
     for (const row of state.waiting) {
@@ -27,7 +31,7 @@ export function QueueAnnouncements({ state }: { state: WaitingState }) {
       }
       previous.inputs.set(key, input.state);
     }
-    previous.seeded = true;
+    if (state.status === 'ready' && !state.error) previous.seeded = true;
     if (waiting || completed) setAnnouncement(value => ({ sequence: value.sequence + 1, text: [
       waiting ? `${waiting} new waiting ${waiting === 1 ? 'question' : 'questions'}.` : '',
       completed ? `${completed} owner ${completed === 1 ? 'reply resolved' : 'replies resolved'}.` : '',

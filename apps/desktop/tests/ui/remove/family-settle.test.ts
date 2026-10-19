@@ -107,6 +107,19 @@ describe('family() while the waiting reader settles', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('a refresh that takes most of its share leaves the wait after it only the rest: 20 s in all, not 30', async () => {
+    const { queue, refresh } = setup(state({ status: 'stale' }));
+    refresh.mockImplementation(() => new Promise<void>(resolve => { setTimeout(resolve, LIMIT - 1000); }));
+    const result = queue.family(topic, session);
+    let done = false; void result.then(() => { done = true; });
+    await vi.advanceTimersByTimeAsync(LIMIT + LIMIT - 1000 - 1);
+    expect(done, 'still inside the second share').toBe(false);
+    await vi.advanceTimersByTimeAsync(1000 + 1);
+    expect(done, 'the shared 10 s after the refresh began is over').toBe(true);
+    expect(await result).toMatchObject({ family: true });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('the refresh settles it: the check decides on the refreshed state', async () => {
     const { queue, refresh } = setup(state({ status: 'stale' }), state());
     const result = queue.family(topic, session);

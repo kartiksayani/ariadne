@@ -141,7 +141,8 @@ export class RemovalQueue {
   /**
    * E34: whether removing `topic` would reach other sessions; archived sessions are read now (5 s at most), once. A waiting reader that is
    * only 'stale' or 'loading' (no error) is waited for, up to FAMILY_SETTLE_MS; then, or at once when it kept a read error, it is asked to
-   * read once more and given up to FAMILY_SETTLE_MS again. An error that repeats, an unavailable project or session, a reader that never
+   * read once more, and the read and the wait after it share one more FAMILY_SETTLE_MS (the wait gets what the read left). So the check
+   * ends within 2 × FAMILY_SETTLE_MS (20 s), however the reader behaves. An error that repeats, an unavailable project or session, a reader that never
    * settles or an unread archive count as family.
    */
   async family(topic: Immutable<Topic>, session: Immutable<Session>): Promise<FamilyCheck> {
@@ -153,16 +154,17 @@ export class RemovalQueue {
       // One more read: it ends a wait that ran out, and it clears an error from a read that raced a write. A stale reader that
       // still has no error after it is waited for again; a repeated error blocks.
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const asked = Date.now();
       await Promise.race([this.deps.refreshWaiting().catch(() => {}), new Promise<void>(resolve => { timer = setTimeout(resolve, FAMILY_SETTLE_MS); })]);
       clearTimeout(timer);
-      waiting = await this.untilSettled(read, FAMILY_SETTLE_MS);
+      waiting = await this.untilSettled(read, FAMILY_SETTLE_MS - (Date.now() - asked));
     }
     return hasFamily(topic, [session], waiting, await archived);
   }
   /** The waiting state as soon as it is not merely settling (immediately when it already is not), else what it is after `ms`. */
   private untilSettled(read: () => WaitingState, ms: number): Promise<WaitingState> {
     const subscribe = this.deps.subscribeWaiting;
-    if (!settling(read()) || !subscribe) return Promise.resolve(read());
+    if (!settling(read()) || !subscribe || ms <= 0) return Promise.resolve(read());
     return new Promise(resolve => {
       let unsubscribe = () => {};
       const done = () => { clearTimeout(timer); unsubscribe(); resolve(read()); };

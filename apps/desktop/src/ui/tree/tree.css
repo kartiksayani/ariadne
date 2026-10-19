@@ -572,8 +572,11 @@
   transform: translateX(-50%);
 }
 
-/* Above: under the band, or under the notice stack when one hangs there (Body publishes --notice-stack-bottom), so a card never covers the pill. */
-.tree-back[data-edge="above"] { top: max(calc(var(--tree-header-height, 0px) + 12px), calc(var(--notice-stack-bottom, 0px) + 6px)); }
+/* Above: under the band, or under the notice stack when one hangs there (Body publishes --notice-stack-bottom), so a card never covers the pill.
+   The top never passes the room above the dock (its 14px gap and the pill's 30px), so a tall stack in a short window cannot push the pill under the dock. */
+.tree-back[data-edge="above"] {
+  top: min(max(calc(var(--tree-header-height, 0px) + 12px), calc(var(--notice-stack-bottom, 0px) + 6px)), calc(100% - var(--dock-inset, 0px) - 44px));
+}
 .tree-back[data-edge="below"] { bottom: calc(var(--dock-inset, 0px) + 14px); }
 
 .tree-back-arrow {

@@ -151,3 +151,25 @@ test('with notices up, the Back-to pill hangs below the stack, is visible and cl
     await expect(pill).toHaveCount(0);
   });
 });
+
+test('in a short window with the dock open, the Back-to pill stays above the dock under a tall stack', async ({ page }) => {
+  await serve(async origin => {
+    await open(page, origin);
+    await scrollTo(page, 'Tree', 'top');
+    await page.locator('.tree-item[data-item-id="1"] .tree-question').click();
+    await expect(page.locator('.tree-item[data-item-id="1"]')).toHaveAttribute('aria-selected', 'true');
+    await scrollTo(page, 'Tree', 'bottom');
+    const pill = page.locator('.tree-scroll-shell > .tree-back');
+    await expect(pill).toHaveAttribute('data-edge', 'above');
+    await page.keyboard.press(']');
+    const dock = page.getByRole('region', { name: 'Answer dock' });
+    await expect(dock).toBeVisible();
+    await page.setViewportSize({ width: 1000, height: 420 });
+    await push(page, 'n1', 'warn', 'The first notice.');
+    await push(page, 'n2', 'warn', 'The second notice.');
+    await page.waitForTimeout(400);
+    await settle(page);
+    const placed = (await pill.boundingBox())!, dockBox = (await dock.boundingBox())!;
+    expect(placed.y + placed.height, 'the pill ends above the open dock').toBeLessThanOrEqual(dockBox.y);
+  });
+});
