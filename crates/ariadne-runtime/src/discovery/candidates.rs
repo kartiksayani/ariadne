@@ -54,6 +54,10 @@ pub struct Candidate {
     pub binding: Option<AnnouncementBinding>,
     /// Actual loaded-daemon membership only; never terminal visibility or Idle.
     pub loaded: bool,
+    /// The last qualification of this announcing conversation was refused because its Claude plugin is not the app's
+    /// version (`is_plugin_mismatch`). Display only: it grants nothing. Cleared by the next successful qualification or
+    /// by an announcement that changes the plugin's claims; carried across repeat heartbeats of the same claims.
+    pub plugin_mismatch: bool,
     pub(crate) announcement: Option<SessionAnnouncement>,
     pub(crate) received: Instant,
 }
@@ -174,6 +178,7 @@ impl Discovery {
             availability: Availability::Unknown,
             binding,
             loaded: false,
+            plugin_mismatch: false,
             announcement: Some(announcement),
             received,
         };
@@ -210,7 +215,7 @@ impl Discovery {
         }
         Ok(Some(actual))
     }
-    pub(crate) fn admit(&self, endpoint: &str, candidate: Candidate) -> Result<(), CoreError> {
+    pub(crate) fn admit(&self, endpoint: &str, mut candidate: Candidate) -> Result<(), CoreError> {
         let key = (
             candidate.adapter_id.clone(),
             endpoint.to_owned(),
@@ -221,14 +226,15 @@ impl Discovery {
         if !state.candidates.contains_key(&key) && state.candidates.len() >= CAP {
             return Err(capacity());
         }
-        if state
-            .candidates
-            .get(&key)
-            .is_some_and(|old| !same_identity(old, &candidate))
-        {
-            if let Some(slot) = state.slots.remove(&key) {
-                slot.clear().map_err(CoreError::from)?;
+        match state.candidates.get(&key) {
+            Some(old) if !same_identity(old, &candidate) => {
+                if let Some(slot) = state.slots.remove(&key) {
+                    slot.clear().map_err(CoreError::from)?;
+                }
             }
+            // The same claims, announced again (a heartbeat): the refusal still stands until a qualification clears it.
+            Some(old) => candidate.plugin_mismatch = old.plugin_mismatch,
+            None => {}
         }
         state.candidates.insert(key, candidate);
         Ok(())
@@ -300,7 +306,15 @@ impl Discovery {
         deadline: Instant,
         expected: Option<&ariadne_agent_protocol::EndpointFingerprint>,
     ) -> Result<QualifiedClaudeHost, CoreError> {
-        let result = self.qualify_claude_blocking(candidate, options, slot, deadline, expected);
+        let mut plugin_mismatch = false;
+        let result = self.qualify_claude_blocking(
+            candidate,
+            options,
+            slot,
+            deadline,
+            expected,
+            &mut plugin_mismatch,
+        );
         if result.is_err() {
             // An older failed probe cannot clear a newer heartbeat's qualification.
             let mut state = self.lock()?;
@@ -316,6 +330,7 @@ impl Discovery {
                 if let Some(current) = state.candidates.get_mut(&key) {
                     current.compatibility = unbound_compatibility(&current.host_version);
                     current.availability = Availability::Unknown;
+                    current.plugin_mismatch = plugin_mismatch;
                 }
             }
         }
@@ -328,6 +343,7 @@ impl Discovery {
         slot: ModEvidenceSlot,
         deadline: Instant,
         expected: Option<&ariadne_agent_protocol::EndpointFingerprint>,
+        plugin_mismatch: &mut bool,
     ) -> Result<QualifiedClaudeHost, CoreError> {
         within(deadline)?;
         if candidate.adapter_id != "claude_code_mod"
@@ -370,7 +386,10 @@ impl Discovery {
                 candidate.received,
                 deadline,
             )
-            .map_err(CoreError::from)?;
+            .map_err(|cause| {
+                *plugin_mismatch = ariadne_adapter_claude::is_plugin_mismatch(&cause);
+                CoreError::from(cause)
+            })?;
         if expected.is_some_and(|fingerprint| fingerprint != qualified.endpoint_fingerprint()) {
             return Err(CoreError::new(
                 CoreErrorCode::BindingMismatch,
@@ -411,6 +430,7 @@ impl Discovery {
             classify_host_version(SUPPORTED_HOST_VERSION, &current.host_version)
                 .map_or(Compatibility::Incompatible, |status| status.compatibility());
         current.availability = Availability::Available;
+        current.plugin_mismatch = false;
         Ok(qualified)
     }
     fn current_candidate(&self, candidate: &Candidate) -> Result<(), CoreError> {
@@ -638,6 +658,7 @@ mod tests {
             availability: Availability::Unknown,
             binding: None,
             loaded: true,
+            plugin_mismatch: false,
             announcement: None,
             received,
         }

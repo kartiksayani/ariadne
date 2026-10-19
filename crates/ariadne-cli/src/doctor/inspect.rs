@@ -5,10 +5,14 @@ use ariadne_adapter_codex::{CodexDaemonReader, CodexOptions, SUPPORTED_CODEX_VER
 use ariadne_agent_protocol::host_version::{
     accepted_range, classify_host_version, untested_notice, HostVersionStatus,
 };
+use ariadne_core::{
+    native::{retry_busy_within, READ_RETRY_WINDOW},
+    CoreError, CoreErrorCode,
+};
 use ariadne_domain::models::*;
 use ariadne_runtime::health::{read_health_file, HealthRead, SupervisorState, STALE_AFTER};
 use ariadne_store::{
-    registry::{Registry, RegistryError},
+    registry::{Registry, RegistryCatalogue, RegistryError},
     session::{Store, StoreError},
     OwnedDirectory,
 };
@@ -93,13 +97,13 @@ pub(crate) fn collect_for_display(
         json!({"validated_socket":control_available,"dispatch_ready":false}),
     );
     supervisor_health(&mut report, data);
-    match Registry::inspect_data_directory(data) {
+    match inspect_riding_out_busy(data) {
         Ok(catalogue) => {
             match (catalogue.diagnostic_routes(), Registry::inspect_binding_index(data)) {
                 (Ok(Some(expected)), Ok(Some(actual))) => report.add(if expected == actual {"ok"} else {"warning"},"registry.binding_index", if expected == actual {"The saved list of agent connections matches your sessions."} else {"The saved list of agent connections is out of date."},"Your sessions are safe; this list is only a shortcut. Doctor never rebuilds it, and it never makes an agent ready to receive messages.",json!({"state":if expected==actual {"matching"} else {"stale"},"authoritative_route_count":expected.len(),"index_route_count":actual.len(),"atomic_readiness_guarantee":false})),
                 (Ok(Some(_)), Ok(None)) => report.add("warning","registry.binding_index","The saved list of agent connections is missing.","Your sessions and projects are safe; this list is only a shortcut. Doctor doesn't rebuild it.",json!({"state":"missing"})),
                 (Err(_), _) => report.add("error","registry.route_conflict","Two sessions claim the same agent connection.","Check your projects and their agent connections. Ariadne won't pick one for you.",json!({"state":"conflict"})),
-                _ => report.add("warning","registry.binding_index","Couldn't compare the saved list of agent connections, because some data was busy or unreadable.","Check you can read Ariadne's data folder, or wait for Ariadne to finish and run doctor again.",json!({"state":"unknown"})),
+                _ => report.add("warning","registry.binding_index","Couldn't compare the saved list of agent connections, because some data was busy or unreadable.","Check you can read Ariadne's data folder, or wait a moment and run doctor again.",json!({"state":"unknown"})),
             }
             report.add("ok", "registry.valid", "Your list of projects is valid.", "A project whose folder is missing stays listed. Being listed doesn't mean an agent is connected.", json!({"revision":catalogue.revision,"registered_project_count":catalogue.projects.len()}));
             let selected = options.project.as_ref().and_then(|p| p.canonicalize().ok());
@@ -259,7 +263,17 @@ pub(crate) fn collect_for_display(
                 | RegistryError::Unavailable { source: ref e, .. } => store_class(e),
                 _ => ("error", "invalid_registry"),
             };
-            report.add(status, "registry.unavailable", "Ariadne's list of projects couldn't be read.", "Leave the files as they are. Check you can read Ariadne's data folder, or wait for Ariadne to finish and run doctor again.", json!({"cause":cause}));
+            if registry_busy(&error) {
+                report.add(
+                    status,
+                    "registry.unavailable",
+                    "Ariadne's list of projects is busy right now, so doctor couldn't read it.",
+                    "Nothing is wrong with it. Wait a moment and run doctor again.",
+                    json!({"cause":cause}),
+                );
+            } else {
+                report.add(status, "registry.unavailable", "Ariadne's list of projects couldn't be read.", "Leave the files as they are. Check you can read Ariadne's data folder, or wait for Ariadne to finish and run doctor again.", json!({"cause":cause}));
+            }
         }
     }
     providers_config(&mut report, &recorded);
@@ -402,6 +416,59 @@ fn providers_config(report: &mut Report, recorded: &providers::Read) {
     );
 }
 
+/// True when `error` is only that another Ariadne task holds a lock for a moment.
+fn is_busy(error: &StoreError) -> bool {
+    matches!(error, StoreError::Busy)
+}
+fn registry_busy(error: &RegistryError) -> bool {
+    match error {
+        RegistryError::Store(e)
+        | RegistryError::InvalidData { source: e, .. }
+        | RegistryError::Unavailable { source: e, .. } => is_busy(e),
+        _ => false,
+    }
+}
+/// Whether any lock the read touched was busy: the registry, a project or a session.
+fn busy_anywhere(read: &Result<RegistryCatalogue, RegistryError>) -> bool {
+    let catalogue = match read {
+        Ok(catalogue) => catalogue,
+        Err(error) => return registry_busy(error),
+    };
+    catalogue
+        .projects
+        .iter()
+        .any(|project| match &project.result {
+            Err(error) => is_busy(error),
+            Ok(project) => match &project.sessions {
+                Err(error) => is_busy(error),
+                Ok(sessions) => sessions
+                    .iter()
+                    .any(|read| matches!(&read.result, Err(error) if is_busy(error))),
+            },
+        })
+}
+/// Reads the catalogue, trying again while some data is busy, within the budget every read-only entrypoint uses
+/// (ADR-0101). The install's doctor runs while the app may be up and writing; one busy moment is no finding. When the
+/// budget runs out, the last read is reported as it is, with its busy parts worded as busy.
+fn inspect_riding_out_busy(data: &Path) -> Result<RegistryCatalogue, RegistryError> {
+    let mut last = None;
+    let _ = retry_busy_within(READ_RETRY_WINDOW, || {
+        let read = Registry::inspect_data_directory(data);
+        let busy = busy_anywhere(&read);
+        last = Some(read);
+        if busy {
+            Err(CoreError::new(
+                CoreErrorCode::StoreBusy,
+                "Saved data is busy.",
+                "Try again.",
+            ))
+        } else {
+            Ok(())
+        }
+    });
+    last.expect("the read ran at least once")
+}
+
 fn store_class(error: &StoreError) -> (&'static str, &'static str) {
     match error {
         StoreError::FutureSchema => ("error", "future_schema"),
@@ -418,7 +485,19 @@ fn store_class(error: &StoreError) -> (&'static str, &'static str) {
 }
 fn store_error(report: &mut Report, kind: &str, error: &StoreError, facts: Value) {
     let (status, cause) = store_class(error);
-    report.add(status, &format!("{kind}.{cause}"), "Saved data couldn't be read safely.", "Leave these files as they are. Check folder access or try again later. Doctor never restores a backup, and data from a newer Ariadne stays read-only.", facts);
+    let check = format!("{kind}.{cause}");
+    // Busy is no sign of damage: another Ariadne task had the data for a moment, longer than doctor waited.
+    if is_busy(error) {
+        report.add(
+            status,
+            &check,
+            "Saved data is busy right now, so doctor couldn't read it.",
+            "Nothing is wrong with it. Wait a moment and run doctor again.",
+            facts,
+        );
+    } else {
+        report.add(status, &check, "Saved data couldn't be read safely.", "Leave these files as they are. Check folder access or try again later. Doctor never restores a backup, and data from a newer Ariadne stays read-only.", facts);
+    }
 }
 
 fn backup(report: &mut Report, store_dir: &Path, session: &Session) {
@@ -608,5 +687,49 @@ fn providers(report: &mut Report, options: &Options) {
             "Run `ariadne setup --agent codex`, or pass --codex-bin with Codex's full path.",
             json!({"supported_baseline":SUPPORTED_CODEX_VERSION}),
         );
+    }
+}
+
+#[cfg(test)]
+mod busy_tests {
+    use super::*;
+
+    fn reported(error: &StoreError) -> Value {
+        let mut report = Report::new();
+        store_error(&mut report, "session", error, json!({}));
+        report.value()["checks"][0].clone()
+    }
+
+    #[test]
+    fn busy_data_is_worded_as_busy_and_everything_else_keeps_its_wording() {
+        let busy = reported(&StoreError::Busy);
+        assert_eq!(busy["code"], "session.coordination_busy");
+        assert_eq!(busy["status"], "warning");
+        assert_eq!(
+            busy["message"],
+            "Saved data is busy right now, so doctor couldn't read it."
+        );
+        assert_eq!(
+            busy["hint"],
+            "Nothing is wrong with it. Wait a moment and run doctor again."
+        );
+        for other in [StoreError::FutureSchema, StoreError::AlreadyExists] {
+            let check = reported(&other);
+            assert_eq!(check["message"], "Saved data couldn't be read safely.");
+            assert!(check["hint"]
+                .as_str()
+                .unwrap()
+                .starts_with("Leave these files as they are."));
+        }
+    }
+
+    #[test]
+    fn only_busy_counts_as_busy() {
+        assert!(is_busy(&StoreError::Busy));
+        assert!(!is_busy(&StoreError::FutureSchema));
+        assert!(registry_busy(&RegistryError::Store(StoreError::Busy)));
+        assert!(!registry_busy(&RegistryError::Store(
+            StoreError::FutureSchema
+        )));
     }
 }

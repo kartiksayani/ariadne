@@ -16,6 +16,7 @@ use ariadne_store::{
 pub use error::QueryError;
 use page::{invalid, Scope};
 use serde_json::json;
+use std::sync::Arc;
 
 pub struct QueryService<'a> {
     registry: &'a Registry,
@@ -44,11 +45,28 @@ impl<'a> QueryService<'a> {
             _ => {
                 let route = visibility::route(context)?;
                 let project = self.registry.resolve_project(route.project_id())?;
-                let session = Store::read_registered(
-                    &self.registry.project_dir(&project.project_id),
-                    route.project_id(),
-                    route.session_id(),
-                )?;
+                let dir = self.registry.project_dir(&project.project_id);
+                let session = match request {
+                    // An agent's `read` polls often and asks about the world, not about a write it is about to
+                    // decide: the lock-free snapshot is enough (ADR-0101). It is the newest commit at the instant of
+                    // the open, so a sequential read after the agent's own write sees that write; only a write
+                    // that lands during the read can be missed, and the next read has it. Any peek failure falls
+                    // through to the locked read, which reports it exactly as before. The other queries stay
+                    // locked: an owner command can be decided on what they return.
+                    QueryRequest::SessionRead(_) => {
+                        Store::open_registered(&dir, route.project_id().clone())
+                            .and_then(|store| store.peek(route.session_id()))
+                            .or_else(|_| {
+                                Store::read_registered(&dir, route.project_id(), route.session_id())
+                                    .map(Arc::new)
+                            })?
+                    }
+                    _ => Arc::new(Store::read_registered(
+                        &dir,
+                        route.project_id(),
+                        route.session_id(),
+                    )?),
+                };
                 visibility::check(&session, context)?;
                 session_query(&session, context, request)?
             }

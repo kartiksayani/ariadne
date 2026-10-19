@@ -816,7 +816,7 @@ describe('Archived sessions stay out of active projections and targets', () => {
     const summary = { ...structuredClone(sessions.items[0]), archived_at: '2026-10-09T00:00:00.000Z' } as SessionSummary;
     const candidate: DesktopDiscoveryCandidate = { session: route, binding_id: summary.active_binding!.id, adapter_id: 'codex',
       endpoint: { kind: 'unix_socket', path: '/tmp/fixture.sock' }, external_session_id: 'fixture-thread', cwd: projects.items[0].canonical_root,
-      title: 'Archived host thread', host_version: 'fixture', observed_at: summary.updated_at, freshness: 'fresh', compatibility: 'unknown', availability: 'unknown', loaded: true };
+      title: 'Archived host thread', host_version: 'fixture', observed_at: summary.updated_at, freshness: 'fresh', compatibility: 'unknown', availability: 'unknown', loaded: true, plugin_mismatch: false };
     class DiscoveryTransport extends AppTransport { discovery = async () => ({ candidates: [candidate], error: null }); setConnectionUiOpen = async () => {}; }
     const controller = new DiscoveryController(createDesktopService(new DiscoveryTransport()));
     const release = controller.acquire();

@@ -72,6 +72,17 @@ No file, field or saved format is added; older releases read the store unchanged
   6.5 s with two busy sessions.
 - The desktop process keeps up to 32 parsed sessions in memory.
 
+## Update (alpha.22)
+
+- An agent's `session_read` query now answers from `Store::peek` too, so a held session
+  lock neither delays nor fails it. A sequential read after the agent's own write sees
+  that write (the open sees the newest commit); only a write landing during the read can
+  be missed, and the next read has it. A peek failure falls through to the locked read.
+  The other session queries stay locked, because an owner command can be decided on them.
+- `ariadne doctor` retries a busy read within the 5 s read budget, and words a busy
+  result as busy ("Saved data is busy right now, so doctor couldn't read it. Nothing is
+  wrong with it. Wait a moment and run doctor again."), not as unsafe data.
+
 ## Spec references
 
 - [Storage transactions](../planning/low-level/DOMAIN_AND_STORAGE.md#4-transaction-and-lock-algorithm)

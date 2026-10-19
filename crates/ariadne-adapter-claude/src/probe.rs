@@ -514,8 +514,15 @@ fn inspection_error(cause: std::io::Error) -> AdapterError {
 fn resource_error() -> AdapterError {
     error(AdapterErrorCode::IncompatibleAdapter, "Claude executable or exact loaded/installed resources could not be verified; check paths, install and reload the Mod")
 }
+const RELOAD_MESSAGE: &str = "Claude loaded Mod/descriptor/resources differ from the installed version; update matching resources and reload plugins";
 fn reload() -> AdapterError {
-    error(AdapterErrorCode::IncompatibleAdapter, "Claude loaded Mod/descriptor/resources differ from the installed version; update matching resources and reload plugins")
+    error(AdapterErrorCode::IncompatibleAdapter, RELOAD_MESSAGE)
+}
+/// True when `cause` is the refusal of a Claude plugin whose version, helper or resources are not the app's: the loaded
+/// plugin is older (or newer) than the installed one. The app keeps this cause per announcing conversation so it can say
+/// so next to that session; no other refusal (an unreadable resource, a stale announcement) counts.
+pub fn is_plugin_mismatch(cause: &AdapterError) -> bool {
+    cause.code == AdapterErrorCode::IncompatibleAdapter && cause.message == RELOAD_MESSAGE
 }
 
 #[cfg(test)]

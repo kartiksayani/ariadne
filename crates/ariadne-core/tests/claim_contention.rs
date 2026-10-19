@@ -496,3 +496,52 @@ fn claims_and_owner_writes_resent_through_a_long_hold_claim_each_input_once() {
         "a resent claim request claimed its input once"
     );
 }
+
+/// P11.24: an agent's `session_read` is answered from the lock-free snapshot, so a long hold of the session lock
+/// neither delays nor fails it, and it returns what a locked read returns once the hold ends.
+#[test]
+fn session_read_is_answered_while_the_session_lock_is_held() {
+    let shared = setup();
+    let core = NativeCoreService::new(
+        shared.registry(),
+        || unreachable!("reads allocate nothing"),
+        at,
+        |_| unreachable!("reads verify nothing"),
+    );
+    let request: QueryRequest = serde_json::from_value(serde_json::json!({
+        "command": "session_read",
+        "params": {"selection": {"view": "items", "filters": {"topic_id": null,
+            "item_id": null, "parent_item_id": null, "statuses": [], "archived": null}},
+            "cursor": null, "limit": 100, "item_pages": []}
+    }))
+    .unwrap();
+    let context = || {
+        QueryContext::owner(OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+            route(),
+        )))
+    };
+    let unheld = core.query(context(), request.clone()).unwrap();
+
+    let holding = Arc::new(AtomicBool::new(false));
+    let holder = {
+        let (shared, holding) = (shared.clone(), holding.clone());
+        std::thread::spawn(move || hold(&shared, 0, &holding))
+    };
+    while !holding.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let started = Instant::now();
+    let held = core
+        .query(context(), request.clone())
+        .expect("a read does not wait for the session lock");
+    assert!(
+        started.elapsed() < Duration::from_millis(1_000),
+        "a locked read would wait the store's 2 s lock wait and fail: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        held, unheld,
+        "the hold wrote nothing, so both reads see the same committed session"
+    );
+    holder.join().unwrap();
+}

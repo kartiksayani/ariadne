@@ -78,6 +78,7 @@ pub(crate) fn project(snapshot: DiscoverySnapshot) -> Result<DesktopDiscoverySna
                 compatibility: candidate.compatibility,
                 availability: candidate.availability,
                 loaded: candidate.loaded,
+                plugin_mismatch: candidate.plugin_mismatch,
                 binding_id: candidate
                     .binding
                     .as_ref()
@@ -137,7 +138,7 @@ pub async fn discovery_ui_open<R: tauri::Runtime>(
 mod tests {
     use super::*;
     fn candidate() -> DesktopDiscoveryCandidate {
-        serde_json::from_value(serde_json::json!({"adapter_id":"codex","endpoint":{"kind":"unix_socket","path":"/tmp/codex.sock"},"external_session_id":"thread","cwd":"/tmp","title":null,"host_version":"fixture","observed_at":"2026-10-01T00:00:00.000Z","freshness":"fresh","compatibility":"unknown","availability":"unknown","loaded":true,"binding_id":null,"session":null})).unwrap()
+        serde_json::from_value(serde_json::json!({"adapter_id":"codex","endpoint":{"kind":"unix_socket","path":"/tmp/codex.sock"},"external_session_id":"thread","cwd":"/tmp","title":null,"host_version":"fixture","observed_at":"2026-10-01T00:00:00.000Z","freshness":"fresh","compatibility":"unknown","availability":"unknown","loaded":true,"plugin_mismatch":false,"binding_id":null,"session":null})).unwrap()
     }
     #[test]
     fn bounds_and_exact_identity_are_enforced_without_truncation() {
