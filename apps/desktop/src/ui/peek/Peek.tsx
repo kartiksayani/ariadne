@@ -77,8 +77,10 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
   }, [focusInside]);
   /** The owner is using the card: a pointer passing by neither closes nor replaces it. */
   const kept = useCallback(() => busy() || engaged.current || !!live.current?.explicit || focusInside(), [busy, focusInside]);
-  const close = useCallback((restore = true) => {
-    cancelOpen(); cancelClose();
+  /** `keepPending`: the grace timer closing a card must not cancel the open already waiting for the next name the pointer reached. */
+  const close = useCallback((restore = true, keepPending = false) => {
+    if (!keepPending) cancelOpen();
+    cancelClose();
     if (restore && (tookFocus.current || focusInside()) && origin.current?.anchor.isConnected) origin.current.anchor.focus({ preventScroll: true });
     origin.current = null; live.current = null;
     tookFocus.current = false; engaged.current = false;
@@ -115,7 +117,7 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
   const leave = useCallback(() => {
     cancelClose();
     if (!live.current || kept()) return;
-    closing.current = setTimeout(() => { closing.current = null; if (live.current && !kept()) close(false); }, PEEK_CLOSE_MS);
+    closing.current = setTimeout(() => { closing.current = null; if (live.current && !kept()) close(false, true); }, PEEK_CLOSE_MS);
   }, [cancelClose, kept, close]);
   const hoverStart = useCallback((route: ItemRoute, anchor: HTMLElement) => {
     const open = live.current;

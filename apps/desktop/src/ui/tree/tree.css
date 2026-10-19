@@ -356,13 +356,16 @@
   opacity: 1;
 }
 
-/* The hover bar floats over the row, left of the end cluster, on a card: it takes no room, so showing it moves nothing.
+/* The hover bar floats against the row, on a card, just above its top edge and right-aligned with the end cluster (it overlaps
+   only the gap between this row and the one above, never the row's own text), or just below the row's bottom edge where the
+   sticky band or the top of the Map is above, or inside the row when neither edge is in view (ItemRow `placeActions` sets data-side). It takes no room, so showing it moves
+   nothing. It overlaps the row by 5px, and sits inside it, so the pointer reaches it without the row losing its hover.
    visibility keeps its buttons unclickable while hidden. */
 .tree-actions {
   position: absolute;
   z-index: 2;
-  top: -3px;
-  right: calc(100% + 6px);
+  right: calc(18px + (var(--depth) - 1) * 6px);
+  bottom: calc(100% - 5px);
   display: flex;
   gap: 1px;
   padding: 2px;
@@ -372,6 +375,24 @@
   visibility: hidden;
   opacity: 0;
   transition: opacity .12s;
+}
+
+.tree-actions[data-side="below"] {
+  top: calc(100% - 5px);
+  bottom: auto;
+}
+
+/* A row taller than the window has no edge in view: the bar sits inside it, in the empty column under the end cluster (the title
+   column ends where the cluster begins, so no text is there); ItemRow sets its `top` to the first visible spot below the cluster. */
+.tree-actions[data-side="inside"] {
+  top: 0;
+  bottom: auto;
+}
+
+/* The hovered or keyboard-focused row paints above its neighbours, so a bar below it is not covered by the next row. */
+.tree-item:hover,
+.tree-column[data-kbd] .tree-item:focus {
+  z-index: 2;
 }
 
 .tree-item:hover .tree-actions,

@@ -204,6 +204,25 @@ describe('name chips and item peek', () => {
     expect(screen.getByRole('dialog')).toBeTruthy();
   });
 
+  it.each([0, 100, 200, 259, 260, 400])('moving straight from one name to the next opens each own card after the delay (%i ms between)', async gap => {
+    // The pointer leaves A at t0; A's close grace (260 ms) must not cancel the open already pending for B.
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value), other = () => screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` });
+    const named = (id: string) => screen.queryByRole('dialog', { name: `Peek: ${value.source.items[id]!.question}` });
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(named('2')).toBeTruthy();
+    fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(gap));
+    fireEvent.mouseEnter(other()); act(() => vi.advanceTimersByTime(349));
+    fireEvent.mouseMove(other());
+    act(() => vi.advanceTimersByTime(1));
+    expect(named('8')).toBeTruthy();
+    expect(named('2')).toBeNull();
+    // and back again: the card of the name the pointer rests on, each time
+    fireEvent.mouseLeave(other()); act(() => vi.advanceTimersByTime(gap));
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(named('2')).toBeTruthy();
+  });
+
   it('a passing pointer never replaces a card the owner opened; a click does', async () => {
     const value = await setup(); vi.useFakeTimers();
     const { chip } = mount(value), other = () => screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` });

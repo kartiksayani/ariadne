@@ -6,8 +6,10 @@
 // Layout contract (alpha.20, C4): a row's height and its text's width depend only on its text and the Map's width. The
 // marker, the session-closed chip, the status badge, the related count and Ack sit in the end cluster, each in a slot that
 // keeps its width whether or not it is filled (tree.css, `.tree-end`), so a marker clearing, an Ack landing or a status
-// changing never rewraps the row. Selection is a background and the hover bar floats (absolute, left of the cluster).
-import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+// changing never rewraps the row. Selection is a background and the hover bar floats (absolute): just above the row's top
+// edge, right-aligned, or just below the row where nothing is above it, or inside a row taller than the window (alpha.22).
+// It never covers the row's own text.
+import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { TreeFonts } from './fonts';
 import { ItemReference, Markdown, MarkdownHighlight } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
@@ -22,6 +24,28 @@ import { Strip } from './Strip';
 import { ChangeMarker } from '../changes/ChangeMarker';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
+
+/** How far the hover bar reaches above a row's top edge (tree.css `.tree-actions`): with less room than this above, it floats below. */
+const BAR_ROOM = 24;
+
+/**
+ * Which side of the row the hover bar floats on: above, unless the sticky topic band or the top of the Map or window is closer than
+ * the bar's reach (the first row under the band); then below, unless the row's bottom is as close to the Map's or window's bottom
+ * (a row taller than the window); then inside the row, in the empty column under its end cluster, below the first line, so the
+ * bar is always on screen and still never covers text. Written straight to the bar, so no render and no layout depends on it.
+ */
+export function placeActions(row: HTMLElement, bar: HTMLElement | null) {
+  if (!bar) return;
+  const band = row.closest('.tree-topic-group')?.querySelector('.tree-topic')?.getBoundingClientRect().bottom ?? -Infinity;
+  const top = row.closest('.tree-scroll')?.getBoundingClientRect().top ?? -Infinity;
+  const bottom = Math.min(row.closest('.tree-scroll')?.getBoundingClientRect().bottom ?? Infinity, window.innerHeight);
+  const floor = Math.max(band, top, 0), rect = row.getBoundingClientRect();
+  const side = rect.top - floor >= BAR_ROOM ? 'above' : bottom - rect.bottom >= BAR_ROOM ? 'below' : 'inside';
+  if (bar.dataset.side !== side) bar.dataset.side = side;
+  if (side !== 'inside') { bar.style.removeProperty('top'); return; }
+  const cluster = row.querySelector('.tree-end')?.getBoundingClientRect().bottom ?? rect.top;
+  bar.style.top = `${Math.max(floor, cluster) - rect.top + 4}px`;
+}
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
 
@@ -141,13 +165,14 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
     return action.disabled && !action.persistent ? <span key={action.title} className="tree-action-off" title={action.title}>{button}</span> : button;
   };
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
+  const bar = useRef<HTMLSpanElement>(null);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
     data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-branch={row.branch}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
-    style={branchStyle(row.branch, row.depth)} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
-    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => onPeekHover?.(item.id, event)}
-    onMouseMove={event => onPeekHover?.(item.id, event)} onMouseLeave={() => onPeekLeave?.()}>
+    style={branchStyle(row.branch, row.depth)} onFocus={(event: FocusEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) { placeActions(event.currentTarget, bar.current); onFocus(row.key); } }}
+    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { placeActions(event.currentTarget, bar.current); onPeekHover?.(item.id, event); }}
+    onMouseMove={event => { placeActions(event.currentTarget, bar.current); onPeekHover?.(item.id, event); }} onMouseLeave={() => onPeekLeave?.()}>
     <Boxes boxes={row.boxes} />
     {selected && <span aria-hidden="true" className="tree-selected-box" />}
     <Guides guides={row.guides} />
@@ -170,10 +195,12 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       {delivery(row)}
       {note && <Strip variant="inside" text={note} depth={row.depth} onClick={() => onToggle(item.id)} />}
     </div>
-    {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). The hover
-        bar floats left of it (absolute), so showing it never moves or rewraps anything. */}
+    {/* The hover bar floats against the row itself (absolute), above its top edge or, with no room above, below its bottom
+        edge, so it never covers the row's text and showing it never moves or rewraps anything. It is inside the row, so
+        moving the pointer from the row onto it keeps the row hovered. */}
+    {hover.length > 0 && <span ref={bar} className="tree-actions" data-side="above">{hover.map(actionButton)}</span>}
+    {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). */}
     <div className="tree-end">
-      {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
       {row.outside && <span className="tree-outside-tag" title="Outside your filter"><i className="ph ph-funnel" aria-hidden="true" />Outside filter</span>}
       <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
         {changeMarker && <ChangeMarker kind={changeMarker} />}
