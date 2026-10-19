@@ -17,6 +17,8 @@ async function click(control) { await control.waitForDisplayed(); await control.
 // goes at once. A session's Remove enables once its words are read.
 const removeDialog = () => browser.$('[role="dialog"][aria-label^="Remove "]');
 async function confirmRemove(label) {
+  // A topic's dialog first checks other sessions for copies (E34): the reader re-reads every session, which can take a while on a busy machine.
+  await wait(async () => !(await removeDialog().$('*=Checking other sessions').isExisting()), 'The family check did not finish', 45000);
   await click(await removeDialog().$(`button*=${label}`));
   await wait(async () => !(await removeDialog().isExisting()), `${label} confirmation did not close`);
 }

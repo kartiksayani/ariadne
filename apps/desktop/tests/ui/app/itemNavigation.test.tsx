@@ -324,7 +324,10 @@ describe('composed map reveal scrolling', () => {
     await click(control('Graph'));
     const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');
     expect(target()).toBeNull();
-    expect(screen.queryByText(outsideNotice)).toBeNull();
+    // Opening the session under a status filter already raised the outside-filter notice (the Tree showed the saved selection);
+    // it shows after the store's 300 ms display delay, so wait for it rather than race the clock. Other causes never raise it.
+    if (cause === 'status') expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    else expect(screen.queryByText(outsideNotice)).toBeNull();
     const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
     // The Graph has no Reveal selected button (SPEC 1.3); an outside route (a link, the dock, a native route) reveals it.
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
