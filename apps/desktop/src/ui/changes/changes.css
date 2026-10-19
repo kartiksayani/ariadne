@@ -50,6 +50,7 @@
   vertical-align: middle;
 }
 
+/* SPEC 5.3: "› Before → after" is the accent-coloured link under a change, caret at 11px. */
 .change-compare-toggle {
   display: inline-flex;
   align-items: center;
@@ -57,15 +58,18 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  color: var(--a-acc-text);
   font: inherit;
-  font-size: calc(11.5px * var(--text-scale));
-  line-height: 1.5; /* its own, so the link is the same size in the timeline and in the popover */
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.2; /* its own, so the link is the same size in the timeline and in the popover */
   cursor: pointer;
 }
 
+.change-compare-toggle > i {
+  font-size: calc(11px * var(--text-scale));
+}
+
 .change-compare-toggle:hover {
-  color: var(--color-text);
   text-decoration: underline;
 }
 

@@ -34,6 +34,12 @@ previous push against its head. Missing bases and unknown paths run full checks.
 The `quality` job always reports. See [Development checks](docs/planning/DEVELOPMENT_CHECKS.md)
 for the commands, coverage exclusions and release-sensitive paths.
 
+Tests find elements by role, label, text or `data-testid`, never by CSS class. The
+`ariadne/no-class-selectors` lint rule (`scripts/eslint/`) enforces it on test files that are not in
+`scripts/eslint/class-selector-baseline.json`. That list is frozen and may only shrink: when you convert
+the last class selector in a listed file, delete the file from the list (a unit test fails on a stale entry).
+Never add a file to it.
+
 Application changes require meaningful tests, Clippy, >=80% weighted Rust+TS/JS
 executable-line coverage including untested handwritten logic, and native WebView
 smoke. Release-sensitive changes additionally prove packaged release isolation;
