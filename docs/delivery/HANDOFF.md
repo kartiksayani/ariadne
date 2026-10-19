@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-18
+# Ariadne handoff — 2026-10-19
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,15 +21,28 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `c5c8f6a9` (#171). Alpha.20 released as
-[`v0.1.0-alpha.20`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.20)**
-(tag at `c5c8f6a9`). Alpha.19 is `v0.1.0-alpha.19` (tag at `c87909da`, #169), alpha.18 is
+**Main: `8ed87b66` (#173). Alpha.21 released as
+[`v0.1.0-alpha.21`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.21)**
+(tag at `8ed87b66`). Alpha.20 is `v0.1.0-alpha.20` (tag at `c5c8f6a9`, #171), alpha.19 is
+`v0.1.0-alpha.19` (tag at `c87909da`, #169), alpha.18 is
 `v0.1.0-alpha.18` (tag at `0336a903`, #164), alpha.17 is
 `v0.1.0-alpha.17` (tag at `925c9645`, #162), alpha.16 is
 `v0.1.0-alpha.16` (tag at `44158cbf`, #160), alpha.15 is `v0.1.0-alpha.15` (tag at
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.21 released
+
+[#173](https://github.com/kartiksayani/ariadne/pull/173), `8ed87b66`, "Details and the rest": the third of three redesign releases. The release is a pre-release with the asset `ariadne-0.1.0-macos-arm64.tar.gz`. Saved data is unchanged from alpha.20. What changed for the owner:
+
+- Details: a new head (the path, Back and Forward on wide windows, Read in a bigger view, Focus, a "…" menu and Fold), and one "Changed since you looked" box with Mark seen. The actions sit in the body under the outcome. The conversation reads like a chat and opens at "New since you last looked". "Because you chose …" shows once, under the answer that changed things. Every message you send shows where it is (Sending…, Sent · waiting for the agent with Undo while queued, Picked up). The bigger view is a 760-wide column in place of the Map. Reply to topic opens the topic in Details.
+- Notices and toasts: things you do confirm in one toast at the Map's lower left, with Undo where it applies. Notices sit under the topic band, newest on top, two at a time, then "N more" and "Dismiss all". A reply that has not reached the agent after 2 minutes gets a notice with Edit or Retry. Words not sent before a restart come back with a notice and a "Recovered after a restart" mark; nothing was sent.
+- Connection: the dot by the session name always says where the agent stands, with a line above the Map when it changes what you can do. The dock says where your answers wait in each state.
+- Remove, archive and the bin: before anything with your words in it is removed, you see the words, with Copy. A plain item goes at once, with 5 seconds to Undo. Removing a topic that continues in another session is blocked; archive it instead. The bin is a dialog (Restore, or Empty after seeing every word that goes with it). Archive always asks, then leaves one strip you can click to undo.
+- Continue elsewhere: two steps (pick a session, then review and edit the summary). Esc keeps your edit. It sends once.
+- Fixes: one session that cannot be read no longer hides the questions waiting in other sessions; ← on the Graph folds the node you picked even while the Graph is still revealing an earlier node; the agent is named "Claude Code" and "Codex" everywhere.
+- Flakes fixed in the release: the `page-keys` test, the `itemNavigation` "undrawn Graph selection" test and the native Graph step `graph.spec.mjs` "← did not fold item 10" (a key against selection-save race).
 
 ## Alpha.20 released
 
@@ -147,14 +160,13 @@ built.
 
 1. The window (answering, Details, top bar): alpha.19, released.
 2. The Map, including what changed and peek: alpha.20, released.
-3. Dialogs, notices and pages, with connection states: release 3.
+3. Details, dialogs, notices and pages, with connection states: alpha.21, released.
 
 ## Next steps
 
-Item 1 is for alpha.21 "Details and the rest", which is in build. Items 2 and 3 are small and do not touch the redesign; take them alongside. Items 4 onward wait until the redesign is done, unless the owner asks for one earlier.
+The three redesign releases are done (alpha.19, alpha.20 and alpha.21). Item 1 is the follow-ups carried to the next release. Items 2 and 3 are small; take them alongside. Items 4 onward waited on the redesign, which is now done; the owner picks the order.
 
-1. **Follow-ups carried from alpha.20** (none blocks the release):
-   - Flake: `apps/desktop/tests/ui/app/page-keys.test.tsx`, "do nothing to the session the Map last showed". It failed under full-run load at least 4 times and passes alone. Deflake it.
+1. **Follow-ups carried to the next release** (none blocks it). The `page-keys` flake, the `itemNavigation` flake and the native Graph race from the alpha.20 list were fixed in alpha.21.
    - Selector lint: an eslint rule against class selectors in tests (the alpha.20 reviewers deferred it).
    - Graph: with Details open at 1280 px, the deepest nodes scroll sideways. The column is fitted as if Details were folded, and the board refits live.
    - "Nothing in the bin": the board says "Empty".
@@ -162,6 +174,11 @@ Item 1 is for alpha.21 "Details and the rest", which is in build. Items 2 and 3 
    - Long-absence head sub-text: the board says "since Monday 18:10" (weekday when more than a day); the app says "since you looked at 21:25".
    - Queued view edits are lost on unmount: a Map view change queued behind an unconfirmed Recent save is lost if the session switches first. The same holds for edits queued behind a running Recent write (`TreeView` `pendingEdits`). Flush them or keep them across the remount.
    - Text scale at the Map's end: stepping the text size back down to 1 at the very bottom moves the reading row by about 17 px. The owner causes the boundary shift; the alpha.20 plan cut it.
+   - Screen-reader announcements of waiting questions stop while any session is unreadable (`components/accessibility/QueueAnnouncements.tsx`, line 14, with the waiting store's stale and error status). This predates alpha.21. Announce from the listed sessions anyway.
+   - Back-to pill under a near-full notice stack: when the expanded stack fills most of the Map, the pill can sit low or under the dock (`tree.css`, line 588). Cap its top. The `.` key still works.
+   - Archive strip at the Map's end: archiving the last topic while reading a tall row near the end puts the strip 11 to 23 px below the row's place. The owner causes the boundary shift; the map-still row is marked fixme.
+   - Retry during a removal window: an uncertain answer's Retry in Details is not blocked while its item is being removed (AnswerSlot drops blocked on the retry bar).
+   - `queue.ts` lines 142-158: the family check can show "Checking other sessions…" for up to 3 × `FAMILY_SETTLE_MS` (30 s), while the docstring says two waits. Cap the second wait from the refresh start, or fix the docstring and the comment at `App.tsx` line 505. Minor, from the review of `2563c4db`.
 
 2. Hook notice follow-ups from the alpha.18 final re-review (non-blocking), each a small task:
    - P11.17 `claim` is not retired after binding removal (`claims.js` `end()`), so the terminal "removed" line stays current and hides later advice until reconnect. Retire it after the removal is recorded.
