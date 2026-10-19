@@ -1005,11 +1005,11 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     } });
     const band = topicRow('Continued context');
     expect(band.querySelector('.tree-topic-line')).not.toBeNull();
-    // Reply waits while the reply is on its way; Archive and Remove stay in the "…" menu.
+    // Reply to topic stays open while a reply is on its way (it opens the topic's Details, where that reply has its Undo); Archive and Remove stay too.
     fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
     expect(screen.getByRole('menuitem', { name: /^Remove topic/ })).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Archive topic/ }).disabled).toBe(false);
-    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(false);
   });
   const text = 'Keep the retry limits as they are';
   // The first input on item 8's topic becomes a queued reply to the whole topic.

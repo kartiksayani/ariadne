@@ -1224,8 +1224,8 @@ export function TreeView(props: TreeViewProps) {
     const id = row.topic.id, unseen = unseenIn(id), at = nextTarget ? unseen.indexOf(nextTarget.id) : -1;
     const focusedName = focusedId ? names.get(focusedId) ?? (focusedItem ? shortLabel(focusedItem) : focusedId) : null;
     const focusedCount = focusedBranch ? [...focusedBranch].filter(itemId => !itemRemoved(session, itemId)).length : 0;
-    const replyBlocked = row.delivery ? 'a reply to this topic is on its way'
-      : session.state === 'active' && session.active_binding_id ? null : 'the agent is not running';
+    // A reply on its way never blocks this: the topic's Details shows that reply with its status and Undo, and takes a second one behind it.
+    const replyBlocked = session.state === 'active' && session.active_binding_id ? null : 'the agent is not running';
     const binItems = removedRoots(session, id).reduce((sum, item) => sum + removedSubtree(session, item.id).length, 0);
     return {
       // While focused, the counts line says so, in the counts' place (D9).

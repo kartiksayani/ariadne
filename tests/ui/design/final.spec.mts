@@ -105,7 +105,8 @@ async function perform(page: Page, step: Step): Promise<void> {
     // With a menu open, its own row wins over a same-named button elsewhere (the agent-removed notice has an "Open the bin" button too).
     const open = page.getByRole('menu').first();
     if (await open.isVisible()) {
-      const row = open.getByRole('menuitem', { name: step.click, exact: true });
+      // A row's name carries its detail line ("Open the bin 1 removed · Restore or empty"), so the match is by prefix.
+      const row = open.getByRole('menuitem', { name: new RegExp(`^${step.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) });
       if (await row.count()) { await row.first().click({ timeout: 20_000 }); return; }
     }
     // A control the app does not draw yet (a pending Map state) fails here in 20 s, not at the test's 240 s.

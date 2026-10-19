@@ -82,26 +82,27 @@ describe('topic mode in Details', () => {
     input.state = 'queued'; input.kind = 'topic_reply'; input.target = { topic_id: topic, item_id: null }; input.attempts = []; input.active_attempt_id = null;
     input.binding_id = session.active_binding_id!; input.payload.text = words; input.payload.selected_option_id = null;
     input.payload.target_snapshot.question_revision = null; input.payload.target_snapshot.item_question = null;
+    // Alone in the session: a message queued behind another one that stopped has StuckNote's controls instead of an Undo.
+    session.inputs = { [input.id]: input };
     return input.id;
   };
   const cancels = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_cancel');
-  // A queued reply cannot be taken back from the band (its "Reply to topic" waits while a reply is on its way): it is taken back from the
-  // stuck notice's Edit (2 minutes on), which opens the topic's Details, or from the bubble's Undo once Details is open.
-  const staleQueued = (transport: AppTransport) => {
-    const id = queuedReply(transport), session = transport.sessions.get(route.session_id)!, input = session.inputs[id]!;
-    input.created_at = new Date(Date.now() - 3 * 60_000).toISOString();
-    // Alone in the session, so it is not "behind" another message (which would explain the wait and raise no notice).
-    session.inputs = { [id]: input };
-    return id;
-  };
   const draftWith = (transport: AppTransport, text: string) => transport.preferences.drafts.some(draft => draft.target.item_id === null && draft.intent === 'topic_reply' && draft.text === text);
+  const undoButton = async () => within((await screen.findByText(/Sent .*waiting for the agent/u)).closest('.detail-bubble-status') as HTMLElement).getByRole('button', { name: 'Undo' });
+  const replyToContinued = () => {
+    const band = [...document.querySelectorAll<HTMLElement>('.tree-topic')].find(value => value.textContent?.includes('Continued context'))!;
+    fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+    const reply = screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ });
+    expect(reply.disabled, 'Reply to topic is never a dead end').toBe(false);
+    fireEvent.click(reply);
+  };
 
-  it('takes a queued topic reply back from the stuck notice: the queued reply is cancelled first, then its words are in the topic box', async () => {
-    const transport = new AppTransport(); const id = staleQueued(transport);
+  it('opens topic mode from the band while a topic reply is queued: its bubble has Undo, and Undo puts the words back in the composer', async () => {
+    const transport = new AppTransport(); const id = queuedReply(transport);
     await mount(transport);
-    const edit = await screen.findByRole('button', { name: 'Edit' });
-    fireEvent.click(edit);
+    replyToContinued();
     await waitFor(() => expect(topicBox()).not.toBeNull());
+    fireEvent.click(await undoButton());
     await waitFor(() => expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(words));
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
     // No draft held the words before the cancel went out: they could have been sent twice.
@@ -113,19 +114,28 @@ describe('topic mode in Details', () => {
   });
 
   it('never overwrites a topic reply the owner already started: the queued one stays and its words are offered to copy', async () => {
-    const transport = new AppTransport(); staleQueued(transport);
-    const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
-    transport.preferences.drafts = [{ submission_attempted: false, op_id: '00000000-0000-4000-8000-0000000000d5', session: route, binding_id: session.active_binding_id!,
-      target: { topic_id: topic, item_id: null }, intent: 'topic_reply', text: 'Something else', selected_option_id: null,
-      target_revision: session.topics[topic]!.revision, question_revision: null, supersedes_answer_id: null }];
+    const transport = new AppTransport(); queuedReply(transport);
     await mount(transport);
-    // The recovered words' notice opens the topic; the queued reply's bubble is there with its Undo.
-    fireEvent.click(await screen.findByRole('button', { name: 'Show it' }));
+    replyToContinued();
     await waitFor(() => expect(topicBox()).not.toBeNull());
-    const status = await screen.findByText(/Sent .*waiting for the agent/u);
-    fireEvent.click(within(status.closest('.detail-bubble-status') as HTMLElement).getByRole('button', { name: 'Undo' }));
+    const box = within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement;
+    await waitFor(() => expect(box.disabled).toBe(false));
+    fireEvent.change(box, { target: { value: 'Something else' } });
+    fireEvent.click(await undoButton());
     expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(words);
     expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Something else');
     expect(cancels(transport)).toHaveLength(0);
+  });
+
+  it('still lets the owner write a second topic reply behind a queued one (it goes out after the first)', async () => {
+    const transport = new AppTransport(); queuedReply(transport);
+    await mount(transport);
+    replyToContinued();
+    await waitFor(() => expect(topicBox()).not.toBeNull());
+    const box = within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement;
+    await waitFor(() => expect(box.disabled).toBe(false));
+    fireEvent.change(box, { target: { value: 'And one more thing' } });
+    await waitFor(() => expect(within(topicBox()!).getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));
+    expect(box.value).toBe('And one more thing');
   });
 });
