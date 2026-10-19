@@ -7,7 +7,7 @@ import type { OwnerMutationRequest, SessionPreferences } from '../../../src/gene
 import { createDesktopService } from '../../../src/data/service';
 import type { SessionStore } from '../../../src/data';
 import { NavigationStore } from '../../../src/state/navigation/store';
-import { viewEditsFor } from '../../../src/state/navigation/viewEdits';
+import { VIEW_SAVE_FAILED, viewEditsFor } from '../../../src/state/navigation/viewEdits';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { TreeView, type TreeViewProps } from '../../../src/ui/tree/TreeView';
@@ -197,6 +197,61 @@ describe('queued view edits (E12, §2c)', () => {
     expect(viewEditsFor(view.navigation).pending(route)).toBe(0);
   });
 
+  describe('a preferences refresh publishes the saved view carrying the in-flight chip before its receipt: the chip stays pressed', () => {
+    const isOpenWrite = (request: OwnerMutationRequest) => request.command.command === 'preferences_patch' && request.command.params.entries
+      .some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.statuses.includes('open'));
+    const outcomes = [
+      { name: 'the receipt still on its way', hold: (view: Mounted) => {
+        // The core commits the write; its response is held.
+        let release!: () => void, entered = false;
+        const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+        vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+          const reply = await invoke(name, args);
+          if (!entered && 'command' in args.request && isOpenWrite(args.request)) { entered = true; await gate; }
+          return reply;
+        });
+        return { entered: () => entered, settle: async () => { await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)); }); } };
+      } },
+      { name: 'the outcome unknown until Check again', hold: (view: Mounted) => {
+        // The core commits the write; its response is lost.
+        let entered = false;
+        const invoke = view.transport.invoke.bind(view.transport);
+        vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+          const reply = await invoke(name, args);
+          if (!entered && 'command' in args.request && isOpenWrite(args.request)) { entered = true; throw new Error('Lost response'); }
+          return reply;
+        });
+        return { entered: () => entered, settle: async () => {
+          await waitFor(() => expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull());
+          await act(async () => { expect(await view.navigation.retryMutation()).toBe(true); });
+          await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        } };
+      } },
+    ];
+    it.each(outcomes)('with $name', async ({ hold }) => {
+      const view = await mount();
+      const held = hold(view);
+      const pressed = watchAttribute(chip('Open'), 'aria-pressed');
+      act(() => { fireEvent.click(chip('Open')); });
+      await waitFor(() => expect(held.entered()).toBe(true));
+      expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
+      const rows = () => screen.getAllByRole('treeitem').map(row => row.getAttribute('aria-label') ?? row.textContent);
+      const drawn = rows();
+      // The 2 s poll (or a preferences_changed hint) reads the committed revision before the receipt.
+      await act(async () => { await view.navigation.refresh(); });
+      expect(view.navigation.getSnapshot().preferences!.sessions.find(value => value.session.session_id === route.session_id)!.filters.statuses).toEqual(['open']);
+      expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+      expect(rows()).toEqual(drawn);
+      await held.settle();
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+      pressed.stop();
+      expect(pressed.values).toEqual(['false', 'true']);
+      expect(rows()).toEqual(drawn);
+      expect(viewWrites(view)).toHaveLength(1);
+      expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
+    });
+  });
+
   it('the saved view moves under an in-flight toggle (another write landed): it stays drawn, rebased, until its own receipt', async () => {
     const view = await mount();
     const gate = gateWrite(view, request => request.command.command === 'preferences_patch' && request.command.params.entries
@@ -269,7 +324,7 @@ describe('queued view edits (E12, §2c)', () => {
     });
     const expanded = watchAttribute(topicRow(TOPIC), 'aria-expanded');
     await act(async () => { foldTopic(TOPIC); await new Promise(resolve => setTimeout(resolve, 20)); });
-    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(true));
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.id === VIEW_SAVE_FAILED)).toBe(true));
     expect(topicFolded(TOPIC)).toBe(true);
     expect(viewOf(view.transport).collapsed_topic_ids ?? []).toEqual([]);
     expect(viewEditsFor(view.navigation).pending(route)).toBe(1);

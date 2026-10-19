@@ -42,7 +42,7 @@ import { Banner } from './Banner';
 import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { useArchiveBridge } from './archiveBridge';
-import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
+import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, savedChips, setSavedChip, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ConnectionLineShown } from '../shared/connection';
 import { UnreadableMap } from './UnreadableMap';
@@ -243,8 +243,9 @@ export function TreeView(props: TreeViewProps) {
   const removals = useContext(RemovalContext);
   // The owner's archive receipt lands with the session read that drops the topic, a render before the lifecycle keeps its
   // Undo (E12). Its strip stands from that render on, so the topic and its strip change places in one commit and the hold
-  // hands the reading row to the strip, not to a row above. Once the lifecycle has kept it, that receipt bridges no more.
-  const archivedTopic = useArchiveBridge(actionState, lifecycle.archived, raw);
+  // hands the reading row to the strip, not to a row above. Once the lifecycle has kept it, that receipt bridges no more; a
+  // receipt from before this visit to the session (a switch back, a return from a page) never bridges.
+  const archivedTopic = useArchiveBridge(actionState, lifecycle.archived, raw, `${route.project_id}/${route.session_id}`);
   const places = useMemo(() => raw ? placeStrips(raw, route, hidden, archivedMode ? null : archivedTopic, archivedMode) : [],
     [raw, route, hidden, archivedTopic, archivedMode]);
   const onPlace = (row: StripRow) => {
@@ -506,8 +507,11 @@ export function TreeView(props: TreeViewProps) {
   const setChip = (chip: Chip) => {
     setNextRevealId(null);
     onDismissReveal();
-    if (isLocalChip(chip)) localChips.set(toggleLocalChip(localChips.chips, chip));
-    else void saveView(next => { next.filters.statuses = toggleSavedChip(next.filters.statuses, chip); });
+    if (isLocalChip(chip)) { localChips.set(toggleLocalChip(localChips.chips, chip)); return; }
+    // The chip's target state is taken now, from the view the owner sees: a saved view that already carries this edit
+    // (a refresh before its receipt) takes it again unchanged, never flipped back.
+    const on = !savedChips(latest.current.view?.filters.statuses ?? []).includes(chip);
+    void saveView(next => { next.filters.statuses = setSavedChip(next.filters.statuses, chip, on); });
   };
   // Clear empties everything that makes the filter active (the saved statuses, the local chips, the saved owners and
   // hide-later, which have no chip) so the row never offers a Clear that leaves the filter on. Search and the archive stay.

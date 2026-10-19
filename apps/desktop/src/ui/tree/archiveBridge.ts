@@ -16,16 +16,21 @@ export interface ArchiveAction {
 
 /**
  * The topic archived this visit: the lifecycle's, or until the lifecycle keeps it, the one the owner's latest receipt archived
- * (the session read already shows it archived). A receipt the lifecycle has kept bridges no more, so an Undo, a dismissal or
- * a session switch never brings its strip back; nor does one whose follow-up read failed.
+ * (the session read already shows it archived). Only a receipt that arrives while this view is drawn for `scope` (the
+ * session's route) bridges: the receipt current when the view was drawn or the route changed is an earlier visit's, whose
+ * strip and Undo the lifecycle has let go. A receipt the lifecycle has kept bridges no more, so an Undo or a dismissal never
+ * brings its strip back; nor does one whose follow-up read failed.
  */
-export function useArchiveBridge(action: ArchiveAction, archived: Archived | null, session: Immutable<Session> | null): Archived | null {
+export function useArchiveBridge(action: ArchiveAction, archived: Archived | null, session: Immutable<Session> | null, scope: string): Archived | null {
   const kept = useRef<Immutable<MutationReceipt> | null>(null);
+  const visit = useRef<{ readonly scope: string; readonly receipt: Immutable<MutationReceipt> | null } | null>(null);
   const bridged = useRef<{ readonly receipt: Immutable<MutationReceipt>; readonly value: Archived } | null>(null);
   const receipt = action.receipt;
+  if (visit.current?.scope !== scope) visit.current = { scope, receipt };
   if (archived) { if (receipt) kept.current = receipt; return archived; }
   const data = receipt && 'data' in receipt ? receipt.data : undefined;
-  if (!receipt || kept.current === receipt || action.error || data?.kind !== 'topic_lifecycle' || data.archived_at === null) return null;
+  if (!receipt || receipt === visit.current.receipt || kept.current === receipt || action.error
+    || data?.kind !== 'topic_lifecycle' || data.archived_at === null) return null;
   const topic = session?.topics[data.topic_id];
   if (!topic || topic.archived_at === null) return null;
   if (bridged.current?.receipt !== receipt) {

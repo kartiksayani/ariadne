@@ -11,7 +11,11 @@ import { itemRemoved } from '../../selectors/removed';
 import { notices } from '../../ui/pages/notices';
 import type { NavigationStore } from './store';
 
-/** Changes the saved view in place; applied to whatever saved view is current when it is written (rebased). */
+/**
+ * Changes the saved view in place; applied to whatever saved view is current when it is written (rebased). Absolute: it
+ * sets a target state taken when the owner acted (fold this topic, press this chip), never a toggle, so applying it to a
+ * saved view that already carries it changes nothing. A refresh can publish that saved view before the write's receipt.
+ */
 export type ViewChange = (next: SessionPreferences) => void;
 /** What an edit is about: an edit whose topic or item has gone from the session by the time it is written is dropped. */
 export interface ViewSubject { readonly topicId?: string; readonly itemId?: string }
@@ -55,7 +59,7 @@ export class ViewEdits {
   };
   /** Changes whenever a session's queued or in-flight edits change. */
   readonly version = (session: SessionRef) => this.lanes.get(keyOf(session))?.version ?? 0;
-  /** The edits not yet confirmed for the session: queued, or in flight. */
+  /** Test-only: the edits not yet confirmed for the session, queued or in flight. The app reads `view` and `version`. */
   readonly pending = (session: SessionRef) => {
     const lane = this.lanes.get(keyOf(session));
     return lane ? lane.queued.length + (lane.writing && !lane.writing.committed ? lane.writing.edits.length : 0) : 0;

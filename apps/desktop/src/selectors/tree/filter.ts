@@ -48,10 +48,15 @@ export function pickedChips(scope: Pick<FilterScope, 'view' | 'local'>): readonl
 /** Pick or drop one saved chip without changing the saved shape. Dropping the last chip saves no filter. A legacy `dropped`
  * rides along with the chips but never stays alone: it has no chip, so alone it would filter with nothing to clear. */
 export function toggleSavedChip(statuses: readonly ItemStatus[], chip: Chip): ItemStatus[] {
+  return setSavedChip(statuses, chip, !savedChips(statuses).includes(chip));
+}
+
+/** Pick (`on`) or drop one saved chip, whatever it was: applying it again to statuses that already have it changes nothing. */
+export function setSavedChip(statuses: readonly ItemStatus[], chip: Chip, on: boolean): ItemStatus[] {
   const status = SAVED[chip];
   if (!status) return [...statuses];
   const next = new Set(hasStatusFilter(statuses) ? statuses : []);
-  if (next.has(status)) next.delete(status); else next.add(status);
+  if (on) next.add(status); else next.delete(status);
   const ordered = FILTER_STATUSES.filter(value => next.has(value));
   return ordered.length === FILTER_STATUSES.length || ordered.every(value => value === 'dropped') ? [] : ordered;
 }
