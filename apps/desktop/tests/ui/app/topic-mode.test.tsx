@@ -87,6 +87,13 @@ describe('topic mode in Details', () => {
     return input.id;
   };
   const cancels = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_cancel');
+  // A queued reply cannot be taken back from the band's menu without opening topic mode first; the stuck notice's Edit (2 minutes on)
+  // opens the topic's Details and takes it back in one step.
+  const staleQueued = (transport: AppTransport) => {
+    const id = queuedReply(transport), session = transport.sessions.get(route.session_id)!, input = session.inputs[id]!;
+    input.created_at = new Date(Date.now() - 3 * 60_000).toISOString();
+    return id;
+  };
   const draftWith = (transport: AppTransport, text: string) => transport.preferences.drafts.some(draft => draft.target.item_id === null && draft.intent === 'topic_reply' && draft.text === text);
   const undoButton = async () => within((await screen.findByText(/Sent .*waiting for the agent/u)).closest('.detail-bubble-status') as HTMLElement).getByRole('button', { name: 'Undo' });
   const replyToContinued = () => {
@@ -121,6 +128,38 @@ describe('topic mode in Details', () => {
     const box = within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement;
     await waitFor(() => expect(box.disabled).toBe(false));
     fireEvent.change(box, { target: { value: 'Something else' } });
+    fireEvent.click(await undoButton());
+    expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(words);
+    expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Something else');
+    expect(cancels(transport)).toHaveLength(0);
+  });
+
+  it('takes a queued topic reply back from the stuck notice: the queued reply is cancelled first, then its words are in the topic box', async () => {
+    const transport = new AppTransport(); const id = staleQueued(transport);
+    await mount(transport);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await waitFor(() => expect(topicBox()).not.toBeNull());
+    await waitFor(() => expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(words));
+    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
+    // No draft held the words before the cancel went out: they could have been sent twice.
+    const cancelAt = transport.mutations.findIndex(request => request.command.command === 'input_cancel');
+    const holdsWords = (request: (typeof transport.mutations)[number]) => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === words);
+    expect(transport.mutations.slice(0, cancelAt).some(holdsWords)).toBe(false);
+    await waitFor(() => expect(draftWith(transport, words)).toBe(true));
+    // Sent once: the cancel is the only input command, and the words were never submitted again.
+    expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+  });
+
+  it('recovered words: the notice\'s Show it opens topic mode, the queued reply keeps its Undo and the started words stay', async () => {
+    const transport = new AppTransport(); staleQueued(transport);
+    const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
+    transport.preferences.drafts = [{ submission_attempted: false, op_id: '00000000-0000-4000-8000-0000000000d5', session: route, binding_id: session.active_binding_id!,
+      target: { topic_id: topic, item_id: null }, intent: 'topic_reply', text: 'Something else', selected_option_id: null,
+      target_revision: session.topics[topic]!.revision, question_revision: null, supersedes_answer_id: null }];
+    await mount(transport);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show it' }));
+    await waitFor(() => expect(topicBox()).not.toBeNull());
     fireEvent.click(await undoButton());
     expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(words);
     expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Something else');

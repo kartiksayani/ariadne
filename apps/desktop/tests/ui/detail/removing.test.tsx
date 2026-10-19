@@ -10,7 +10,9 @@ import type { RemoveSubject, RemoveTarget } from '../../../src/ui/dialogs/remove
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { TopicConversation } from '../../../src/ui/detail/TopicConversation';
 import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
+import { DesktopApp } from '../../../src/App';
 import { AppTransport, route } from '../app/transport';
+import { answerWords } from '../answer/words';
 
 const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); vi.restoreAllMocks(); });
@@ -100,4 +102,44 @@ describe('Details in topic mode while the topic is being removed', () => {
     expect(screen.queryByText('Being removed · Undo first')).toBeNull();
     expect(send().disabled).toBe(false);
   });
+});
+
+// The waiting question's answer card is a send too (E28): it carries the same reason and sends nothing in the window.
+describe('the bigger view of a waiting item that is being removed', () => {
+  it('the answer card says "Being removed · Undo first", its Send is off; Undo gives Send back', async () => {
+    const transport = new AppTransport();
+    transport.preferences.global.selected_navigation = { kind: 'session', session: route };
+    transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.tab_open = true;
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    await screen.findByRole('region', { name: 'Session tree' });
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+    fireEvent.click(document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    fireEvent.click(screen.getByRole('button', { name: 'Read in a bigger view' }));
+    await screen.findByRole('region', { name: 'Item conversation' });
+    const conversation = () => screen.getByRole('region', { name: 'Item conversation' });
+    const send = () => within(conversation()).getByRole<HTMLButtonElement>('button', { name: /^Send/ });
+    const words = await waitFor(() => answerWords(conversation()));
+    await waitFor(() => expect(words.disabled).toBe(false));
+    fireEvent.change(words, { target: { value: 'Use the morning window' } });
+    await waitFor(() => expect(send().getAttribute('aria-disabled')).toBeNull());
+    expect(within(conversation()).queryByText('Being removed · Undo first')).toBeNull();
+    // Remove from the head's "…" menu: a waiting question asks first.
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Remove/ }));
+    const dialog = await screen.findByRole('dialog', { name: /^Remove “/ });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Remove item|^Remove \d+ items/ }));
+    await waitFor(() => expect(within(conversation()).getByText('Being removed · Undo first')).toBeTruthy());
+    expect(send().getAttribute('aria-disabled') === 'true' || send().disabled).toBe(true);
+    fireEvent.click(send());
+    expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+    // Undo from the toast (the bigger view covers the Map's strip).
+    fireEvent.click(within(await screen.findByTestId('toast')).getByRole('button', { name: 'Undo' }));
+    // Undo brings the item back (the view may return to the Map's Details); its answer card sends again.
+    await waitFor(() => expect(screen.queryByText('Being removed · Undo first')).toBeNull());
+    const again = await waitFor(() => { const button = document.querySelector<HTMLButtonElement>(`[data-detail-item-id="2"] [data-answer-send]`); expect(button).not.toBeNull(); return button!; });
+    expect(again.disabled).toBe(false);
+    expect(again.getAttribute('aria-disabled')).toBeNull();
+    expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+  }, 15_000);
 });
