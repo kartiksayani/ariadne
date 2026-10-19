@@ -13,6 +13,8 @@ import { DetailsColumn } from '../../../apps/desktop/src/ui/shell/DetailsColumn'
 import { DockInsetProvider } from '../../../apps/desktop/src/ui/shell/dockInset';
 import { DetailsColumnProvider } from '../../../apps/desktop/src/state/details/column';
 import '../../../apps/desktop/src/ui/detail/detail.css';
+import { notices } from '../../../apps/desktop/src/ui/pages/notices';
+import { toasts } from '../../../apps/desktop/src/ui/shell/toast';
 
 // The ordinary App over its real stores; only the native transport is replaced.
 // Item 1 carries a long finding (it must fold to three lines), item 5 a paragraph that
@@ -28,6 +30,8 @@ class TreeLayoutTransport extends AppTransport {
       session.state = 'closed'; session.closed_at = session.updated_at; session.archived_at = session.updated_at;
       this.preferences.global.selected_navigation = { kind: 'session', session: route };
     }
+    // These tests measure the Map, not the stuck-reply notice (alpha.21 E17): the demo's old queued replies stay "just sent".
+    for (const input of Object.values(session.inputs)) if (input) input.created_at = '2099-01-01T00:00:00.000Z';
     const items = session.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
     for (let n = 9; n <= 18; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.' };
@@ -95,9 +99,20 @@ class TreeLayoutTransport extends AppTransport {
   }
   /** Set by a spec: every Ack is refused, so an Ack all batch stops in its failed state ("0 saved · N to finish"). */
   failAck = false;
+  /** Set while a read of the session fails, as a locked or damaged session file does: the Map keeps its last good copy. */
+  failReads = false;
+  /** While set, a preferences save waits here: it is in flight, and its outcome is not known yet. */
+  private saveGate: Promise<void> | null = null;
+  /** Set until the owner's next "Later" is saved: that write is lost on its way back (reading marks and the like still land). */
+  private loseLater = false;
+  private releaseSave = () => {};
   /** The owner's Ack lands: the proposal is accepted, so the item takes its target status and leaves "to ack". */
   async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
+    if (this.failReads && !('command' in request) && request.request.command === 'session_get') throw new Error('The session file could not be read.');
+    if ('command' in request && request.command.command === 'preferences_patch' && this.saveGate) await this.saveGate;
+    if ('command' in request && request.command.command === 'preferences_patch' && this.loseLater
+        && request.command.params.entries.some(entry => entry.kind === 'set_later')) { this.loseLater = false; throw new Error('Lost response'); }
     if ('command' in request && request.command.command === 'ack') {
       if (this.failAck) throw new Error('The Ack could not be saved.');
       const session = this.sessions.get(request.session!.session_id)!, item = session.items[request.command.params.item_id]!;
@@ -105,6 +120,14 @@ class TreeLayoutTransport extends AppTransport {
       this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
       return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
         data: { kind: 'item_ack', item_id: item.id, item_revision: item.revision, status: item.status, message_id: crypto.randomUUID() } } } as T;
+    }
+    // The owner archives a topic (E33): it is marked archived and leaves one strip in its place for this visit.
+    if ('command' in request && request.command.command === 'topic_archive') {
+      const session = this.sessions.get(request.session!.session_id)!, topic = session.topics[request.command.params.topic_id]!;
+      topic.archived_at = session.updated_at; ++topic.revision; ++session.revision;
+      this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+      return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
+        data: { kind: 'topic_lifecycle', topic_id: topic.id, topic_revision: topic.revision, archived_at: topic.archived_at } } } as T;
     }
     return super.invoke<T>(name, args);
   }
@@ -118,6 +141,22 @@ class TreeLayoutTransport extends AppTransport {
     // The agent renames an item above the reading row to a much longer name: it wraps to more lines.
     if (change === 'grow-above') { items['9']!.question = 'Another item 9, renamed to a much longer name that wraps over several lines in the Map. '.repeat(3); ++items['9']!.revision; }
     if (change === 'session-ends') { session.state = 'closed'; session.closed_at = session.updated_at; }
+    // The connection lines above the Map (SPEC 12.3, 12.6, 12.8): the agent stops and returns, the connection drops, a read fails
+    // (the Map keeps its last good copy) and comes back.
+    const binding = session.bindings[session.active_binding_id!]!;
+    if (change === 'agent-stops') { binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; }
+    // The host's own report outranks the stored state, so the drop and the return are reported as the host would.
+    const reported = (connection_state: 'connected' | 'reconnecting') => this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation,
+      observation: { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
+        source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never });
+    if (change === 'connection-drops') { binding.connection_state = 'reconnecting'; reported('reconnecting'); return; }
+    if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; reported('connected'); }
+    if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
+    if (change === 'read-returns') this.failReads = false;
+    // SPEC 12.9: the next save is lost on its way back (Ariadne can't tell whether it landed); its check can be held in flight and released.
+    if (change === 'save-unsure') { this.loseLater = true; return; }
+    if (change === 'save-hold') { this.saveGate = new Promise<void>(resolve => { this.releaseSave = resolve; }); return; }
+    if (change === 'save-release') { this.saveGate = null; this.releaseSave(); return; }
     // The dependency of the last Blocked item is done: it leaves the Blocked filter by itself.
     if (change === 'settle') { items['2']!.status = 'done'; ++items['2']!.revision; }
     // An Ack landing from elsewhere (the Graph has no Ack button): the item takes its target status and is no longer to ack.
@@ -206,6 +245,8 @@ const query = new URLSearchParams(window.location.search);
 const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter'), continuable: query.has('continuable') });
 // The specs drive agent writes and seen marks through this handle.
 (window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
+// The notice stack and the toast, which the Map must never move for (notices-still.spec.mts).
+(window as unknown as { floating: { notices: typeof notices; toasts: typeof toasts } }).floating = { notices, toasts };
 createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
   : query.has('grid') ? <ActionGridFixture />
   : <DesktopApp service={createDesktopService(transport)} />);

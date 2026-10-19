@@ -62,3 +62,15 @@
 .change-marker[data-form="diamond"][data-kind="changed"] > i {
   border: 1.5px solid var(--attention);
 }
+
+/* Seen (SPEC 3.7, transient): medium, quiet text, a 1px ring, a 10px check where the diamond was. */
+.change-marker[data-kind="seen"] {
+  gap: 4px;
+  height: 17px;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  font-size: calc(10.5px * var(--text-scale));
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+}

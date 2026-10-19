@@ -2,6 +2,7 @@
 // `R` is the caller's own session route; the components only hand it back through callbacks.
 import type { ReactNode } from 'react';
 import type { RunState } from '../topbar/model';
+import type { WordsRead } from '../remove/words';
 
 export interface PageSession<R> {
   readonly route: R;
@@ -151,6 +152,8 @@ export interface RemoveProjectDialogProps {
   readonly sessionCount: number;
   /** Questions waiting on me in it; they go too, unanswered. */
   readonly waitingCount: number;
+  /** The owner's words in its sessions, read when the dialog opens (null while reading); Remove waits until all are shown. */
+  readonly words: WordsRead | null;
   readonly busy?: boolean;
   readonly error?: string;
   readonly onRemove: () => void;

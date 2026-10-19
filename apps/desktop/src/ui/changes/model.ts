@@ -1,44 +1,20 @@
 import type { Immutable } from '../../data/session-store';
-import type { Session } from '../../generated/domain/models';
+import type { Item, Session } from '../../generated/domain/models';
 import type { ChangeCard, ChangeRow } from '../../selectors/changes/card';
-import { changeRow } from '../../selectors/changes/card';
+import { changeCard, changeRow } from '../../selectors/changes/card';
+import { peekNames } from '../peek/names';
 import { activeItems } from '../../selectors/removed';
 
-export interface CardGroup { readonly label: string; readonly rows: readonly ChangeRow[] }
-export interface LimitedGroups {
-  readonly shown: readonly CardGroup[];
-  readonly hidden: readonly CardGroup[];
-  readonly withinGroup: CardGroup | null;
-  readonly summary: string;
-}
+/** What an answer did to one item, in the Because card's words (SPEC 6.8). */
+export type EffectKind = 'created' | 'changed' | 'blocked';
+export interface Effect { readonly kind: EffectKind; readonly row: ChangeRow; readonly note: string | null }
+export interface LimitedEffects { readonly shown: readonly Effect[]; readonly more: number }
 
-/** Keep groups whole, except an oversized first group; never hide one name. */
-export function limitGroups(groups: readonly CardGroup[], expanded = false, withinGroupExpanded = false): LimitedGroups {
-  const nonempty = groups.filter(group => group.rows.length);
-  const shown: CardGroup[] = [], hidden: CardGroup[] = [];
-  let count = 0, stopped = false, withinGroup: CardGroup | null = null;
-  for (const group of nonempty) {
-    if (!stopped && count + group.rows.length <= 5) {
-      shown.push(group);
-      count += group.rows.length;
-    } else if (!shown.length) {
-      shown.push({ label: group.label, rows: group.rows.slice(0, 5) });
-      withinGroup = { label: group.label, rows: group.rows.slice(5) };
-      stopped = true;
-    } else {
-      hidden.push(group);
-      stopped = true;
-    }
-  }
-  const remaining = hidden.reduce((sum, group) => sum + group.rows.length, 0);
-  if (remaining + (withinGroup?.rows.length ?? 0) === 1) return { shown: nonempty, hidden: [], withinGroup: null, summary: '' };
-  const displayed = withinGroupExpanded && withinGroup ? nonempty.slice(0, 1) : shown;
-  return {
-    shown: expanded ? [...displayed, ...hidden] : displayed,
-    hidden: expanded ? [] : hidden,
-    withinGroup: withinGroupExpanded ? null : withinGroup,
-    summary: !expanded && remaining ? `and ${remaining} more: ${hidden.map(group => `${group.rows.length} ${group.label.toLowerCase()}`).join(', ')}` : '',
-  };
+/** Five effects show; a list that would hide only one shows it too, so "and 1 more" never stands for a single name. */
+export const EFFECTS_SHOWN = 5;
+export function limitEffects(effects: readonly Effect[], expanded = false): LimitedEffects {
+  if (expanded || effects.length <= EFFECTS_SHOWN + 1) return { shown: effects, more: 0 };
+  return { shown: effects.slice(0, EFFECTS_SHOWN), more: effects.length - EFFECTS_SHOWN };
 }
 
 const settled = (status: string | null | undefined) => status == null || ['done', 'decided', 'dropped'].includes(status);
@@ -67,11 +43,37 @@ export function newlyBlocked(session: Immutable<Session>, card: ChangeCard): Rea
   return result;
 }
 
-export function answerGroups(session: Immutable<Session>, card: ChangeCard, blocked = newlyBlocked(session, card)): readonly CardGroup[] {
+/** Created, then Changed (updated and replaced), then Blocked, each in Map order. Hidden-by-rewording rows are not effects. */
+export function answerEffects(session: Immutable<Session>, card: ChangeCard, blocked = newlyBlocked(session, card)): readonly Effect[] {
   const changedIds = new Set([...card.groups.updated, ...card.groups.replaced, ...card.groups.new].map(row => row.item.id));
-  const rows = activeItems(session).filter(item => blocked.has(item.id) && !changedIds.has(item.id));
-  return [{ label: 'Updated', rows: card.groups.updated }, { label: 'Replaced', rows: card.groups.replaced },
-    { label: 'New', rows: card.groups.new }, { label: 'Now blocked', rows: rows.map(item => changeRow(session, item, [])) }];
+  const labels = peekNames(session);
+  const waitsOn = (item: Immutable<Item>) => (item.depends_on ?? []).filter(id => !settled(session.items[id]?.status)).map(id => `“${labels.get(id) ?? session.items[id]?.question ?? id}”`);
+  const created = card.groups.new.map((row): Effect => ({ kind: 'created', row, note: row.reasons[0] ?? (row.item.question !== labels.get(row.item.id) ? row.item.question : null) }));
+  const changed = [...card.groups.updated, ...card.groups.replaced].map((row): Effect => ({ kind: 'changed', row, note: row.reasons[0] ?? null }));
+  const stopped = activeItems(session).filter(item => blocked.has(item.id) && !changedIds.has(item.id))
+    .map((item): Effect => ({ kind: 'blocked', row: changeRow(session, item, []), note: waitsOn(item).length ? `waits on ${waitsOn(item).join(', ')}` : null }));
+  return [...created, ...changed, ...stopped];
+}
+
+/** The input behind an owner message: its own message id, or the answer's. Null for an agent message or a plain reply with no input. */
+export function answerInputId(session: Immutable<Session>, messageId: string): string | null {
+  return Object.values(session.inputs).find(value => value?.message_id === messageId)?.id
+    ?? session.answers.find(value => value.message_id === messageId)?.input_id ?? null;
+}
+
+/**
+ * The newest owner message whose answer changed something: the one place the Because card shows (SPEC 5.3 item 8). The owner's
+ * messages are matched to their answer by message id, as the input's own message or the answer's.
+ */
+export function latestChangedAnswer(session: Immutable<Session>, entries: readonly { readonly id: string; readonly you?: unknown }[]): string | null {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!;
+    const inputId = entry.you ? answerInputId(session, entry.id) : null;
+    if (!inputId) continue;
+    const card = changeCard(session, inputId);
+    if (card.total || card.groups.reworded.length) return entry.id;
+  }
+  return null;
 }
 
 export function readAs(session: Immutable<Session>, card: ChangeCard): readonly string[] {

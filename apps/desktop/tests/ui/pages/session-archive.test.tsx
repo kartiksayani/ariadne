@@ -107,7 +107,8 @@ async function barrierSetup(archived = false, confirmation = false) {
   const view = confirmation
     ? render(<ArchiveSessionDialog store={store} actions={actions} agent="codex" onClose={onClose} onSaved={onSaved} />)
     : archived ? render(<ArchivePage navigation={navigation} actions={controllers} projects={navigation.getSnapshot().projects!.projects.items}
-      sessions={navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined} />)
+      sessions={navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined}
+      onAskRemove={() => undefined} onReadWords={async () => ({ words: [], complete: true })} />)
     : render(<SessionLists navigation={navigation} actions={controllers} projects={[navigation.getSnapshot().projects!.projects.items[0]!]} single
       sessions={navigation.getSnapshot().sessions!.sessions.items} now={Date.now()} narrow={false} disabled={false} onOpenSession={() => undefined} />);
   return { transport, session, store, actions, controllers, navigation, onSaved, onClose, ...view };
@@ -423,7 +424,8 @@ describe('Session archive cards', () => {
     second.name = fixture.session.name; second.state = 'closed'; second.closed_at = second.updated_at; second.archived_at = second.updated_at;
     await fixture.navigation.refresh();
     fixture.rerender(<ArchivePage navigation={fixture.navigation} actions={fixture.controllers} projects={fixture.navigation.getSnapshot().projects!.projects.items}
-      sessions={fixture.navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined} />);
+      sessions={fixture.navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined}
+      onAskRemove={() => undefined} onReadWords={async () => ({ words: [], complete: true })} />);
     const invoke = fixture.transport.invoke.bind(fixture.transport);
     vi.spyOn(fixture.transport, 'invoke').mockImplementation(async (name, args) => name === 'session_get'
       ? { api_version: 1, ok: false, error: { code: 'io_error', message: 'Fixture read failed', hint: '', retryable: true, field_errors: [] } }
@@ -448,7 +450,8 @@ describe('Session archive cards', () => {
     fixture.rerender(<ArchivePage navigation={fixture.navigation} actions={fixture.controllers} projects={fixture.navigation.getSnapshot().projects!.projects.items}
       sessions={fixture.navigation.getSnapshot().sessions!.sessions.items}
       snapshots={new Map([[sessionKey(route), fixture.session], [sessionKey({ ...route, session_id: secondId }), second]])}
-      now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined} />);
+      now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined}
+      onAskRemove={() => undefined} onReadWords={async () => ({ words: [], complete: true })} />);
     for (const button of screen.getAllByRole('button', { name: `Restore ${topic.name}` })) {
       await act(async () => { fireEvent.click(button); });
     }
@@ -585,8 +588,8 @@ describe('Session archive cards', () => {
     const transport = await setup();
     await archive(); await unfold();
     openRemove();
-    expect(screen.getByRole('alertdialog')).toBeTruthy();
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('dialog', { name: /^Remove / })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('dialog', { name: /^Remove / })).getByRole('button', { name: /^Cancel/ }));
     expect(cardButton('Restore')).toBeTruthy();
     expect(queryCardButton('Reopen')).toBeNull();
     const session = transport.sessions.get(route.session_id)!, item = session.items['1']!;
@@ -621,7 +624,9 @@ describe('Session archive cards', () => {
     expect(rowClosed()).toBe(true);
     await archive(); await unfold(); notices.clear();
     openRemove();
-    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove session' })); });
+    // Remove waits until the session's words are read and quoted (E27).
+    const remove = await waitFor(() => { const button = within(screen.getByRole('dialog', { name: /^Remove / })).getByRole<HTMLButtonElement>('button', { name: 'Remove session' }); expect(button.disabled).toBe(false); return button; });
+    await act(async () => { fireEvent.click(remove); });
     await waitFor(() => expect(card()).toBeNull());
     fireEvent.click((await screen.findByRole('button', { name: 'Undo' })));
     await waitFor(() => expect(card()).not.toBeNull());

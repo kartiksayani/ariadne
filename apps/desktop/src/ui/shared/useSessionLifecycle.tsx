@@ -1,16 +1,16 @@
 import { itemRemoved } from '../../selectors/removed';
 // Close session, archive and restore topics. Archive never refuses (ADR-0090):
-// a topic with open items or unsent messages asks one plain confirmation that
-// says what stays and what is cancelled; one with neither archives at once.
-// Either way an "Archived" banner offers Undo.
+// it always asks first (10.13), naming the questions waiting on the owner that
+// leave with it. After it, the Map shows a strip in the topic's place and a toast,
+// both with Undo, until Undo or a session switch (E33).
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CoreFailure, plainFailure, type ServiceFailure } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import type { SessionActions } from '../../components/bindings/actions';
 import { unconfirmedText } from '../../components/bindings/unconfirmed';
 import { Dialog } from '../dialogs/Dialog';
-import { ConfirmDialog } from '../dialogs/ConfirmDialog';
-import { archiveImpact, archiveWarning, closeImpact, closeWarning } from '../../components/history-actions/selectors';
+import { closeImpact, closeWarning } from '../../components/history-actions/selectors';
+import { ArchiveTopicDialog, archiveWaiting } from '../dialogs/ArchiveTopicDialog';
 import { announceClosed } from '../pages/SessionDialogs';
 import { agentName, ownerName, sessionPhrase, sessionWhen } from '../shell/model';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
@@ -50,8 +50,10 @@ export interface SessionLifecycle {
   readonly state: SessionLifecycleState;
   /** Rename against the latest ready session capture. */
   readonly rename: (name: string, description: string) => Promise<string | null>;
-  /** Archive: confirm first when open items stay or unsent messages are cancelled, else at once. */
+  /** Archive: always confirm first (10.13). */
   readonly archive: (topicId: string) => void;
+  /** The open Archive confirmation's "Archive topic" (what its dialog runs); nothing when none is open. */
+  readonly confirmArchive: () => void;
   readonly restore: (topicId: string) => void;
   readonly archived: Archived | null;
   readonly undo: () => void;
@@ -74,7 +76,7 @@ const idleSnapshot = () => null;
 /** No session: every control does nothing and the lifecycle reads busy. */
 const idle: SessionLifecycle = Object.freeze({
   session: noop, close: noop, reopen: noop, restoreSession: noop, archiveTopic: noop, restoreTopic: noop, copySessionId: () => Promise.resolve(false),
-  state: null, rename: () => Promise.resolve(loadingError), archive: noop, restore: noop, archived: null, undo: noop, dismiss: noop,
+  state: null, rename: () => Promise.resolve(loadingError), archive: noop, confirmArchive: noop, restore: noop, archived: null, undo: noop, dismiss: noop,
   busy: true, error: null, errorCount: 0, pending: null, reconcile: noop, dialog: null, reviewing: false,
 });
 type SessionStanding = Exclude<SessionLifecycleState, null>;
@@ -191,7 +193,7 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
     const saved = await run({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } }, current);
     if (saved) {
       const receipt = actions.getSnapshot().receipt, data = receipt && 'data' in receipt ? receipt.data : undefined;
-      setArchived({ topicId, name: topic.name, waiting, cancelled: data?.kind === 'topic_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0 });
+      setArchived({ topicId, name: topic.short?.trim() || topic.name, waiting, cancelled: data?.kind === 'topic_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0 });
     }
     return saved;
   };
@@ -200,8 +202,9 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
     void withReady(`archive:${topicId}`, current => {
       const topic = current.topics[topicId];
       if (!topic || topic.archived_at !== null) { setError(topic ? 'This topic is already archived.' : 'This topic is no longer available. Reload the session and try again.'); return false; }
-      if (archiveWarning(archiveImpact(current, topicId), agent)) { setConfirming({ topicId, error: null }); return false; }
-      return archiveCurrent(topicId, current);
+      // E33: archiving a topic always asks (SPEC 10.13).
+      setConfirming({ topicId, error: null });
+      return false;
     });
   };
   const restore = (topicId: string) => {
@@ -222,19 +225,17 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
   };
 
   let dialog: ReactNode = null;
+  let confirmArchive = noop;
   const confirmed = confirming && session?.topics[confirming.topicId];
   if (confirming && session && confirmed && confirmed.archived_at === null && !operation.pending) {
     // The confirmation reads the topic as it is now; an agent write meanwhile only updates its words.
-    const warning = archiveWarning(archiveImpact(session, confirmed.id), agent) ?? 'You can restore it any time.';
-    dialog = <ConfirmDialog title={`Archive “${confirmed.name}”?`} body={warning} confirmLabel="Archive topic" busy={disabled}
-      error={confirming.error} onCancel={() => { if (cancelWait()) setConfirming(null); }}
-      onConfirm={() => {
+    const waitingNow = archiveWaiting(session, confirmed.id);
+    const confirm = () => {
+        if (disabled) return;
         setConfirming(value => value && { ...value, error: null });
         let warningChanged = false;
         void withReady(`archive:${confirmed.id}`, current => {
-          const binding = current.active_binding_id ? current.bindings[current.active_binding_id] : null;
-          const currentWarning = archiveWarning(archiveImpact(current, confirmed.id), binding ? agentName(binding.adapter_id) : 'the agent') ?? 'You can restore it any time.';
-          if (currentWarning !== warning) {
+          if (archiveWaiting(current, confirmed.id) !== waitingNow) {
             warningChanged = true;
             setConfirming(value => value && { ...value, error: null });
             return false;
@@ -248,7 +249,10 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
           setConfirming(current => current && { ...current, error: current.error ?? (actions.session.getSnapshot().status !== 'ready' || actions.session.getSnapshot().error
             ? loadingError : plainFailure(actions.getSnapshot().error, 'The topic was not archived. Try again.')) });
         });
-      }} />;
+      };
+    confirmArchive = confirm;
+    dialog = <ArchiveTopicDialog name={confirmed.short?.trim() || confirmed.name} items={Object.values(session.items).filter(item => item?.topic_id === confirmed.id && !itemRemoved(session, item.id)).length}
+      waiting={waitingNow} agent={agent} busy={disabled} error={confirming.error} onCancel={() => { if (cancelWait()) setConfirming(null); }} onConfirm={confirm} />;
   } else if (review && session) {
     const closing = review.kind === 'session_close';
     // Close and reopen act on the session as it is now: an agent write meanwhile never holds them.
@@ -327,7 +331,7 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
       return copySessionReference(actions.session.getSnapshot().route.session_id, () => copies.current === attempt);
     },
     state: !session ? null : session.archived_at != null ? 'archived' : session.state === 'closed' ? 'closed' : 'active',
-    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, errorCount, dialog, reviewing: dialog !== null,
+    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, errorCount, dialog, reviewing: dialog !== null, confirmArchive,
     pending: operation.pending && !review ? unconfirmedText(operation.pending.command.command) : null,
     reconcile: () => {
       if (operation.writing) return;

@@ -8,6 +8,7 @@ import type { WaitingStore } from '../../selectors/waiting/store';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
 import { notices } from '../pages/notices';
 import { binView, removalNotice, useRestoreConfirmation } from './AgentBin';
+import { agentName } from '../shell/model';
 
 interface Props {
   readonly waiting: WaitingStore;
@@ -16,6 +17,7 @@ interface Props {
   readonly selectedSession: Immutable<Session> | null;
   readonly onTree: (route: SessionRef) => void;
 }
+const agentOf = (session: Immutable<Session>) => { const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null; return binding ? agentName(binding.adapter_id) : 'The agent'; };
 const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 /** Observe all loaded sessions without rerendering the selected workspace on other sessions' updates. */
 export function AgentRemovalNotices({ waiting, controllers, navigation, selectedSession, onTree }: Props) {
@@ -38,15 +40,15 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
         if (seenRemovals.current.has(id)) continue;
         seenRemovals.current.add(id);
         const route = { project_id: session.project_id, session_id: session.id };
-        notices.push({ id, icon: 'ph ph-trash', text: removalNotice(session, removal), dismissible: true, actions: [
+        notices.push({ id, icon: 'ph ph-trash', text: removalNotice(session, removal, agentOf(session)), actions: [
           { label: 'Restore', run: () => {
             const actions = controllers.forSession(navigation.opened.open(route));
             void restoreConfirmation.restore(actions, removal.topic_id, removal.item_id).then(({ error, restored }) => {
-              if (error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: error, dismissible: true });
+              if (error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: error });
               else if (restored) notices.dismiss(id);
             });
           } },
-          { label: 'View', run: () => {
+          { label: 'Open the bin', run: () => {
             let failure: unknown = null;
             void navigation.navigate({ kind: 'session', session: route }, null, undefined, undefined, error => { failure = error; });
             const request = navigation.getNavigationRequest();
@@ -54,13 +56,13 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
             void navigation.getNavigationCompletion(request).then(async saved => {
               if (!current()) return;
               if (!saved) {
-                if (failure) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: navigationFailure(failure), dismissible: true });
+                if (failure) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: navigationFailure(failure) });
                 return;
               }
               const actions = controllers.forSession(navigation.opened.open(route));
               const ready = await waitForLifecycleReady(actions);
               if (!current()) return;
-              if (!ready.ok) { if (ready.error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: ready.error, dismissible: true }); return; }
+              if (!ready.ok) { if (ready.error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: ready.error }); return; }
               const topic = ready.session.topics[removal.topic_id], scope = removal.item_id && !topic?.removed_at ? removal.topic_id : null;
               onTree(route);
               const preferences = navigation.getSnapshot().preferences;
@@ -74,7 +76,7 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
               } }, preferences.revision);
               if (!current()) return;
               if (!opened) {
-                notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: 'The bin could not be opened. Try View again.', dismissible: true }); return;
+                notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: 'The bin could not be opened. Try Open the bin again.' }); return;
               }
               binView.reveal(route, scope);
             });

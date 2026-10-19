@@ -5,6 +5,7 @@ import type { Immutable } from '../../data/session-store';
 import type { SessionActions } from '../../components/bindings/actions';
 import { ackTarget } from '../../selectors/ack';
 import { notices } from '../pages/notices';
+import { toasts } from '../shell/toast';
 import { navigationVisits } from '../navigation/visits';
 import { isViewConflict } from './conflictNotice';
 import { shortLabel } from './short';
@@ -108,7 +109,7 @@ export interface AckHold {
   undo(itemId: string): void;
   /**
    * A view that is mounted and would draw "✓ Acked · Undo" for these items says so, and calls the returned function when it
-   * goes away. While an item is held and nothing shows it, a notice carries the Undo; the notice leaves when a view shows it again.
+   * goes away. While an item is held and nothing shows it, a toast carries the Undo; the toast leaves when a view shows it again.
    */
   showing(itemIds: Iterable<string>): () => void;
   /** Saves every held Ack now. Used when the owner leaves the session and when the application closes. */
@@ -126,6 +127,8 @@ class SessionAckHold implements AckHold {
   private readonly shown = new Map<string, number>();
   /** Items whose Undo is carried by a notice at the moment. */
   private readonly announced = new Set<string>();
+  /** Items whose save failed and was tried again from the notice: their success says so in a toast. */
+  private readonly retried = new Set<string>();
   /** The items inside their 6 s window. A new set only when it changes, so subscribers can compare by identity. */
   held: ReadonlySet<string> = NO_ITEMS;
   constructor(readonly actions: SessionActions) {}
@@ -139,17 +142,20 @@ class SessionAckHold implements AckHold {
     this.listeners.forEach(listener => listener());
     registryListeners.forEach(listener => listener());
   }
-  /** Every held item has an Undo somewhere: in a view that shows it, else in a notice. */
+  /** Every held item has an Undo somewhere: in a view that shows it, else in the toast (E19). */
   private reconcile() {
     for (const [id, entry] of this.entries) {
       const unshown = !entry.saving && !(this.shown.get(id) ?? 0);
       if (unshown && !this.announced.has(id)) {
         this.announced.add(id);
-        notices.push({ id: this.heldNoticeId(id), icon: 'ph ph-check', dismissible: true, text: `Acked “${shortLabel(entry.reviewed)}”`,
-          actions: [{ label: 'Undo', run: () => { this.undo(id); } }] });
-      } else if (!unshown && this.announced.has(id)) { this.announced.delete(id); notices.dismiss(this.heldNoticeId(id)); }
+        // The producer owns Undo's life: save() and undo() end it with toasts.expire.
+        toasts.show({ id: this.heldNoticeId(id), text: `Acked “${shortLabel(entry.reviewed)}”`, ms: ACK_HOLD_MS, undo: () => { this.undo(id); } });
+      } else if (!unshown && this.announced.has(id)) {
+        this.announced.delete(id);
+        if (entry.saving) toasts.expire(this.heldNoticeId(id)); else toasts.dismiss(this.heldNoticeId(id));
+      }
     }
-    for (const id of [...this.announced]) if (!this.entries.has(id)) { this.announced.delete(id); notices.dismiss(this.heldNoticeId(id)); }
+    for (const id of [...this.announced]) if (!this.entries.has(id)) { this.announced.delete(id); toasts.expire(this.heldNoticeId(id)); }
   }
   readonly showing = (itemIds: Iterable<string>) => {
     const ids = [...itemIds];
@@ -167,10 +173,14 @@ class SessionAckHold implements AckHold {
     const route = this.actions.session.getSnapshot().route;
     return JSON.stringify(['item-ack', route.project_id, route.session_id, itemId]);
   }
-  private refuse(itemId: string, text: string) {
-    notices.push({ id: this.noticeId(itemId), icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text });
+  private refuse(itemId: string, text: string, retry?: Immutable<Item>) {
+    notices.push({ id: this.noticeId(itemId), icon: 'ph ph-warning-circle', tone: 'problem', text,
+      // SPEC 11.1: a save that definitely failed can be tried again; the toast "Saved your Ack on “x”." follows the retry's save.
+      ...(retry ? { actions: [{ label: 'Try again', dismissOnRun: true, run: () => { this.retried.add(itemId); this.ack(retry); if (!this.entries.has(itemId)) this.retried.delete(itemId); } }] } : {}) });
   }
-  /** Where no row or Details shows the held Ack, this notice is the owner's only Undo. */
+  /** A failed save offers Try again unless the controller holds an uncertain write, which only its exact retry may settle. */
+  private retryable(reviewed: Immutable<Item>) { return this.actions.getSnapshot().pending ? undefined : reviewed; }
+  /** Where no row or Details shows the held Ack, this toast is the owner's only Undo. */
   private heldNoticeId(itemId: string) { return JSON.stringify(['ack-held', this.noticeId(itemId)]); }
   readonly ack = (item: Immutable<Item>) => {
     // A second click on a held or saving item never starts a second Ack.
@@ -191,7 +201,9 @@ class SessionAckHold implements AckHold {
     if (!entry || entry.saving) return;
     clearTimeout(entry.timer);
     this.entries.delete(itemId);
-    notices.dismiss(this.heldNoticeId(itemId));
+    // Undo ends the retry too: a later Ack of this result is a plain one and says nothing in a toast.
+    this.retried.delete(itemId);
+    toasts.dismiss(this.heldNoticeId(itemId));
     this.publish();
   };
   readonly flush = (): Promise<void> => {
@@ -202,7 +214,8 @@ class SessionAckHold implements AckHold {
     const entry = this.entries.get(id);
     if (!entry || entry.saving) return Promise.resolve();
     clearTimeout(entry.timer); entry.timer = undefined; entry.saving = true;
-    notices.dismiss(this.heldNoticeId(id));
+    // The Undo window is over; the toast's text stays until its display time ends.
+    toasts.expire(this.heldNoticeId(id));
     this.publish();
     const run: Promise<void> = ackLane(this.actions, () => this.write(id, entry.reviewed)).finally(() => {
       this.entries.delete(id); this.running.delete(run); this.publish();
@@ -215,9 +228,11 @@ class SessionAckHold implements AckHold {
     try {
       const saved = await acknowledge(this.actions, id, () => false, reviewed);
       const failure = this.actions.getSnapshot().error;
-      if (saved) navigationVisits.record(this.actions.session.getSnapshot().route, id, 'acked');
-      else if (failure && !isViewConflict(failure)) this.refuse(id, ackFailure(failure));
-    } catch (failure) { this.refuse(id, ackFailure(failure)); }
+      if (saved) {
+        navigationVisits.record(this.actions.session.getSnapshot().route, id, 'acked');
+        if (this.retried.delete(id)) toasts.show({ text: `Saved your Ack on “${shortLabel(reviewed)}”.` });
+      } else if (failure && !isViewConflict(failure)) this.refuse(id, ackFailure(failure), this.retryable(reviewed));
+    } catch (failure) { this.refuse(id, ackFailure(failure), this.retryable(reviewed)); }
   }
 }
 const holds = new WeakMap<SessionActions, SessionAckHold>();

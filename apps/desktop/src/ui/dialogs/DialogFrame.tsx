@@ -2,12 +2,14 @@
 // the bottom right with their keys. Focus stays inside; Esc cancels; Tab wraps. Pure presentation (contract C8).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { dialogControls } from '../../components/accessibility/dialog-focus';
-import { focusReturnTarget, Keycap } from '../parts/parts';
+import { copyIcon, copyLabel, focusReturnTarget, Keycap, useCopy } from '../parts/parts';
+import { copyText } from '../shared/clipboard';
 import './dialog-frame.css';
 
 export interface DialogFrameProps {
   /** The dialog's accessible name; the visible title is part of `children`. */
   readonly label: string;
+  /** 520 by default; 560 for Continue's summary step and the bin. */
   readonly width?: number;
   readonly onCancel: () => void;
   /** A press on the scrim cancels too. Leave it off when the dialog holds words that must not be lost by a stray click. */
@@ -56,9 +58,14 @@ export function DialogText({ children }: { readonly children: ReactNode }) {
   return <p className="dg-text">{children}</p>;
 }
 
-/** An amber note: what else goes with the choice. */
-export function DialogWarn({ children }: { readonly children: ReactNode }) {
-  return <div className="dg-warn"><i className="ph ph-warning-circle" aria-hidden="true" /><span>{children}</span></div>;
+/** An amber note: what else goes with the choice; `danger` for what a removal deletes (SPEC 10.2, 10.14). */
+export function DialogWarn({ children, tone = 'warn' }: { readonly children: ReactNode; readonly tone?: 'warn' | 'danger' }) {
+  return <div className={tone === 'danger' ? 'dg-warn dg-warn-danger' : 'dg-warn'}><i className="ph ph-warning-circle" aria-hidden="true" /><span>{children}</span></div>;
+}
+
+/** A quiet line with an icon (SPEC 5.10 "note line"). */
+export function DialogNote({ icon = 'ph ph-info', children }: { readonly icon?: string; readonly children: ReactNode }) {
+  return <p className="dg-note"><i className={icon} aria-hidden="true" /><span>{children}</span></p>;
 }
 
 export function DialogError({ children }: { readonly children: ReactNode }) {
@@ -69,9 +76,63 @@ export function DialogActions({ children }: { readonly children: ReactNode }) {
   return <div className="dg-actions">{children}</div>;
 }
 
-export function DialogButton({ kind, icon, kbd, children, ...rest }: {
-  readonly kind: 'primary' | 'danger' | 'ghost'; readonly icon?: string; readonly kbd?: string; readonly children: ReactNode;
+/**
+ * Button kinds (SPEC 5.10): primary and danger are filled; secondary has an edge ring; ghost has none; focus is the safe
+ * default (a secondary that shows the accent ring whenever it holds focus, e.g. "Keep them").
+ */
+export type DialogButtonKind = 'primary' | 'danger' | 'secondary' | 'focus' | 'ghost';
+
+export function DialogButton({ kind, icon, kbd, left = false, children, ...rest }: {
+  readonly kind: DialogButtonKind; readonly icon?: string; readonly kbd?: string; readonly children: ReactNode;
   readonly onClick?: () => void; readonly disabled?: boolean; readonly autoFocus?: boolean; readonly type?: 'button' | 'submit';
+  readonly title?: string;
+  /** Sits at the left of the button row ("Archive instead", "Empty the bin…"). */
+  readonly left?: boolean;
 }) {
-  return <button type="button" {...rest} className={`dg-btn dg-btn-${kind}`}>{icon && <i className={icon} aria-hidden="true" />}{children}{kbd && <Keycap>{kbd}</Keycap>}</button>;
+  return <button type="button" {...rest} className={`dg-btn dg-btn-${kind}${left ? ' dg-btn-left' : ''}`}>{icon && <i className={icon} aria-hidden="true" />}{children}{kbd && <Keycap>{kbd}</Keycap>}</button>;
+}
+
+/** Copy → Copied (or "Couldn't copy" when the write failed) for one exact text. */
+export function DialogCopy({ text, label = 'Copy', name }: { readonly text: string; readonly label?: string; readonly name?: string }) {
+  const [state, copy] = useCopy();
+  return <button type="button" className="dg-copy" aria-label={name ? `${copyLabel(state, label)} ${name}` : undefined}
+    onClick={() => { copy(() => copyText(text).then(() => true)); }}>
+    <i className={copyIcon(state)} aria-hidden="true" />{copyLabel(state, label)}</button>;
+}
+
+/**
+ * Quoted words with Copy (SPEC 10.1, 10.2, 10.11): an optional label ("Your cancelled message, about “x”") and the text
+ * exactly as written. `inList` is the card variant that sits under a list-box row.
+ */
+export function DialogQuote({ label, text, inList = false }: { readonly label?: ReactNode; readonly text: string; readonly inList?: boolean }) {
+  return <figure className={inList ? 'dg-quote dg-quote-card' : 'dg-quote'} data-testid="dialog-quote">
+    {label !== undefined
+      ? <figcaption className="dg-quote-head"><span className="dg-quote-label">{label}</span><DialogCopy text={text} /></figcaption>
+      : null}
+    <div className="dg-quote-row">
+      <blockquote className="dg-quote-text">{text}</blockquote>
+      {label === undefined && <DialogCopy text={text} />}
+    </div>
+  </figure>;
+}
+
+/** The list box (SPEC 10.11): rows divided by 1px lines on the window background. */
+export function DialogList({ label, children }: { readonly label?: string; readonly children: ReactNode }) {
+  return <ul className="dg-list" aria-label={label}>{children}</ul>;
+}
+
+/** One list-box row: icon, name, sub, an action at the right, and anything below (e.g. a quote card). */
+export function DialogListRow({ icon = 'ph ph-trash', name, sub, action, dim = false, children }: {
+  readonly icon?: string; readonly name: ReactNode; readonly sub?: ReactNode; readonly action?: ReactNode; readonly dim?: boolean;
+  readonly children?: ReactNode;
+}) {
+  return <li className={dim ? 'dg-list-row dg-list-row-dim' : 'dg-list-row'}>
+    <i className={`${icon} dg-list-icon`} aria-hidden="true" />
+    <div className="dg-list-main">
+      <div className="dg-list-name">{name}</div>
+      {sub !== undefined && <div className="dg-list-sub">{sub}</div>}
+      {children}
+    </div>
+    {action !== undefined && <div className="dg-list-action">{action}</div>}
+  </li>;
 }

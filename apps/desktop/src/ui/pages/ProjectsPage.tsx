@@ -9,6 +9,7 @@ import { CandidateList } from '../../components/navigation/Discovery';
 import { Dialog } from '../dialogs/Dialog';
 import { RemoveProjectDialog } from '../dialogs/RemoveProjectDialog';
 import type { RemoveHandler, RemoveSubject } from '../dialogs/remove';
+import type { WholeTarget, WordsRead } from '../remove/words';
 import { projectName, projectRemoval, sessionKey } from './model';
 import { ProjectsCards } from './ProjectsCards';
 import type { PageBack } from './page-types';
@@ -31,6 +32,8 @@ export interface ProjectsPageProps {
   readonly onOpenSession: (route: SessionRef) => void;
   readonly onRegister: (root: string) => void;
   readonly onRemove: RemoveHandler;
+  /** The words a project removal deletes, read fresh from every session of it (E27). */
+  readonly onReadWords: (target: WholeTarget) => Promise<WordsRead>;
   /** Under the cards: loading, empty and catalogue notes. */
   readonly children?: ReactNode;
 }
@@ -42,10 +45,10 @@ function Discover({ controller, register, sessions }: { controller: DiscoveryCon
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function ProjectsPage({ projects, sessions, snapshots, now, currentSession, back, disabled = false, navigationDisabled = disabled, discovery, onOpen, onOpenSession, onRegister, onRemove, children }: ProjectsPageProps) {
+export function ProjectsPage({ projects, sessions, snapshots, now, currentSession, back, disabled = false, navigationDisabled = disabled, discovery, onOpen, onOpenSession, onRegister, onRemove, onReadWords, children }: ProjectsPageProps) {
   const unless = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => { if (!disabled) run(...args); };
   const unlessNavigating = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => { if (!navigationDisabled) run(...args); };
-  const [removing, setRemoving] = useState<{ id: string; subject: Extract<RemoveSubject, { kind: 'project' }> } | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; subject: Extract<RemoveSubject, { kind: 'project' }>; words: WordsRead | null } | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const cards = projects.map(project => projectCardData(project, sessions, now, currentSession));
   const waiting = cards.reduce((sum, card) => sum + card.waiting, 0);
@@ -54,7 +57,10 @@ export function ProjectsPage({ projects, sessions, snapshots, now, currentSessio
     if (!project) return;
     const own = sessions.filter(session => session.project_id === id);
     const counts = projectRemoval(own.flatMap(session => snapshots.get(sessionKey(session)) ?? []));
-    setRemoving({ id, subject: { kind: 'project', name: projectName(project), path: project.canonical_root, sessions: own.length, ...counts } });
+    const subject = { kind: 'project', name: projectName(project), path: project.canonical_root, sessions: own.length, ...counts } as const;
+    setRemoving({ id, subject, words: null });
+    // Core deletes every session of the project: their words are read fresh and quoted before Remove can run (E27).
+    void onReadWords({ kind: 'project', project_id: id }).then(words => { setRemoving(current => current?.subject === subject ? { ...current, words } : current); });
   };
   return <>
     <ProjectsCards<SessionRef> back={back} sub={`${plural(projects.length, 'project')} · ${plural(waiting, 'question')} waiting on you`} projects={cards}
@@ -65,7 +71,7 @@ export function ProjectsPage({ projects, sessions, snapshots, now, currentSessio
       <div className="dialog-title">Discover sessions</div><Discover controller={discovery} register={root => { setDiscovering(false); onRegister(root); }} sessions={sessions} />
       <div className="dialog-actions"><button type="button" className="btn btn-ghost" onClick={() => setDiscovering(false)}>Done</button></div>
     </Dialog>}
-    {removing && <RemoveProjectDialog name={removing.subject.name} path={removing.subject.path} sessionCount={removing.subject.sessions} waitingCount={removing.subject.waiting}
+    {removing && <RemoveProjectDialog name={removing.subject.name} path={removing.subject.path} sessionCount={removing.subject.sessions} waitingCount={removing.subject.waiting} words={removing.words}
       onCancel={() => setRemoving(null)} onRemove={() => { const { id, subject } = removing; setRemoving(null); onRemove({ kind: 'project', project_id: id }, subject); }} />}
   </>;
 }

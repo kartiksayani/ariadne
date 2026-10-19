@@ -9,6 +9,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 import { viewportPlace } from '../map-viewport.mts';
+import { closeDetails } from './closeDetails';
 
 /** `pinned`: a topic bar stuck to the Map's top edge, which goes where the Map's edge goes. */
 interface Placed { readonly key: string; readonly top: number; readonly height: number; readonly text: number; readonly pinned: boolean }
@@ -79,12 +80,12 @@ const click = (control: Locator) => control.evaluate(element => (element as HTML
 /** Selects the reading row (its Details opens, then closes again, so the Map is as wide as before). Focus acts on it. */
 const selectReading = async (page: Page) => {
   await press(row(page, '10').getByText('Another item 10'));
-  const close = page.getByRole('button', { name: 'Close detail' });
-  await expect(close).toBeVisible();
-  await close.click();
+  await closeDetails(page, true);
   await settle(page);
   await page.mouse.move(2, 690);
 };
+/** Selects the reading row and leaves its Details open beside the Map. */
+const openDetails = async (page: Page) => { await press(row(page, '10').getByText('Another item 10')); await settle(page); };
 const bandButton = (page: Page, name: string | RegExp) => band(page).getByRole('button', { name });
 const moreActions = (page: Page) => bandButton(page, /^More actions for/);
 
@@ -101,6 +102,11 @@ const triggers: readonly Trigger[] = [
   // The popovers open over the Map and take no room in it (D18, D19).
   ['What changed opens', 'still', '12', nothing, page => press(bandButton(page, /new|changed|changes since/)),
     page => expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible()],
+  // The bigger view covers the Map and never resizes or unmounts it (alpha.21 E4): its rows keep their place as it opens and closes.
+  ['the bigger view opens', 'still', '11', openDetails, page => page.getByRole('button', { name: 'Read in a bigger view' }).click(),
+    page => expect(page.getByRole('region', { name: 'Item conversation' })).toBeVisible()],
+  ['the bigger view closes', 'still', '11', async page => { await openDetails(page); await page.getByRole('button', { name: 'Read in a bigger view' }).click(); await settle(page); },
+    page => page.getByRole('button', { name: 'Back to Map' }).click(), page => expect(page.getByRole('region', { name: 'Item conversation' })).toHaveCount(0)],
   ['Recent opens', 'still', '12', nothing, page => page.getByRole('button', { name: 'Recent' }).click(),
     page => expect(page.getByRole('dialog', { name: 'Recent items' })).toBeVisible()],
   // The band's Ack all goes with the topic's only result to ack.
@@ -180,18 +186,15 @@ const triggers: readonly Trigger[] = [
   ['the Next label changes while stepping', 'still', '11', nothing, page => press(bandButton(page, 'Next unseen')),
     page => expect(bandButton(page, /^Next unseen, 1 of 2/)).toBeVisible()],
   ['the "…" menu opens', 'still', null, nothing, page => press(moreActions(page)), page => expect(page.getByRole('menu')).toBeVisible()],
-  ['Open the bin is chosen in the "…" menu: the bin opens and scrolls into view', 'goes', null, nothing, async page => {
+  // E30: the bin is a dialog over the Map; opening it moves nothing.
+  ['Open the bin is chosen in the "…" menu: the bin dialog opens over the Map', 'still', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Open the bin/ }).click();
-  }, async page => {
-    const fold = page.getByRole('button', { name: /^Removed by agent/ });
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
-    await expect(fold).toBeInViewport();
-  }],
-  ['a topic reply opens under the band', 'held', null, nothing, async page => {
+  }, page => expect(page.getByRole('dialog', { name: /^The bin for “/ })).toBeVisible()],
+  ['a topic reply opens in Details', 'held', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Reply to topic/ }).click();
-  }, page => expect(page.getByRole('textbox', { name: 'Reply to this topic' })).toBeVisible()],
+  }, page => expect(page.getByRole('complementary', { name: 'Item detail' }).getByRole('textbox', { name: 'Reply to this topic' })).toBeVisible()],
   ['the Ack all popover opens', 'still', null, nothing, page => press(bandButton(page, /^Ack all/)),
     page => expect(page.getByRole('dialog', { name: /^Acknowledge results in/ })).toBeVisible()],
   ['the Ack all popover is cancelled', 'still', null, async page => { await press(bandButton(page, /^Ack all/)); },
@@ -213,8 +216,7 @@ async function open(page: Page, origin: string, under = 4) {
   await expect(session).toBeEnabled(); await session.click();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
   await page.evaluate(async () => { await document.fonts.ready; });
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   // Item 10 (a four-line finding that folds behind Show more) is the reading row: its top just under the band.
   await row(page, '10').evaluate((element, covered) => {
     const box = element.closest('.tree-scroll')!, header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
@@ -351,8 +353,7 @@ async function prepare(page: Page, origin: string, view: View) {
   await expect(session).toBeEnabled(); await session.click();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
   await page.evaluate(async () => { await document.fonts.ready; });
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   if (view === 'Graph') {
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
     await expect(page.locator('.graph-scroll')).toBeVisible();
@@ -500,9 +501,7 @@ test.describe('the filter row never moves the Map', () => {
     expect((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - before.y, 'the band took the row down with it').toBeGreaterThan(5);
     const at = (await row(page, reader.id).boundingBox())!;
     await page.mouse.click(at.x + 100, at.y + 10);
-    const close = page.getByRole('button', { name: 'Close detail' });
-    await expect(close).toBeVisible();
-    await close.click();
+    await closeDetails(page, true);
     await settle(page);
     const closed = (await viewportPlace(page, cellOf('Tree', reader.id)))!.y;
     await funnel(page).click();
@@ -518,9 +517,7 @@ test.describe('the filter row never moves the Map', () => {
     await scrollTo(page, 'Tree', 'middle');
     const cell =(await wholeCells(page, 'Tree'))[3]!;
     await page.mouse.click(cell.left + 100, cell.top + 10);
-    const close = page.getByRole('button', { name: 'Close detail' });
-    await expect(close).toBeVisible();
-    await close.click();
+    await closeDetails(page, true);
     await page.mouse.move(2, 690);
     await settle(page);
     const before = (await viewportPlace(page, cellOf('Tree', cell.id)))!, band = await bandBottom(page);
@@ -574,8 +571,7 @@ const goes = (page: Page, reading: string) => expect(row(page, reading)).toHaveC
 /** Item 12 is selected with Details closed, below the first row in view, and the owner has scrolled a little since. */
 const selectTwelve = async (page: Page) => {
   await press(row(page, '12').getByText('Another item 12'));
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   await expect(row(page, '12')).toHaveAttribute('aria-selected', 'true');
   await page.mouse.wheel(0, 20);
   await settle(page);
@@ -588,7 +584,6 @@ const holds: readonly Hold[] = [
     page => expect(row(page, '0')).toHaveCount(1)),
   ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
   ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
-  ...everywhere('the agent removes the reading row', risesAtTop, nothing, (page, reading) => agent(page, `remove:${reading}`), goes),
   // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
   // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
   ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
@@ -640,6 +635,82 @@ for (const [name, where, expectation, before, change, done] of holds) {
       expect(now, `${survivor} never moves down`).toBeLessThanOrEqual(was.get(survivor)! + 0.5);
       if (survivor !== read.key) expect(now, `${survivor} rises no higher than the row it replaces`).toBeGreaterThanOrEqual(was.get(read.key)! - 3);
     }
+  }));
+}
+
+// The line above the Map (SPEC 5.12) opens and clears outside the Map's own column, so the Map's top edge moves and the rows must go
+// with it: the reading row keeps its distance under the edge, at the top, middle and bottom of the Map and on a short Map. An ordinary
+// change hint is no state at all: it opens no line and moves nothing. One place differs: a line clearing while the Map is at its foot cannot
+// pull the rows up with the edge (the Map is already as far down as it goes), so there the rows keep their window place.
+const connectionLine = (page: Page) => page.getByRole('status', { name: 'Connection' });
+const lineOpens = (change: string, words: RegExp) => async (page: Page) => { await agent(page, change); await expect(connectionLine(page)).toContainText(words); };
+const lineRows: readonly (readonly [name: string, before: (page: Page) => Promise<void>, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
+  ['the agent stops running and its line opens', nothing, page => agent(page, 'agent-stops'), page => expect(connectionLine(page)).toContainText('isn’t running')],
+  ['the agent comes back and its line clears', lineOpens('agent-stops', /isn’t running/), page => agent(page, 'agent-returns'), page => expect(connectionLine(page)).toHaveCount(0)],
+  ['the connection drops and its line opens', nothing, page => agent(page, 'connection-drops'), page => expect(connectionLine(page)).toContainText('Reconnecting')],
+  ['a read fails and the last-good-copy line opens', nothing, page => agent(page, 'read-fails'), page => expect(connectionLine(page)).toContainText('last good copy')],
+  ['the read comes back and the line clears', lineOpens('read-fails', /last good copy/), page => agent(page, 'read-returns'), page => expect(connectionLine(page)).toHaveCount(0)],
+  ['an ordinary change hint arrives (no line)', nothing, page => stale(page),
+    async page => { await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'stale'); await expect(connectionLine(page)).toHaveCount(0); }],
+];
+for (const where of ['top', 'middle', 'bottom'] as const) for (const [name, before, change, done] of lineRows) {
+  test(`the Map keeps the reading row under its edge when ${name} at the ${where}`, ({ page }) => served(page, async () => {
+    await before(page);
+    await settle(page);
+    await goTo(page, where);
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    await change(page);
+    await done(page);
+    await settle(page);
+    const moved = where === 'bottom' && name.includes('clears') ? 0 : await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place`).toBeLessThanOrEqual(3);
+  }));
+}
+for (const [name, before, change, done] of lineRows) {
+  test(`the Map keeps the reading row under its edge on a short Map when ${name}`, ({ page }) => served(page, async () => {
+    await page.setViewportSize({ width: 1000, height: 4400 });
+    await before(page);
+    await goTo(page, 'top');
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    await change(page);
+    await done(page);
+    await settle(page);
+    const moved = await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place under the Map's edge`).toBeLessThanOrEqual(3);
+  }));
+}
+
+// 12.9: a save whose outcome is unknown opens a line above the Map; Try again checks it, and the line stays up while the check is in
+// flight (it neither closes nor reopens), then clears when the check lands. The reading row keeps its distance under the edge throughout.
+// (The line opening is the lineRows' job; here the owner's Later on a middle row is lost, then the Map is taken to the place under test.)
+for (const where of ['top', 'middle', 'bottom'] as const) {
+  test(`the Map keeps the reading row, and the unsure-save line stays up through Try again, at the ${where}`, ({ page }) => served(page, async () => {
+    const first = await readingRow(page);
+    await agent(page, 'save-unsure');
+    await point(page, first.key);
+    await press(row(page, first.key).getByRole('button', { name: /^Later/ }));
+    await expect(connectionLine(page)).toContainText('isn’t sure your last change was saved');
+    await goTo(page, where);
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    // Try again: the check is in flight (held), and the line is the same line, in the same place, for as long as it runs.
+    await agent(page, 'save-hold');
+    const line = await connectionLine(page).elementHandle();
+    await press(connectionLine(page).getByRole('button', { name: 'Try again' }));
+    for (let frame = 0; frame < 12; frame++) {
+      await settle(page);
+      expect(await line!.evaluate(node => node.isConnected), 'the line is never taken down and put up again').toBe(true);
+      await expect(connectionLine(page)).toContainText('isn’t sure your last change was saved');
+      expect(await mapTop(page) - edge, 'the Map’s edge does not move while the check runs').toBeCloseTo(0, 0);
+      expect(Math.abs((await windowTop(page, read.key))! - place)).toBeLessThanOrEqual(3);
+    }
+    await agent(page, 'save-release');
+    await expect(connectionLine(page)).toHaveCount(0);
+    await settle(page);
+    const moved = where === 'bottom' ? 0 : await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place when the line clears`).toBeLessThanOrEqual(3);
   }));
 }
 
@@ -702,7 +773,7 @@ test('the Map holds when a tall clipped row grows while it is the only row on sc
 const stale = (page: Page) => page.evaluate(() => (window as unknown as { treeLayout: { stale(): void } }).treeLayout.stale());
 const shortMap: readonly (readonly [name: string, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
   ['a row is added above', page => agent(page, 'add-top'), page => expect(row(page, '0')).toHaveCount(1)],
-  ['a notice opens above', stale, page => expect(page.getByText('Showing last valid data')).toBeVisible()],
+  ['the last-good-copy line opens above', page => agent(page, 'read-fails'), page => expect(page.getByRole('status', { name: 'Connection' })).toContainText('last good copy')],
 ];
 for (const [name, change, done] of shortMap) test(`the Map holds on a short Map when ${name}`, ({ page }) => served(page, async () => {
   await page.setViewportSize({ width: 1000, height: 4400 });
@@ -871,3 +942,174 @@ test('a row above that shrinks at the bottom is clamped by the browser, and the 
   // One step up only: back down at the Map's end the rows no longer reach the row's old place (pinned or not), a separate matter.
   await pinHolds(page, '17', place, 'after a row above shrank at the bottom', [1.2]);
 }));
+
+// Details' body below the head never moves when the dwell clears the head's marker (alpha.21 E7-E9): the marker slot has one width
+// for New, Changed and Seen, and the change box's title keeps one line. Measured at the narrowest Details and a larger text size,
+// where the title and the badge row would otherwise wrap.
+test('Details keeps the change box and what is below it still when the head goes from unseen to seen, at 320px and text size 1.2', ({ page }) => served(page, async () => {
+  const detail = page.locator('.item-detail');
+  // Item 10 opens Details first, so the column can be narrowed and the text enlarged before the item with a change box is chosen.
+  await press(row(page, '10').getByText('Another item 10'));
+  await expect(detail).toBeVisible();
+  const edge = page.getByRole('separator', { name: 'Resize detail panel' });
+  await edge.focus();
+  await page.keyboard.press('Home');
+  await expect.poll(async () => (await page.locator('.shell-detail').boundingBox())!.width).toBeLessThanOrEqual(320);
+  await textScale(page, 1.2);
+  await settle(page);
+  await press(row(page, '12').getByText('Another item 12'));
+  const box = detail.getByTestId('change-box'), marker = detail.locator('.detail-status').getByTestId('change-marker');
+  await expect(box).toHaveAttribute('data-state', 'unseen');
+  await expect(marker).toHaveAttribute('data-kind', 'changed');
+  const places = () => detail.evaluate(element => {
+    const top = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().top ?? null;
+    const height = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().height ?? null;
+    const left = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().left ?? null;
+    const width = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().width ?? null;
+    return { slot: width('.detail-marker-slot'), pill: width('[data-testid="change-marker"]'), meta: left('.detail-meta'), metaTop: top('.detail-meta'), head: height('.detail-head'), box: height('[data-testid="change-box"]'), title: height('.change-box-title'),
+      actions: top('.detail-actions-row'), chat: top('[aria-label="Conversation"]') };
+  });
+  const unseen = await places();
+  expect(unseen.actions, 'the actions row is drawn').not.toBeNull();
+  expect(unseen.slot, 'the marker has its own slot').not.toBeNull();
+  expect(unseen.pill!, 'the Changed pill fits its slot').toBeLessThanOrEqual(unseen.slot!);
+  expect(unseen.title, 'the title keeps one line (within the head\'s 26px)').toBeLessThanOrEqual(26);
+  // The dwell clears the head: the change box says "Changed at", the marker becomes Seen, and nothing below moves.
+  await expect(box).toHaveAttribute('data-state', 'seen');
+  await expect(marker).toHaveAttribute('data-kind', 'seen');
+  await settle(page);
+  const after = await places();
+  expect(after.pill!, 'the Seen pill fits the same slot').toBeLessThanOrEqual(after.slot!);
+  expect({ ...after, pill: 0 }).toEqual({ ...unseen, pill: 0 });
+}));
+
+// E29: a removed row's place keeps a strip, and the hold hands the reading row's place to it, at the top, the middle and the
+// bottom; at commit the strip goes and the row the owner now reads keeps its place.
+const placeTop = async (page: Page, text: RegExp, skip: readonly string[] = []) => {
+  const strips = page.locator('.tree-place', { hasText: text });
+  for (const strip of await strips.all()) if (!skip.includes((await strip.getAttribute('data-row')) ?? '')) return (await strip.boundingBox())?.y ?? null;
+  return null;
+};
+/** The strips already in the Map (the fixture's own agent-removed item has one). */
+const stripKeys = async (page: Page) => page.locator('.tree-place').evaluateAll(strips => strips.map(strip => strip.getAttribute('data-row') ?? ''));
+/** The owner removes `id` from its hover bar; an item with others below it asks first. */
+const ownerRemoves = async (page: Page, id: string) => {
+  await point(page, id);
+  await press(row(page, id).getByRole('button', { name: /^Remove/ }));
+  const asking = page.getByRole('dialog', { name: /^Remove “/ });
+  if (await asking.count()) await asking.getByRole('button', { name: /^Remove (item|\d+ items)$/ }).click();
+};
+const stripCases: readonly (readonly [name: string, text: RegExp, change: (page: Page, reading: string) => Promise<void>])[] = [
+  ['the owner removes the reading row', /^Removed “/, ownerRemoves],
+  ['the agent removes the reading row', /removed “/, (page, reading) => agent(page, `remove:${reading}`)],
+];
+test.describe('strips hold the removed row\'s place', () => {
+  for (const where of ['top', 'middle', 'bottom'] as const) for (const [name, text, change] of stripCases) {
+    test(`${name} at the ${where}: its strip takes its window place`, ({ page }) => served(page, async () => {
+      await goTo(page, where);
+      await settle(page);
+      const read = await readingRow(page), was = (await windowTop(page, read.key))!, earlier = await stripKeys(page);
+      await change(page, read.key);
+      await expect(row(page, read.key)).toHaveCount(0);
+      await expect.poll(async () => (await stripKeys(page)).length, 'a new strip shows').toBe(earlier.length + 1);
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - was), 'the strip is where the row was').toBeLessThanOrEqual(3);
+    }));
+  }
+  for (const where of ['top', 'middle', 'bottom'] as const) {
+    test(`the owner's removal commits at the ${where}: the strip goes and the row read now keeps its place`, ({ page }) => served(page, async () => {
+      await goTo(page, where);
+      await settle(page);
+      const read = await readingRow(page);
+      await ownerRemoves(page, read.key);
+      const strip = page.locator('.tree-place', { hasText: /^Removed “/ });
+      await expect(strip).toBeVisible();
+      await settle(page);
+      const now = await readingRow(page), y = (await windowTop(page, now.key))!, height = (await strip.boundingBox())!.height;
+      await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+      await expect(strip).toHaveCount(0);
+      await settle(page);
+      // At the top the Map has no room above to scroll into, so the rows close the strip's gap and nothing more.
+      const room = where === 'top' ? height + 2 : 0;
+      await expect.poll(async () => Math.abs((await windowTop(page, now.key))! - y), `${now.key} keeps its window place`).toBeLessThanOrEqual(3 + room);
+    }));
+  }
+  test('Undo on the strip puts the row back where the strip was', ({ page }) => served(page, async () => {
+    const read = await readingRow(page), was = (await windowTop(page, read.key))!;
+    await ownerRemoves(page, read.key);
+    const strip = page.locator('.tree-place', { hasText: /^Removed “/ });
+    await expect(strip).toBeVisible();
+    await press(strip.getByRole('button'));
+    await expect(row(page, read.key)).toHaveCount(1);
+    await settle(page);
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - was), 'the row is back in its place').toBeLessThanOrEqual(3);
+    await expect(strip).toHaveCount(0);
+  }));
+});
+
+// E29, E33: a parent's strip and a topic's archive strip take the place of what they stand for, on a short Map (no room
+// to scroll) and when the reading row is taller than the window. Item 1 is the parent (1.1 below it, in the first topic);
+// the second topic ("Continued context", items 8 to 18) is archived.
+const parentStrip = /^Removed “.+” and the \d+ items? below it$/, archiveStrip = /^Archived “Continued context” · \d+ items? · Undo$/;
+const ownerArchives = async (page: Page) => {
+  await press(moreActions(page));
+  await page.getByRole('menuitem', { name: /^Archive topic/ }).click();
+  await page.getByRole('dialog', { name: /^Archive the “Continued context” topic\?$/ }).getByRole('button', { name: 'Archive topic' }).click();
+};
+/** Makes `id` the reading row, taller than the window: its whole result open, its top just under the sticky band. */
+const tallReading = async (page: Page, id: string) => {
+  await page.setViewportSize({ width: 1000, height: 460 });
+  await goTo(page, 'top');
+  await settle(page);
+  if (id === '8') for (let n = 0; n < 4; n++) await agent(page, 'write:8');
+  await expect(row(page, id).getByRole('button', { name: 'Show more' }).last()).toBeVisible();
+  await click(row(page, id).getByRole('button', { name: 'Show more' }).last());
+  await expect(row(page, id).getByRole('button', { name: 'Show less' }).first()).toBeAttached();
+  await row(page, id).evaluate(element => {
+    const box = element.closest('.tree-scroll')!, edge = box.getBoundingClientRect().top;
+    // Clear of the sticky band (62px) by a little.
+    box.scrollTop += element.getBoundingClientRect().top - edge - 72;
+  });
+  await settle(page);
+  const read = await readingRow(page);
+  expect(read.key, `${id} is the reading row`).toBe(id);
+  expect(await row(page, id).evaluate(element => element.getBoundingClientRect().bottom > element.closest('.tree-scroll')!.getBoundingClientRect().bottom),
+    `${id} runs past the window`).toBe(true);
+};
+const placeCases: readonly (readonly [name: string, text: RegExp, subject: string, change: (page: Page) => Promise<void>])[] = [
+  ['the owner removes a parent', parentStrip, '1', page => ownerRemoves(page, '1')],
+  ['the owner archives a topic', archiveStrip, '8', ownerArchives],
+];
+test.describe('a parent\'s strip and an archive strip hold the place', () => {
+  for (const [name, text, subject, change] of placeCases) {
+    test(`${name} on a short Map: its strip is where it was, and the reading row keeps its place`, ({ page }) => served(page, async () => {
+      await page.setViewportSize({ width: 1000, height: 4400 });
+      await goTo(page, 'top');
+      await settle(page);
+      const short = await scroller(page).evaluate(box => box.getBoundingClientRect().bottom - box.querySelector('.tree-rows')!.getBoundingClientRect().bottom);
+      expect(short, 'the rows end well above the window\'s bottom').toBeGreaterThan(300);
+      // The parent's own row, or the archived topic's band, is what the strip stands in for.
+      const place = subject === '1' ? (await windowTop(page, '1'))! : (await band(page).boundingBox())!.y;
+      const read = await readingRow(page), was = (await windowTop(page, read.key))!, earlier = await stripKeys(page);
+      await change(page);
+      // The archive strip stands for the whole topic, so it takes the place of the agent-removed strip inside it too.
+      await expect(page.locator('.tree-place', { hasText: text })).toBeVisible();
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - place), 'the strip is where it was').toBeLessThanOrEqual(3);
+      if (read.key !== subject) expect(Math.abs((await windowTop(page, read.key))! - was), `${read.key} keeps its place`).toBeLessThanOrEqual(3);
+      expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
+    }));
+    // Open (found by this row): archiving the last topic while its tall row is read near the Map's end leaves the strip
+    // 11-23px below the row's place; the scroller is at its end, so the hold's bottom spacer doesn't make the room.
+    test(`${name} while it holds a reading row taller than the window: its strip takes that row's window place`, ({ page }) => served(page, async () => {
+      test.fixme(subject === '8', 'the archive strip of the last topic is clamped at the Map\'s end');
+      await tallReading(page, subject);
+      const was = (await windowTop(page, subject))!, earlier = await stripKeys(page);
+      await change(page);
+      await expect(row(page, subject)).toHaveCount(0);
+      await expect(page.locator('.tree-place', { hasText: text })).toBeVisible();
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - was), 'the strip is where the row was').toBeLessThanOrEqual(3);
+    }));
+  }
+});

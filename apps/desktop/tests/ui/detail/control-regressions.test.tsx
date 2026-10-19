@@ -280,58 +280,23 @@ describe('conversation control regressions', () => {
     expect(screen.getByRole('dialog', { name: 'Current question' })).toBe(dialog);
   });
 
-  it('reveals a long conversation title with one accessible button press', async () => {
-    clamp(true);
-    const { source, store, props } = await setup();
-    const fullTitle = 'A complete long title with all the detail needed to understand the item. '.repeat(8);
-    source.items['4']!.question = fullTitle; ++source.revision; await store.refresh();
-    render(<ConversationView {...props} onClose={vi.fn()} />);
-    const title = screen.getByRole('button', { name: `Expand title: ${fullTitle.trim()}` });
-    expect(title.getAttribute('aria-expanded')).toBe('false');
-    expect(title.textContent).toBe(fullTitle);
-    fireEvent.click(title);
-    expect(screen.getByRole('button', { name: `Collapse title: ${fullTitle.trim()}` }).classList.contains('conversation-title-expanded')).toBe(true);
-    expect(title.getAttribute('aria-expanded')).toBe('true');
-  });
-
-  it('folds the title with the keyboard and keeps focus on it', async () => {
-    clamp(true);
-    const { source, store, props } = await setup();
-    const fullTitle = 'A complete long title with all the detail needed to understand the item. '.repeat(8);
-    source.items['4']!.question = fullTitle; ++source.revision; await store.refresh();
-    render(<ConversationView {...props} onClose={vi.fn()} />);
-    const title = screen.getByRole('button', { name: `Expand title: ${fullTitle.trim()}` });
-    title.focus();
-    fireEvent.keyDown(title, { key: 'Enter' });
-    expect(title.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.keyDown(title, { key: ' ' });
-    expect(title.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.getByRole('button', { name: `Expand title: ${fullTitle.trim()}` })).toBe(title);
-    expect(document.activeElement).toBe(title);
-  });
-
-  it('shows an expand control for the title and question only while their text is clipped, and re-measures on resize and on text edits', async () => {
+  it('shows an expand control for the question only while its text is clipped, and re-measures on resize and on text edits', async () => {
     const state = clamp(false);
     const { source, store, props } = await setup();
     source.items['2']!.ask = 'Which window?'; ++source.revision; await store.refresh();
     render(<ConversationView {...props} itemId="2" onClose={vi.fn()} />);
-    const title = () => screen.queryByRole('button', { name: /^(Expand|Collapse) title/ });
     expect(screen.queryByRole('button', { name: 'Expand question' }), 'a question that fits has no caret').toBeNull();
-    expect(title(), 'a title that fits has no button').toBeNull();
     // The window narrows: the same text now needs more than two lines.
     state.clipped = true; resize();
     expect(screen.getByRole('button', { name: 'Expand question' })).toBeTruthy();
-    expect(title()).toBeTruthy();
     // The window widens again.
     state.clipped = false; resize();
     expect(screen.queryByRole('button', { name: 'Expand question' })).toBeNull();
-    expect(title()).toBeNull();
-    // The agent rewrites the question and the title at a length that no longer fits.
+    // The agent rewrites the question at a length that no longer fits.
     state.clipped = true;
     source.items['2']!.ask = 'Which window should we use? '.repeat(20); source.items['2']!.question = 'A longer title. '.repeat(20); ++source.revision;
     await act(async () => { await store.refresh(); });
     expect(screen.getByRole('button', { name: 'Expand question' })).toBeTruthy();
-    expect(title()).toBeTruthy();
   });
 
   it('keeps the full-question dialog open, with the new text and its focus, when the agent edits the question', async () => {
@@ -355,16 +320,14 @@ describe('conversation control regressions', () => {
     expect(screen.queryByRole('dialog', { name: 'Current question' })).toBeNull();
   });
 
-  it('keeps the original pane owner caption after the reply while the larger view labels You before it', async () => {
+  it('labels the owner bubble above it, with its time, in the pane and in the larger view', async () => {
     const { props } = await setup();
     const pane = render(<ItemConversation {...props} itemId="1" />);
-    const paneCaption = document.querySelector('.detail-bubble-you .detail-pending-caption')!;
-    expect(paneCaption.textContent).toMatch(/^you · /);
-    expect(paneCaption.previousElementSibling).not.toBeNull();
+    const paneLabel = document.querySelector('.detail-msg-you [data-testid="chat-label"]')!;
+    expect(paneLabel.textContent).toMatch(/^You( replied)?.*\d\d:\d\d$/u);
+    expect(document.querySelector('.detail-bubble-you .detail-pending-caption')).toBeNull();
     pane.unmount();
     render(<ConversationView {...props} itemId="1" onClose={vi.fn()} />);
-    const viewCaption = document.querySelector('.detail-bubble-you .detail-pending-caption')!;
-    expect(viewCaption.textContent).toMatch(/^You · /);
-    expect(viewCaption.previousElementSibling).toBeNull();
+    expect(document.querySelector('.detail-msg-you [data-testid="chat-label"]')!.textContent).toMatch(/^You( replied)?.*\d\d:\d\d$/u);
   });
 });

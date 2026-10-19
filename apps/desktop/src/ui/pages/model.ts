@@ -2,11 +2,10 @@ import { activeItems, activeTopics, itemRemoved } from '../../selectors/removed'
 // Words of the pages built from catalogue summaries and session snapshots: relative days, archived topics, the
 // Continue dialog's groups and the Remove dialog's counts.
 import type { Immutable } from '../../data/session-store';
-import type { ContinuePreview, SessionRef } from '../../generated/core';
+import type { SessionRef } from '../../generated/core';
 import type { Item, ItemStatus, ProjectSummary, Session, SessionSummary, Topic } from '../../generated/domain/models';
 import { agentName, clock, ownerName, sessionWhen, shortDate } from '../shell/model';
 import { agentRunning, connectionOf } from '../shared/connection';
-import { unsentOf } from '../remove/model';
 import { sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
@@ -102,41 +101,18 @@ export function archivedTopics(summaries: readonly Immutable<SessionSummary>[], 
   }).sort((a, b) => Date.parse(b.topic.archived_at!) - Date.parse(a.topic.archived_at!));
 }
 
-export interface ContinueGroup { readonly title: string; readonly icon: string; readonly color: string; readonly lines: readonly { readonly id: string; readonly text: string }[] }
-/** The four groups of the Continue dialog (Ariadne.dc.html:1745-1760), from the preview's mapping. */
-export function continueGroups(source: Immutable<Session>, preview: Immutable<ContinuePreview>): ContinueGroup[] {
-  const items = preview.mapping.flatMap(mapping => {
-    const item = source.items[mapping.source_item_id];
-    if (!item || item.topic_id !== preview.source_topic_id) return [];
-    return [mapping.action.kind === 'imported_drop'
-      ? { ...item, status: 'dropped' as const, replaced_by: null, outcome: mapping.action.outcome, why: mapping.action.why }
-      : item];
-  });
-  const group = (title: string, status: VisualStatus, statuses: readonly ItemStatus[], text: (item: Immutable<Item>) => string): ContinueGroup | null => {
-    const list = items.filter(item => statuses.includes(item.status));
-    return list.length ? { title: `${title} · ${list.length}`, icon: ICON[status], color: `var(--st-${status})`, lines: list.map(item => ({ id: item.id, text: text(item) })) } : null;
-  };
-  return [
-    group('Waiting on you', 'waiting', ['waiting_on_me'], item => item.question),
-    group('Open or in progress', 'open', ['open', 'in_progress'], item => item.question),
-    group('Decided or done', 'decided', ['decided', 'done'], item => item.outcome || item.question),
-    group('Dropped or replaced', 'dropped', ['dropped', 'replaced'], item => item.outcome || item.question),
-  ].filter((value): value is ContinueGroup => !!value);
-}
-
 /** Session counts for the Remove dialog of a session (README, Remove). */
 export function sessionRemoval(session: Immutable<Session> | null, shared: ReadonlySet<string>) {
   if (!session) return { topics: 0, items: 0, shared: 0, waiting: 0 };
   const topics = Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic), own = topics.filter(topic => !shared.has(`${session.id}:${topic.id}`));
   const ownIds = new Set(own.map(topic => topic.id));
   const items = Object.values(session.items).filter((item): item is Immutable<Item> => !!item && ownIds.has(item.topic_id));
-  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => waitingOnOwner(session, item) && !itemRemoved(session, item.id)).length,
-    unsent: unsentOf([session]) };
+  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => waitingOnOwner(session, item) && !itemRemoved(session, item.id)).length };
 }
 
 /** Project counts for the Remove dialog of a project. */
 export function projectRemoval(sessions: readonly Immutable<Session>[]) {
   const items = sessions.flatMap(session => Object.values(session.items).filter((item): item is Immutable<Item> => !!item));
   return { topics: sessions.reduce((sum, session) => sum + Object.keys(session.topics).length, 0), items: items.length,
-    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => waitingOnOwner(session, item)).length, 0), unsent: unsentOf(sessions) };
+    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => waitingOnOwner(session, item)).length, 0) };
 }

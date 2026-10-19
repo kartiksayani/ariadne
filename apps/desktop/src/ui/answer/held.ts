@@ -103,7 +103,7 @@ function occupied(existing: DraftEntry | undefined, { intent, text, selected }: 
  * Saves the words in their editor. Call only when `input` can no longer be sent (it is cancelled). The editor is checked
  * again right before writing, with no wait in between: a message the owner started meanwhile is never overwritten.
  */
-async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input: Immutable<Input>, planned: Plan): Promise<ReviewOutcome> {
+async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input: Immutable<Input>, planned: Plan, origin?: 'taken_back'): Promise<ReviewOutcome> {
   const { intent, text, selected } = planned, unavailable = { kind: 'unavailable' } as const;
   if (drafts.getSnapshot().preferenceUncertain) return unavailable;
   const existing = find(drafts, session, input, intent), blocked = occupied(existing, planned);
@@ -118,6 +118,7 @@ async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input:
   if (!await drafts.editSaved(id, { text, selected_option_id: selected })) return unavailable;
   // The owner may have typed while it saved: their words stay.
   if (drafts.getSnapshot().entries[id]?.draft.text !== text) return { kind: 'kept', intent, text };
+  if (origin) drafts.markOrigin(id, origin);
   return { kind: 'moved', intent };
 }
 
@@ -147,7 +148,7 @@ export function sendingAgain(state: DraftState, session: Immutable<Session>, inp
  * could be sent from there), or null when it can. The Not sent line shows this instead of the button.
  */
 export function putBackBlocked(session: Immutable<Session>, input: Immutable<Input>): string | null {
-  return session.topics[input.target.topic_id]?.removed_at || input.target.item_id && itemRemoved(session, input.target.item_id) ? 'Restore this work from Removed by agent to put it back in the reply box.' : session.archived_at != null ? 'Restore the session, then reopen it to put it back in the reply box.' : session.state !== 'active' ? 'Reopen the session to put it back in the reply box.'
+  return session.topics[input.target.topic_id]?.removed_at || input.target.item_id && itemRemoved(session, input.target.item_id) ? 'Restore this work from the bin to put it back in the reply box.' : session.archived_at != null ? 'Restore the session, then reopen it to put it back in the reply box.' : session.state !== 'active' ? 'Reopen the session to put it back in the reply box.'
     : session.topics[input.target.topic_id]?.archived_at ? 'Restore the topic to put it back in the reply box.' : null;
 }
 
@@ -183,6 +184,6 @@ export async function editQueued(drafts: OwnerDraftStore, session: Immutable<Ses
     if (pending?.command === 'input_cancel' && pending.params.input_id === input.id) return { kind: 'not_taken_back' };
     return state && state !== 'queued' && state !== 'cancelled' ? { kind: 'already_sent' } : { kind: 'not_taken_back' };
   }
-  const outcome = await load(drafts, now, input, planned);
+  const outcome = await load(drafts, now, input, planned, 'taken_back');
   return outcome.kind === 'unavailable' ? { kind: 'taken_back' } : outcome;
 }

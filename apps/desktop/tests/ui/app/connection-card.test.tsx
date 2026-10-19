@@ -42,7 +42,7 @@ describe('connection card session actions (were the session bar’s)', () => {
     const view = await openCard();
     await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Copy session ID' })); });
     expect(copyText).toHaveBeenCalledExactlyOnceWith(route.session_id);
-    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Connection reference copied.']));
+    await waitFor(() => expect(notices.getSnapshot().filter(notice => !notice.id.startsWith('stuck:')).map(notice => notice.text)).toEqual(['Connection reference copied.']));
     expect(view.getByRole('button', { name: 'Copied' })).toBeTruthy();
     expect(document.querySelector('.cc')!.innerHTML).not.toContain(route.session_id);
     expect(document.querySelector('.tb')!.innerHTML).not.toContain(route.session_id);

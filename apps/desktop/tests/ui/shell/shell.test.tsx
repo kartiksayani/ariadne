@@ -11,6 +11,8 @@ import { DetailsColumnProvider } from '../../../src/state/details/column';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
 import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
+import type { DetailHeadControls } from '../../../src/ui/shell/DetailHead';
+import type { ItemActionView } from '../../../src/ui/detail/itemActions';
 import { notices } from '../../../src/ui/pages/notices';
 
 const jsdomWidth = window.innerWidth;
@@ -23,15 +25,14 @@ interface ShellProps {
   readonly header: TopBarProps;
   readonly body: {
     readonly dock?: ReactNode; readonly dockHeight?: number; readonly center: ReactNode; readonly conversation?: ReactNode; readonly detail?: ReactNode; readonly detailPath?: ReactNode;
-    readonly onCloseDetail?: () => void; readonly onRemove?: () => void; readonly hidden?: boolean; readonly hiddenNotice?: string; readonly onHide?: () => void;
+    readonly head?: DetailHeadControls; readonly hidden?: boolean;
     readonly detailWidth?: number | null; readonly onResizeDetail?: (width: number) => void;
   };
   readonly overlay?: ReactNode;
 }
 function Shell({ header, body, overlay }: ShellProps) {
   return <DetailsColumnProvider saved={body.detailWidth} onSave={body.onResizeDetail}><DockInsetProvider height={body.dockHeight ?? 0}><SlotShell topBar={<TopBar {...header} />} main={body.center}
-    side={body.detail ? <DetailsColumn path={body.detailPath} onClose={body.onCloseDetail} onRemove={body.onRemove} hidden={body.hidden} hiddenNotice={body.hiddenNotice}
-      onHide={body.onHide}>{body.detail}</DetailsColumn> : undefined}
+    side={body.detail ? <DetailsColumn path={body.detailPath} head={body.head} hidden={body.hidden}>{body.detail}</DetailsColumn> : undefined}
     dock={body.dock} legacy={{ conversation: body.conversation }}
     overlay={overlay} /></DockInsetProvider></DetailsColumnProvider>;
 }
@@ -144,7 +145,8 @@ describe('Paperwhite shell', () => {
     expect(Number(rules(shell, '.shell-notices').match(/z-index: (\d+)/)![1])).toBeGreaterThan(Number(rules(shell, '.shell-conversation').match(/z-index: (\d+)/)![1]));
     expect(rules(notes, '.pw-notices')).toContain('position: absolute;');
     expect(rules(notes, '.pw-notices')).toContain('width: min(480px, calc(100% - 32px));');
-    expect(notes).toContain('@container shell-center (max-width: 400px)');
+    // Over a Map (or the bigger view) the stack hangs from --notice-top at left/right 10, clear of the dock; on a page it keeps the bottom right.
+    expect(rules(notes, '.shell-notices[data-placement] .pw-notices')).toContain('inset: var(--notice-top, 8px) 10px calc(var(--notice-bottom, 8px) + var(--dock-inset, 0px)) 10px;');
   });
 
   it('keeps notification actions opaque throughout their entrance, including a suspended first frame', () => {
@@ -212,32 +214,39 @@ describe('Paperwhite shell', () => {
     } finally { notices.clear(); vi.useRealTimers(); }
   });
 
-  it('hides and unhides from the detail header next to Remove', () => {
-    const hide = vi.fn();
-    const value = props({ body: { center: null, detail: <p>Detail</p>, onHide: hide } });
+  it('hides, unhides and removes from the "…" menu of the detail head, which has no Close ×', () => {
+    const hide = vi.fn(), remove = vi.fn(), unhide = vi.fn();
+    const rows = (hidden: boolean): readonly ItemActionView[] => [
+      { id: 'copyRef', label: 'Copy reference', icon: 'ph ph-copy', run: vi.fn(), applies: true },
+      hidden ? { id: 'unhide', label: 'Unhide', icon: '', run: unhide, applies: true } : { id: 'hide', label: 'Hide', icon: '', run: hide, applies: true },
+      { id: 'remove', label: 'Remove', icon: 'ph ph-trash', run: remove, applies: true },
+      { id: 'drop', label: 'Drop', icon: 'ph ph-x-circle', run: vi.fn(), applies: false },
+    ];
+    const value = props({ body: { center: null, detail: <p>Detail</p>, head: { actions: rows(false) } } });
     const { rerender } = render(<Shell {...value} />);
-    const button = screen.getByRole('button', { name: 'Hide item' });
-    expect(button.title).toBe('Hide (h)');
-    expect(button.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
-    expect(button.nextElementSibling?.getAttribute('aria-label')).toBe('Remove item');
-    fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
-    rerender(<Shell {...value} body={{ ...value.body, hidden: true }} />);
-    const unhide = screen.getByRole('button', { name: 'Unhide item' });
-    expect(unhide.title).toBe('Unhide');
-    expect(unhide.getAttribute('aria-pressed')).toBe('true');
-    expect(unhide.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
-    expect(screen.getByRole('status').textContent).toContain('Hidden — this item is hidden from the list.');
-    fireEvent.click(unhide); expect(hide).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: 'Close detail' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Hide item|Remove item/ })).toBeNull();
+    const menu = () => fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    menu();
+    expect(screen.getAllByRole('menuitem').map(row => row.textContent)).toEqual(['Copy reference', 'Hide', 'Remove', 'Close Details ( esc )']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' })); expect(hide).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).toBeNull();
+    rerender(<Shell {...value} body={{ ...value.body, hidden: true, head: { actions: rows(true) } }} />);
+    expect(screen.queryByRole('status')).toBeNull();
+    menu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unhide' })); expect(unhide).toHaveBeenCalledOnce();
+    menu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' })); expect(remove).toHaveBeenCalledOnce();
   });
 
-  it('puts accessible Back/Forward icons before the detail breadcrumb, with shortcut tooltips and disabled endpoints', () => {
+  it('puts accessible Back/Forward icons after the detail breadcrumb, with shortcut tooltips and disabled endpoints', () => {
     const back = vi.fn(() => true), forward = vi.fn(() => true);
     const value = props({ body: { center: null, detail: <p>Detail</p>, detailPath: <span>Topic / #2</span> } });
     const { rerender } = render(<ItemHistoryContext.Provider value={{ canBack: true, canForward: false, back, forward }}><Shell {...value} /></ItemHistoryContext.Provider>);
     const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Back' });
     expect(button.title).toBe('Back (⌘[)'); expect(button.querySelector('.ph-arrow-left')).not.toBeNull();
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Forward' }).disabled).toBe(true);
-    expect(button.closest('.shell-detail-history')?.nextElementSibling?.className).toBe('shell-detail-path');
+    expect(button.closest('.shell-detail-history')?.previousElementSibling?.className).toBe('shell-detail-path');
     fireEvent.click(button); expect(back).toHaveBeenCalledOnce();
     rerender(<ItemHistoryContext.Provider value={{ canBack: false, canForward: true, back, forward }}><Shell {...value} /></ItemHistoryContext.Provider>);
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Back' }).disabled).toBe(true);
@@ -278,7 +287,7 @@ describe('Paperwhite shell', () => {
     render(<Shell {...props({
       header: { ...props().header, sessionName: 's', search: { active: true, query: 'needle', onOpen: vi.fn(), onQuery: query, onClear: vi.fn() },
         onView: select, theme: 'light', onToggleTheme: theme },
-      body: { center: null, detail: <section><p>Detail body</p></section>, onCloseDetail: close, onRemove: remove },
+      body: { center: null, detail: <section><p>Detail body</p></section>, head: { close, actions: [{ id: 'remove', label: 'Remove', icon: 'ph ph-trash', run: remove, applies: true }] } },
     })} />);
     const views = screen.getByRole('group', { name: 'View' });
     expect(within(views).getByRole('button', { name: 'Tree' }).getAttribute('aria-pressed')).toBe('true');
@@ -287,8 +296,10 @@ describe('Paperwhite shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to dark' })); expect(theme).toHaveBeenCalled();
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     expect(detail.querySelector('.shell-detail-scroll')?.textContent).toBe('Detail body');
-    fireEvent.click(within(detail).getByRole('button', { name: 'Remove item' })); expect(remove).toHaveBeenCalled();
-    fireEvent.click(within(detail).getByRole('button', { name: 'Close detail' })); expect(close).toHaveBeenCalled();
+    fireEvent.click(within(detail).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' })); expect(remove).toHaveBeenCalled();
+    fireEvent.click(within(detail).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Close Details/ })); expect(close).toHaveBeenCalled();
     expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('minmax(560px,1fr) 400px');
   });
 

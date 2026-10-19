@@ -58,11 +58,10 @@ function preview(row: Row): Preview | null {
   return null;
 }
 
-/** The delivery of the owner's latest message, as a small line under the details; a stopped one shows its fix instead. */
-function delivery(row: Row, fix: ReactNode): ReactNode {
+/** The delivery of the owner's latest message, as a small line under the details. A stuck one is fixed in Details (StuckNote), not here. */
+function delivery(row: Row): ReactNode {
   const value = row.delivery;
   if (!value) return null;
-  if (value.stuck && fix) return fix;
   return <div className="tree-line tree-delivery" style={{ color: value.color }}><i className={value.icon} /><span>{value.text}</span></div>;
 }
 
@@ -113,8 +112,6 @@ export interface ItemRowProps {
   readonly closedReason?: string;
   readonly note: string | null;
   readonly actions: readonly RowAction[];
-  /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
-  readonly fix?: ReactNode;
   /** The long preview is shown in full ("Show less" offered) instead of folded to three lines. */
   readonly unfolded: boolean;
   readonly onUnfold: (id: string) => void;
@@ -130,7 +127,7 @@ export interface ItemRowProps {
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
@@ -170,13 +167,14 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       <MarkdownHighlight.Provider value={row.matches.includes('outcome') ? { terms: search.terms, current: current === 'outcome' } : null}>
         <ClampBlock text={details?.text} open={unfolded} onToggle={() => onUnfold(item.id)}>{details?.node}</ClampBlock>
       </MarkdownHighlight.Provider>
-      {delivery(row, fix)}
+      {delivery(row)}
       {note && <Strip variant="inside" text={note} depth={row.depth} onClick={() => onToggle(item.id)} />}
     </div>
     {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). The hover
         bar floats left of it (absolute), so showing it never moves or rewraps anything. */}
     <div className="tree-end">
       {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
+      {row.outside && <span className="tree-outside-tag" title="Outside your filter"><i className="ph ph-funnel" aria-hidden="true" />Outside filter</span>}
       <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
         {changeMarker && <ChangeMarker kind={changeMarker} />}
       </span>

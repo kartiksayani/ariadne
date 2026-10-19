@@ -219,7 +219,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
       && message.input_id === input.id && message.body === resultTexts[index]);
     assert.ok(reply, `Round ${round.ordinal} lost its full canonical correlated reply`);
     return { owner: { id: input.message_id, text: index % 2 === 0 ? `You chose “${option(index + 1).label}”`
-      : `You replied: “${ownerTexts[index].trim()}”` }, reply };
+      : ownerTexts[index].trim() }, reply };
   });
   const finalRound = rounds.at(-1), final = expected.at(-1);
   await failureEvidence('history-final-round-result', () => waitForRoundResult(finalRound, final.owner, final.reply));
@@ -339,7 +339,7 @@ async function conversation(history, saved, paged) {
     }
   });
   await waitForOwnerReplyTarget(history, ownerReplyTarget(saved, history.itemId));
-  const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
+  const reply = await browser.$('[aria-label="Item actions"]').$('button[aria-label="Reply"]'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('owner-input-editor-first', () => editor.waitForEnabled());
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
   await editor.scrollIntoView(); await editor.setValue(draft);
@@ -433,14 +433,14 @@ export async function runHistoryAcceptance(configuration) {
       'Native detail did not show the previous explicit response before the next owner intent'));
     // Revisit (Ariadne.dc.html): Follow up opens a box for the owner's words; Back to Open sends its fixed request at once.
     const label = intent === 'followup' ? 'Follow up' : 'Back to Open';
-    const control = await browser.$('[aria-label="Item actions"]').$(`button*=${label}`);
+    const control = await browser.$('[aria-label="Item actions"]').$(`button[aria-label="${label}"]`);
     await control.scrollIntoView(); await control.waitForEnabled(); await control.click();
     if (intent === 'followup') {
       // A click during the re-render after the CLI-published result can miss the box; click once more.
       const opened = () => browser.$(`${ownerInput('1')} textarea`).isExisting();
       if (!await browser.waitUntil(opened, { timeout: 2000, interval: 100 }).catch(() => false)) {
         console.warn(`[history] first ${intent} click did not open the editor; clicked again`);
-        const again = await browser.$('[aria-label="Item actions"]').$(`button*=${label}`);
+        const again = await browser.$('[aria-label="Item actions"]').$(`button[aria-label="${label}"]`);
         await again.scrollIntoView(); await again.waitForEnabled(); await again.click();
         await wait(opened, `Native ${intent} owner input editor did not open after a second click`);
       }
@@ -488,7 +488,7 @@ export async function restoreHistoryAcceptance(configuration) {
   await proveRounds(history, finalSession, prior.ownerTexts, prior.resultTexts, prior.paged);
   await proveConversationMessages(finalSession, '1');
   // The Reply box is docked on the open item; it shows the draft the relaunch retained.
-  const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
+  const reply = await browser.$('[aria-label="Item actions"]').$('button[aria-label="Reply"]'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('restored-owner-draft', () => editor.waitForDisplayed());
   assert.equal(await editor.getValue(), prior.conversationProof.draft, 'Actual process relaunch must retain the unsent owner draft without creating a new input');
   assert.ok(folded(await browser.$('.item-detail [aria-label="Former outcome"]').getText()).includes(folded(formerOutcome)));

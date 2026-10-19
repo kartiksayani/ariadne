@@ -1,4 +1,8 @@
-/* Keep the overlay's bounds fixed, even while empty; cards sit above the footer beside the other panes. */
+/*
+ * The notice layer (SPEC 5.11, E20). Over a Map it hangs from the top, below the topic band, at left/right 10 of the Map region
+ * (Body measures --notice-top). On a page, where no Map is drawn, it keeps today's place: bottom right, anchored to the bottom.
+ * The layer floats, so cards coming and going never move the Map.
+ */
 .pw-notices {
   position: absolute;
   z-index: 25;
@@ -15,72 +19,57 @@
 .pw-notice-stack {
   position: absolute;
   top: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   width: 100%;
   max-height: 100%;
   overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
   transform: translateY(-100%);
 }
 
-/* A squeezed centre uses its top edge, immediately below the shell tabs. */
-@container shell-center (max-width: 400px) {
-  .pw-notices {
-    top: 8px;
-  }
-
-  .pw-notice-stack {
-    top: 0;
-    transform: none;
-  }
+/* Over a Map or the bigger view: from the top, clear of the band, the connection line and the open dock. */
+.shell-notices[data-placement] .pw-notices {
+  inset: var(--notice-top, 8px) 10px calc(var(--notice-bottom, 8px) + var(--dock-inset, 0px)) 10px;
+  width: auto;
 }
 
-/*
- * Over the bigger conversation view the stack keeps to the band between the view's header and its footer (Body measures it
- * into --notice-top and --notice-bottom) and hangs from the top, so it never covers Back to Map, own words or Send.
- */
-.shell-notices[data-conversation] .pw-notices {
-  top: var(--notice-top, 16px);
-  bottom: var(--notice-bottom, 16px);
-}
-
-.shell-notices[data-conversation] .pw-notice-stack {
+.shell-notices[data-placement] .pw-notice-stack {
   top: 0;
   transform: none;
 }
 
-.pw-notice-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.pw-notice-group:not(:empty) + .pw-notice-group:not(:empty) { margin-top: 8px; }
-
 .pw-notices .pw-note {
   flex-shrink: 0;
-  align-items: flex-start;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px 10px;
   margin: 0;
-  padding: 12px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 7px;
   background: var(--a-card);
-  box-shadow: inset 0 0 0 1px var(--color-divider), var(--a-lift);
+  box-shadow: inset 0 0 0 1px var(--color-divider), var(--shadow-sm);
+  line-height: 1.45;
   pointer-events: auto;
   animation: pw-notice-arrive 150ms ease-out;
 }
 
 .pw-notices .pw-note[data-tone="problem"] {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-warn) 50%, var(--color-divider)), var(--a-lift);
+  background: color-mix(in srgb, var(--a-danger) 6%, var(--a-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-danger) 32%, transparent), var(--shadow-md);
 }
 
-.pw-notices .pw-note > i { margin-top: 3px; }
-.pw-notices .pw-note[data-tone="problem"] > i { color: var(--a-warn); }
+.pw-notices .pw-note[data-tone="warn"] {
+  background: color-mix(in srgb, var(--a-warn) 7%, var(--a-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-warn) 34%, transparent), var(--shadow-md);
+}
+
+.pw-notices .pw-note > i { font-size: calc(14px * var(--text-scale)); }
+.pw-notices .pw-note[data-tone="problem"] > i { color: var(--a-danger); }
+.pw-notices .pw-note[data-tone="warn"] > i { color: var(--a-warn); }
 
 .pw-notices .pw-note-text {
-  flex-basis: 0;
-  line-height: 1.5;
+  flex: 1 1 300px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -89,8 +78,52 @@
   outline-offset: -2px;
 }
 
-.pw-notices .pw-note-action { align-self: flex-start; }
+.pw-notices .pw-note-action {
+  height: 24px;
+  padding: 0 9px;
+}
+
 .pw-notices .pw-note-dismiss { margin-left: auto; }
+
+/* The live regions only announce: they add no box, and each card's `order` keeps the stack newest on top across both. */
+.pw-notice-live {
+  display: contents;
+}
+
+/* "⌄ N more" expands all; "Dismiss all" clears the stack. Left-aligned, so it never sits under a card's ×. */
+.pw-notice-pill {
+  order: 1000;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  align-self: flex-start;
+  gap: 10px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--color-divider), var(--shadow-sm);
+  pointer-events: auto;
+}
+
+.pw-notice-pill button {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.pw-notice-pill .pw-notice-all { text-decoration: underline; }
+
+.pw-notice-pill button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 
 @keyframes pw-notice-arrive {
   from {

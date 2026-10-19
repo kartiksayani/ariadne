@@ -77,7 +77,7 @@ const states: Record<string, ConnectionView> = {
   reconnect: { kind: 'reconnect', agent: 'Claude Code', where: 'Claude Code in iTerm window 1', droppedAt: '21:30' },
   unreadable: { kind: 'unreadable', unreadableLine: 1204 },
   stale: { kind: 'stale', lastGoodAt: '21:24' },
-  unsaved: { kind: 'unsaved', where: 'Claude Code in iTerm window 1', unsavedAt: '21:31', unsavedChange: 'Later on “separate hit metrics”' },
+  unsaved: { kind: 'unsaved', where: 'Claude Code in iTerm window 1', unsavedAt: '21:31' },
 };
 for (const [id, view] of Object.entries(states)) {
   renderers[`connection-${id}`] = context => <>
@@ -122,7 +122,7 @@ const projectsPage = <ProjectsCards back={back} sub="4 projects · 5 questions w
 renderers.projects = context => <>{pageBar(context)}{projectsPage}</>;
 renderers['projects-menu'] = context => <>{pageBar(context)}{projectsPage}</>;
 renderers.register = context => <>{pageBar(context)}{projectsPage}<RegisterProjectDialog initialPath="~/code/notes-mobile" onRegister={noop} onCancel={noop} /></>;
-renderers['remove-project'] = context => <>{pageBar(context)}{projectsPage}<RemoveProjectDialog name="notes-api" path="~/code/notes-api" sessionCount={2} waitingCount={2} onRemove={noop} onCancel={noop} /></>;
+renderers['remove-project'] = context => <>{pageBar(context)}{projectsPage}<RemoveProjectDialog name="notes-api" path="~/code/notes-api" sessionCount={2} waitingCount={2} words={{ words: [], complete: true }} onRemove={noop} onCancel={noop} /></>;
 renderers.sessions = context => <>{pageBar(context)}
   <SessionsList narrow={context.narrow} back={back} title="All sessions" sub="6 sessions in 3 projects" tabs={{ value: 'all', counts: { open: 5, closed: 1, all: 6 }, onChange: noop }}
     groups={sessionGroups()} onOpen={noop} onRename={noop} onClose={noop} onArchive={noop} /></>;

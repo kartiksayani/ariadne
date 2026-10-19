@@ -131,6 +131,39 @@
   color: var(--st-done);
 }
 
+/* Where answers wait while the agent isn't live (SPEC 5.12): a quiet chip, no ring, beside the other-sessions chip. */
+.dock-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(12px * var(--text-scale));
+  margin-right: 8px;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.dock-line-loading {
+  gap: 10px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.dock-line-quiet > .dock-muted {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.dock-line-quiet > .dock-danger {
+  color: var(--a-danger);
+}
+
+.dock-skeleton {
+  flex: none;
+  width: 140px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--a-skel);
+}
+
 .dock-sent,
 .dock-others,
 .dock-draft {
@@ -590,4 +623,32 @@
   line-height: 1.45;
   white-space: pre-wrap;
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+/* The question's marker pill sits at the title's right (SPEC 9.7); a change adds its strip under the title. */
+.dock-question-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dock-question-head > .dock-question-title {
+  flex: 1;
+  min-width: 0;
+}
+.dock-question-head > .change-marker { margin-top: 3px; }
+
+.dock-question-change {
+  padding: 6px 9px;
+  margin: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--attention) 8%, transparent);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+}
+
+/* The board sets the strip's lead words in the same weight as the rest (9.7). */
+.dock-question-change > strong {
+  font-weight: inherit;
 }

@@ -9,7 +9,7 @@ import { route } from './transport';
 
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
 
-it('keeps the sole topic archive notice actionable through queued navigation and reconciliation with item detail open', async () => {
+it('keeps the sole topic archive strip actionable through queued navigation and reconciliation with item detail open', async () => {
   const transport = new HistoryTransport(), session = transport.source;
   const item = session.items['8']!, topic = session.topics[item.topic_id]!;
   item.status = 'done';
@@ -26,15 +26,16 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   fireEvent.click(document.querySelector(`[role="treeitem"][data-item-id="${item.id}"]`)!);
   await screen.findByRole('article', { name: `Detail of ${item.question}` });
 
-  const region = screen.getByRole('region', { name: 'Notifications' });
   fireEvent.click(await screen.findByRole('button', { name: 'Archive topic' }));
-  const undo = await within(region).findByRole<HTMLButtonElement>('button', { name: 'Undo' });
-  const card = undo.closest<HTMLElement>('[data-notice-id]')!;
-  expect(within(card).getByText(`Archived “${topic.name}”.`)).toBeTruthy();
+  // E33: archive asks first, then leaves one strip in the topic's place whose click is Undo.
+  const dialog = within(await screen.findByRole('dialog', { name: `Archive the “${topic.name}” topic?` }));
+  await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+  const stripName = new RegExp(`^Archived “${topic.name}” · 1 item · Undo$`);
+  const strip = await screen.findByRole('treeitem', { name: stripName });
+  expect(screen.getByTestId('toast').textContent).toContain(`Archived “${topic.name}”. It’s in Archive with all its history.`);
   expect(topic.archived_at).not.toBeNull();
   expect(screen.queryByRole('dialog')).toBeNull();
   await waitFor(() => expect(document.querySelector(`[data-item-id="${item.id}"][role="treeitem"]`)).toBeNull());
-  await waitFor(() => expect(undo.disabled).toBe(false));
 
   const invoke = transport.invoke.bind(transport);
   let release!: () => void, writing = false;
@@ -47,13 +48,11 @@ it('keeps the sole topic archive notice actionable through queued navigation and
     return invoke(name, args);
   });
   const assertNotice = () => {
-    expect(screen.getByRole('region', { name: 'Notifications' })).toBe(region);
-    expect(region.parentElement).toBe(document.querySelector('.shell-notices'));
-    expect(screen.getByRole('main').contains(region)).toBe(false);
-    expect(region.closest('[inert],[aria-hidden="true"]')).toBeNull();
-    expect(within(region).getByRole('button', { name: 'Undo' })).toBe(undo);
-    expect(undo.closest('[data-notice-id]')).toBe(card);
-    expect(card.isConnected).toBe(true); expect(undo.disabled).toBe(false);
+    // The strip outlives a navigation to the session already shown.
+    const current = screen.getByRole('treeitem', { name: stripName });
+    expect(current.closest('[inert],[aria-hidden="true"]')).toBeNull();
+    expect(current.isConnected).toBe(true);
+    expect(strip.getAttribute('data-row')).toBe(current.getAttribute('data-row'));
     expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
   };
   try {
@@ -78,10 +77,10 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   await waitFor(() => expect(screen.queryByText('Opening the session…')).toBeNull());
   expect(transport.preferences.global.theme).toBe('light');
   assertNotice();
-  fireEvent.click(undo);
+  fireEvent.click(within(screen.getByRole('treeitem', { name: stripName })).getByRole('button'));
   await waitFor(() => expect(topic.archived_at).toBeNull());
   await waitFor(() => expect(document.querySelector(`[data-item-id="${item.id}"][role="treeitem"]`)).not.toBeNull());
-  await waitFor(() => expect(within(region).queryByRole('button', { name: 'Undo' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('treeitem', { name: stripName })).toBeNull());
   expect(transport.mutations.filter(request => ['topic_archive', 'topic_restore'].includes(request.command.command)).map(request => request.command.command))
     .toEqual(['topic_archive', 'topic_restore']);
   expect(item.status).toBe('done');

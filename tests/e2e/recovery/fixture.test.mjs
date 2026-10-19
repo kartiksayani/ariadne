@@ -75,7 +75,7 @@ function replyBoxBrowser(emptiesAfter) {
   const browser = {
     $(selector) {
       if (selector === '.item-detail .detail-answer-slot[data-owner-input]') return exists(() => false);
-      if (selector.includes('[aria-label="Reply"]')) return exists(() => false);
+      if (selector.includes('[aria-label="Reply"]') || selector.includes('[aria-label="Add a reply"]')) return exists(() => false);
       if (selector === '.item-detail [data-owner-input] .detail-box textarea') return box;
       return assert.fail(`The docked Reply box needs no press: ${selector}`);
     },
@@ -110,10 +110,10 @@ test('a sent Reply box that never empties fails; a waiting item\'s successive wo
   globalThis.browser = {
     $(selector) {
       if (selector === '.item-detail [data-owner-input] .detail-box textarea' || selector === '.item-detail [data-owner-input] .detail-box') return exists(false);
-      if (selector === '.item-detail[data-status="waiting"] [aria-label="Reply"] [aria-label="Item actions"] button') return exists(true);
+      if (selector === '.item-detail[data-status="waiting"] [aria-label="Item actions"] button[aria-label="Add a reply"]') return exists(true);
       if (selector === '.item-detail') return { async getAttribute(name) { return name === 'data-status' ? 'waiting' : 'item-detail'; } };
-      if (selector === '.item-detail [aria-label="Reply"] [aria-label="Item actions"] button') {
-        return { async waitForDisplayed() {}, async waitForEnabled() {}, async scrollIntoView() {}, async getText() { return 'Add a reply r'; }, async click() { clicks.push('Add a reply'); } };
+      if (selector === '.item-detail [aria-label="Item actions"] button[aria-label="Add a reply"]') {
+        return { async waitForDisplayed() {}, async waitForEnabled() {}, async scrollIntoView() {}, async click() { clicks.push('Add a reply'); } };
       }
       return assert.fail(`Successive answer cannot choose another form: ${selector}`);
     },
@@ -129,7 +129,7 @@ test('a missing Reply box after a send is a clear failure, not a saved reply, an
   const exists = value => ({ async isExisting() { return value; } });
   globalThis.browser = {
     $(selector) {
-      if (selector === '.item-detail .detail-answer-slot[data-owner-input]' || selector.includes('[aria-label="Reply"]')) return exists(false);
+      if (selector === '.item-detail .detail-answer-slot[data-owner-input]' || selector.includes('[aria-label="Reply"]') || selector.includes('[aria-label="Add a reply"]')) return exists(false);
       if (selector === '.item-detail [data-owner-input] .detail-box textarea') return exists(false);
       return assert.fail(`A closed item has no Reply to press: ${selector}`);
     },
@@ -267,8 +267,8 @@ for (const [status, label] of [['waiting', 'Send'], ['open', 'Send reply'], ['pr
 }
 
 test('opens the current closed-item Follow up action, scoped to its detail', async t => {
-  const dom = new JSDOM(`<button title="Comment, or ask for more">Unrelated</button><article class="item-detail" data-status="done">
-    <div aria-label="Item actions"><button title="Comment, or ask for more">Follow up<span>r</span></button></div></article>`);
+  const dom = new JSDOM(`<button aria-label="Follow up">Unrelated</button><article class="item-detail" data-status="done">
+    <div aria-label="Item actions"><button aria-label="Follow up">Follow up<span>r</span></button></div></article>`);
   const previous = globalThis.browser;
   t.after(() => { globalThis.browser = previous; dom.window.close(); });
   const document = dom.window.document, detail = document.querySelector('.item-detail');
@@ -292,13 +292,13 @@ test('a successive progress note waits for its docked box to empty instead of wa
 });
 
 test('a successive waiting reply waits for its saved box to close, then reopens Add a reply', async t => {
-  const dom = new JSDOM(`<article class="item-detail" data-status="waiting"><section aria-label="Reply"><div aria-label="Item actions">
-    <button>Add a reply<span>r</span></button></div></section><div data-owner-input="1">${wordsBox('Send reply')}</div></article>`);
+  const dom = new JSDOM(`<article class="item-detail" data-status="waiting"><div aria-label="Item actions">
+    <button aria-label="Add a reply">Add a reply<span>r</span></button></div><div data-owner-input="1">${wordsBox('Send reply')}</div></article>`);
   const previous = globalThis.browser;
   t.after(() => { globalThis.browser = previous; dom.window.close(); });
   const document = dom.window.document, detail = document.querySelector('.item-detail'), old = detail.querySelector('[data-owner-input]');
   let polls = 0, clicks = 0;
-  detail.querySelector('section button').addEventListener('click', () => {
+  detail.querySelector('[aria-label="Item actions"] button').addEventListener('click', () => {
     assert.equal(old.isConnected, false); clicks++;
     detail.insertAdjacentHTML('beforeend', `<div data-owner-input="1">${wordsBox('Send reply')}</div>`);
   });

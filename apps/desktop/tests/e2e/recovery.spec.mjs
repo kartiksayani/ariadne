@@ -139,15 +139,16 @@ export async function runRecoveryAcceptance(configuration) {
   assert.ok(Date.parse(originalAttempt.error.observed_at) - Date.parse(originalAttempt.turn_observed_at) >= 5000, 'Missing result must wait the natural grace period');
   assert.equal(expired.bindings[configuration.bindingId].dispatch_state, 'recovery_required');
   assert.equal(expired.bindings[configuration.bindingId].pause_reason, 'result_missing');
-  // The delivered message needs an answer; with its row visible there is no recovery banner.
-  const recoveryRow = () => browser.$(`[role="tree"] .stuck-note[data-stuck="answer"][data-stuck-input="${input.id}"]`);
+  // The delivered message needs an answer; its decision is in Details under the message (the Tree row no longer carries it, alpha.21 E17).
+  const recoveryRow = () => browser.$(`.item-detail .stuck-note[data-stuck="answer"][data-stuck-input="${input.id}"]`);
   const row = await recoveryRow();
-  await wait(async () => await row.isExisting() && (await row.getText()).includes('codex has your message but hasn’t saved its answer yet. It may still be working.'), 'Missing answer was not visible on its tree row');
+  await wait(async () => await row.isExisting() && (await row.getText()).includes('Codex has your message but hasn’t saved its answer yet. It may still be working.'), 'Missing answer was not visible in Details');
   assert.doesNotMatch(await row.getText(), /Couldn’t deliver|Not delivered/, 'An accepted message cannot be described as undelivered');
   await wait(async () => (await browser.$(`.item-detail [data-pending="${input.id}"]`).getText()).includes('Delivered · no answer yet'), 'Delivered message did not retain its truthful pending caption');
-  assert.equal(await browser.$('[aria-label="Delivery recovery"]').isExisting(), false, 'A decision on a visible row must not also raise a banner');
+  // Every decision is also listed in the recovery banner (the Map row no longer answers it).
+  assert.equal(await browser.$('[aria-label="Delivery recovery"]').isExisting(), true, 'The recovery banner must list the stopped delivery');
   // This accepted attempt belongs to the current binding generation: the bar waits for its answer.
-  const waitingLabel = `Waiting for codex to answer “${folded(workText).slice(0, 38).trimEnd()}…”`;
+  const waitingLabel = `Waiting for Codex to answer “${folded(workText).slice(0, 38).trimEnd()}…”`;
   // The session's sending state is read in the connection card's Sending… dialog (the session bar and its chip are gone).
   await openDispatch();
   await wait(async () => (await sendingLabel().getText()) === waitingLabel, 'Sending did not wait for the accepted message’s answer');
@@ -162,12 +163,12 @@ export async function runRecoveryAcceptance(configuration) {
   assert.ok((await (await recoveryRow()).$('button=Stop waiting').getAttribute('class')).includes('btn-primary'));
   const ask = await (await recoveryRow()).$('button=Ask for the answer');
   assert.ok((await ask.getAttribute('class')).includes('btn-secondary'));
-  assert.equal(await ask.getAttribute('title'), 'Asks codex to save its answer now. An answer it’s still working on won’t be linked to this message.');
+  assert.equal(await ask.getAttribute('title'), 'Asks Codex to save its answer now. An answer it’s still working on won’t be linked to this message.');
   const again = await (await recoveryRow()).$('button=Send again');
   assert.ok((await again.getAttribute('class')).includes('btn-ghost'));
   assert.equal(await (await recoveryRow()).$('button=Cancel message').isExisting(), false, 'A received message cannot be cancelled');
   await click(again);
-  assert.ok((await dialog().getText()).includes('codex already has this message. Send it again anyway?'));
+  assert.ok((await dialog().getText()).includes('Codex already has this message. Send it again anyway?'));
   await click(await dialog().$('button=Cancel'));
   await wait(async () => !(await dialog().isExisting()), 'Resend confirmation remained open');
   await click(await (await recoveryRow()).$('button=More options'));
@@ -232,7 +233,7 @@ export async function runRecoveryAcceptance(configuration) {
   const lateWorkText = `native-stop-waiting-work-${nonce}\nSave the original answer when it becomes available.`;
   // Nothing is held once the successor has finished, but the item's one answer stays sealed: this reply goes out through
   // "Add a reply". The window may still be switching from the held follow-up; wait for that action before choosing an editor.
-  await wait(async () => (await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button').isExisting())
+  await wait(async () => (await browser.$('.item-detail [aria-label="Item actions"] button[aria-label="Add a reply"]').isExisting())
     && !(await browser.$('.item-detail [data-owner-input] .detail-box textarea').isExisting()), '"Add a reply" did not return after the successor finished');
   await ownerReply(configuration, lateWorkText, await snapshot(configuration));
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');
@@ -242,8 +243,8 @@ export async function runRecoveryAcceptance(configuration) {
   const lateMissing = await snapshot(configuration), lateInput = lateMissing.inputs[lateAdmission.inputId];
   assert.equal(lateInput.attempts[0].acceptance, 'accepted');
   assert.equal(lateInput.attempts[0].host_turn_id, lateAdmission.turnId);
-  const lateRow = () => browser.$(`[role="tree"] .stuck-note[data-stuck="answer"][data-stuck-input="${lateInput.id}"]`);
-  await wait(async () => await lateRow().isExisting(), 'Stop-waiting decision did not appear on its tree row');
+  const lateRow = () => browser.$(`.item-detail .stuck-note[data-stuck="answer"][data-stuck-input="${lateInput.id}"]`);
+  await wait(async () => await lateRow().isExisting(), 'Stop-waiting decision did not appear in Details');
   await click(await lateRow().$('button=Stop waiting'));
   await wait(async () => (await snapshot(configuration)).inputs[lateInput.id].state === 'skipped', 'Stop waiting did not save the real owner decision');
   const stoppedWaiting = await snapshot(configuration), skippedInput = stoppedWaiting.inputs[lateInput.id];

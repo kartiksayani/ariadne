@@ -11,7 +11,7 @@ const route = { project_id: project, session_id: '00000000-0000-4000-8000-000000
 describe('earlier session message numbers', () => {
   it('names the agent only while this session is idle and another of its project runs', () => {
     const live = summary('00000000-0000-4000-8000-000000000002', true, { active_binding: { adapter_id: 'claude_code_mod', connection_state: 'connected' } });
-    expect(earlierAgent(route, [summary(route.session_id, false), live])).toBe('codex');
+    expect(earlierAgent(route, [summary(route.session_id, false), live])).toBe('Codex');
     // Its own agent running, nothing running elsewhere, or the running one in another project: plain numbers.
     expect(earlierAgent(route, [summary(route.session_id, true), live])).toBeNull();
     expect(earlierAgent(route, [summary(route.session_id, false)])).toBeNull();

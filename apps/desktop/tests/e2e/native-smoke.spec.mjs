@@ -24,8 +24,8 @@ const phase = process.env.ARIADNE_E2E_PHASE;
 const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
-async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
-// What one surface shows for a saved reply's delivery: its stuck note (when it has words) or else the dock's delivery line.
+// What one surface shows for a saved reply's delivery: its stuck note (when it has words), else the status line under its bubble
+// (alpha.21 E16), else the dock's delivery line.
 // `facts` lists every stuck note and delivery line present, so a failure says what was actually there.
 const replyDelivery = (root, inputId) => browser.execute((root, inputId) => {
   const scope = document.querySelector(root), shown = element => !!element && element.getClientRects().length > 0;
@@ -33,10 +33,13 @@ const replyDelivery = (root, inputId) => browser.execute((root, inputId) => {
     input: note.getAttribute('data-stuck-input'), stuck: note.getAttribute('data-stuck'),
     text: (note.querySelector('[role="status"]')?.textContent ?? '').trim() }));
   const delivery = [...(scope?.querySelectorAll('.detail-delivery[role="status"]') ?? [])].filter(shown).map(line => (line.textContent ?? '').trim());
+  const bubble = [...(scope?.querySelectorAll(`[data-pending="${inputId}"] .detail-bubble-status[data-status]`) ?? [])].filter(shown)
+    .map(line => ({ status: line.getAttribute('data-status'), text: (line.querySelector('span')?.textContent ?? line.textContent ?? '').trim() }));
   const own = notes.find(note => note.input === inputId && note.text !== '');
   const shownState = own ? { kind: 'stuck-note', stuck: own.stuck, text: own.text }
+    : bubble.length ? { kind: 'bubble-status', stuck: bubble[0].status, text: bubble[0].text }
     : delivery.find(text => text !== '') ? { kind: 'delivery', stuck: null, text: delivery.find(text => text !== '') } : null;
-  return { state: shownState, facts: `stuck notes ${JSON.stringify(notes)}; delivery lines ${JSON.stringify(delivery)}` };
+  return { state: shownState, facts: `stuck notes ${JSON.stringify(notes)}; bubble status ${JSON.stringify(bubble)}; delivery lines ${JSON.stringify(delivery)}` };
 }, root, inputId);
 const invoke = (command, request) => browser.execute(async (command, request) => {
   try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke(command, { request }) }; }
@@ -145,16 +148,6 @@ async function dockQuestion(question) {
   if (!await card.isExisting()) return undefined;
   return (await card.$('.dock-question-title').getText()).includes(question) ? card : undefined;
 }
-// What the dock's Sent chip lists for one question: the words as they went out and the delivery line. Opens the list.
-async function dockSent(question) {
-  const chip = await browser.$(`${dockSelector} button.dock-sent`);
-  if (!await chip.isExisting()) return undefined;
-  if (await chip.getAttribute('aria-expanded') !== 'true') await chip.click();
-  for (const row of await browser.$$(`${dockSelector} [aria-label="Sent answers"] .dock-sent-row`)) {
-    if ((await row.getText()).includes(question)) return row;
-  }
-  return undefined;
-}
 function orderedInputs(session) { return Object.values(session.inputs).sort((a, b) => a.seq - b.seq); }
 function receipts(session, inputs) {
   return inputs.map(input => {
@@ -218,22 +211,28 @@ async function delivery(configuration) {
   // After its Sent hold the dock moves on: nothing unsent waits, so it folds to its line.
   await wait(async () => !(await browser.$(`${dockSelector} button.dock-pill`).isExisting()) && await browser.$(dockSelector).getAttribute('data-open') === null,
     'Answered question remained in the dock');
-  // The Sent list quotes the chosen option once the saved input is read back.
-  await wait(async () => (await (await dockSent(configuration.question))?.getText())?.includes(configuration.options[0].label) ?? false,
-    'Dock answer did not appear in Sent with its chosen option');
+  // The dock's Sent chip lists only answers the agent has not picked up (alpha.21 E17: a stuck one gets a notice and its controls in
+  // Details), so it can already be gone here; the saved answer and its chosen option are checked on disk below.
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
-  // Close the Sent list again (its chip toggles it) before the Map is used.
-  await click(await browser.$(`${dockSelector} button.dock-sent`));
 
   // The first follow-up uses the bigger conversation view; the others use the detail's same composer.
   // The held answer hides the answer slot, so all four replies queue behind it.
   const item = await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`);
   await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Selected item detail did not load');
+  // The dock's Sent chip lists only answers the agent has not picked up. Where the answer lives now is its bubble in Details: the chosen option,
+  // then a status line "✓ Sent at … · waiting for the agent" before the pickup, or "✓ Picked up at …" after it (alpha.21 E16).
+  await wait(async () => {
+    for (const turn of await browser.$$('.item-detail li[data-owner-said="true"]')) {
+      const text = await turn.getText();
+      if (text.includes(configuration.options[0].label) && /✓ (Sent at|Picked up)/.test(text)) return true;
+    }
+    return false;
+  }, 'The answer showed no "Sent" or "Picked up" status line under its bubble in Details');
   let replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
   for (const [index, text] of ownerTexts.slice(1).entries()) {
     if (index === 0) {
-      const expand = await browser.$('.item-detail button[aria-label="Open the conversation in a bigger view"]');
+      const expand = await browser.$('.shell-detail-head button[aria-label="Read in a bigger view"]');
       await expand.waitForDisplayed(); await expand.waitForEnabled(); await expand.click();
       await browser.$('section[aria-label="Item conversation"]').waitForDisplayed();
     }
@@ -249,17 +248,19 @@ async function delivery(configuration) {
       assert.equal(saved.state, 'queued', 'The conversation reply queues behind the held answer');
       const pending = await browser.$(`section[aria-label="Item conversation"] [data-pending="${saved.id}"]`);
       await pending.waitForExist(); await pending.scrollIntoView({ block: 'center' });
-      await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text))
-        && (await pending.getText()).includes('Not sent yet'), 'The conversation reply and its queued delivery were not visible');
-      // Behind the held answer the reply shows a stuck note instead of the dock line, and the wording depends on the stage.
+      await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text)), 'The conversation reply was not visible');
+      // Behind the held answer the reply shows a stuck note or its bubble status instead of the dock line, and the wording depends on the stage.
       // So capture whichever the view shows for the reply and require the detail pane to show the same kind with the same text.
       const viewRoot = 'section[aria-label="Item conversation"]', paneRoot = '.item-detail:not(.item-conversation)';
       let viewShown = await replyDelivery(viewRoot, saved.id);
       try { await wait(async () => (viewShown = await replyDelivery(viewRoot, saved.id)).state !== null, 'unused'); }
       catch { assert.fail(`The bigger conversation view did not show a delivery state for the saved reply; it had ${viewShown.facts}`); }
       const expected = viewShown.state;
+      // A reply still queued behind the held answer is "Sent" or has a stuck note; it is never "Picked up".
+      assert.ok(expected.kind === 'stuck-note' || expected.kind === 'delivery' || expected.kind === 'bubble-status' && expected.stuck === 'sent',
+        `A queued reply must read as sent or stuck, never picked up; the view showed ${JSON.stringify(expected)}`);
       await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
-      const back = await browser.$('section[aria-label="Item conversation"]').$('button=Back to Map');
+      const back = await browser.$('section[aria-label="Item conversation"]').$('button[aria-label="Back to Map"]');
       await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();
       await wait(async () => !(await browser.$('section[aria-label="Item conversation"]').isExisting()), 'Back to Map did not close the bigger conversation view');
       assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), configuration.itemId,

@@ -7,6 +7,7 @@ import { goToSession } from './open';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { PresenceObservation } from '../../../src/generated/domain/models';
 import { answerWords } from '../answer/words';
+import { closeDetails } from '../shell/closeDetails';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
@@ -78,12 +79,14 @@ describe('quick owner answers from the desktop', () => {
     press(2);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2', text: note } });
+    // Queued behind another message: the Not sent yet caption and StuckNote's Edit and Delete, as before.
     await screen.findByText('Not sent yet');
     const session = transport.sessions.get(route.session_id)!;
     const input = Object.values(session.inputs).find(value => value?.kind === 'answer' && value.target.item_id === '2')!;
     input.state = 'in_flight'; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
-    await screen.findByText('On its way');
+    await waitFor(() => expect(within(detail()).queryByRole('button', { name: 'Undo' })).toBeNull());
+    expect(within(detail()).getByText(/^✓ Sent at \d\d:\d\d · waiting for the agent$/u)).toBeTruthy();
     expect(within(detail()).getByRole('button', { name: 'Cancel message' })).toBeTruthy();
   });
 
@@ -92,7 +95,7 @@ describe('quick owner answers from the desktop', () => {
     const note = ' Keep my exact note: café\nsecond line ';
     fireEvent.change(words(), { target: { value: note } });
     // Details holds the question, so the dock leaves it out; closing Details hands it to the dock with the same draft.
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     const dock = screen.getByRole('region', { name: 'Answer dock' });
     fireEvent.click(await within(dock).findByRole('button', { name: /^1 waiting$/ }));
     await waitFor(() => expect(answerWords(dock).value).toBe(note));

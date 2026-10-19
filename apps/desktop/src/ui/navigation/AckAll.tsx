@@ -105,12 +105,20 @@ export function AckAll({ actions, topicId, topicName, items, disabled = false }:
       ? <span className="ack-all-held" role="status"><i className="ph ph-check" aria-hidden="true" />
         <span>Acked {state.total}<span className="tree-wide-only"> results</span></span>
         <button type="button" className="ack-all-undo" aria-label="Undo Ack all" onClick={() => controller.undo()}>Undo</button></span>
-      : !!eligible.length && <button ref={opener} type="button" className="tree-topic-ack-all" title="Ack read-only findings and explanations in this topic"
+      : !!eligible.length && !(mine && state.phase === 'failed') && <button ref={opener} type="button" className="tree-topic-ack-all" title="Ack read-only findings and explanations in this topic"
         aria-haspopup="dialog" aria-expanded={!!reviewed}
         disabled={disabled || busy || actionState.writing || !!actionState.pending || sessionState.status !== 'ready' || !!sessionState.error}
         onClick={() => { if (reviewed) close(); else { setReviewed(eligible); setError(null); } }}><i className="ph ph-check" aria-hidden="true" />Ack all ({eligible.length})</button>}
-    {mine && state.phase === 'failed' && <span className="ack-all-progress" role="status"
-      title={`${state.completed} saved · ${state.remaining} to finish`}>{state.completed} saved · {state.remaining} to finish</span>}
+    {mine && state.phase === 'failed' && <>
+      <span className="ack-all-progress" role="status"
+        title={`${state.completed} saved · ${state.remaining} to finish`}>{state.completed} saved · {state.remaining} to finish</span>
+      {/* The notice offers the same two actions; this keeps them within reach after it is dismissed. They take the disabled opener's place,
+          so the band keeps its width. An unconfirmed write is only retried. */}
+      <button type="button" className="ack-all-act" aria-label="Retry" title="Retry" onClick={() => { void controller.retry(); }}>
+        <i className="ph ph-arrow-clockwise" aria-hidden="true" /><span className="tree-wide-only">Retry</span></button>
+      <button type="button" className="ack-all-act" aria-label="Cancel remaining" title="Cancel remaining" disabled={!!actionState.pending}
+        onClick={() => { controller.cancelRemaining(); }}><i className="ph ph-x" aria-hidden="true" /><span className="tree-wide-only">Cancel remaining</span></button>
+    </>}
     {reviewed && !(mine && state.phase === 'holding') && <AckAllReview anchor={opener.current} label={`Acknowledge results in ${topicName}`} topicName={topicName}
       items={reviewed} error={error} onConfirm={confirm} onCancel={close} />}
   </>;

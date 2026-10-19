@@ -14,12 +14,14 @@ import type { RevealedItem } from '../../../src/data/routes';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
+import { ContinueTopicHost } from '../../../src/ui/dialogs/ContinueTopicDialog';
 import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tree/TreeView';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 import { Notices, notices } from '../../../src/ui/pages/notices';
+import { toasts } from '../../../src/ui/shell/toast';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { shortLabel } from '../../../src/ui/shared/short';
@@ -30,6 +32,7 @@ import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
 import { ACK_HOLD_MS } from '../../../src/ui/shared/ack';
 import { SessionRowAction } from '../../../src/ui/pages/SessionRowAction';
 import { dispatchIntent } from '../../../src/ui/intents';
+import { TopicConversation } from '../../../src/ui/detail/TopicConversation';
 
 const stores: NavigationStore[] = [];
 const removals = new Set<RemovalQueue>();
@@ -42,6 +45,8 @@ async function disposeTrees() {
   removals.clear();
   stores.splice(0).forEach(store => store.stop());
   notices.clear();
+  const toast = toasts.current();
+  if (toast) toasts.dismiss(toast.id);
 }
 afterEach(async () => {
   await disposeTrees();
@@ -57,6 +62,8 @@ interface Recorded {
   selected: RevealedItem[]; acts: [RowIntent, ItemRoute][];
   openedDetail: boolean[];
   dismissed: number; resumed: number; cleared: number; archive: number; removed: number;
+  /** The topics "Reply to topic" and a stuck reply's Edit asked Details to open (alpha.21 E6). */
+  topics: string[];
 }
 async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null }: {
   transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean; removal?: RemovalQueue | null;
@@ -69,22 +76,30 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   const store = navigation.opened.open(route);
   if (load) await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
-  const calls: Recorded = { selected: [], openedDetail: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
+  const calls: Recorded = { selected: [], openedDetail: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0, topics: [] };
   const openLink = vi.fn();
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
+    const [topic, setTopic] = useState<string | null>(null);
     return <RemovalContext.Provider value={removal}><LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} summaries={[]} now={now}
       onSelected={(result, openDetail = true) => { calls.selected.push(result); calls.openedDetail.push(openDetail); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
-      onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider></RemovalContext.Provider>;
+      onOpenTopic={topicId => { calls.topics.push(topicId); setTopic(topicId); }}
+      onRemove={() => { calls.removed++; }} {...props} {...extra} />
+      {/* Details' topic mode, beside the tree: the reply composer the menu opens. */}
+      {topic && <TopicConversation drafts={drafts} store={store} topicId={topic} onOpenItem={() => {}} />}</LinkOpener.Provider></RemovalContext.Provider>;
   }
   const view = render(<Harness />);
   return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
 }
+/** SPEC 11.4: the notice for an item the filter would leave out. */
+const outsideNotice = /^Showing “.+”, which is outside your filter \(Waiting on me\)\.$/;
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
+/** The topic reply composer in Details' topic mode (the harness shows it beside the tree once the tree asks to open the topic). */
+const box = () => document.querySelector<HTMLElement>('[data-composer="topic"]');
 /** An entry of a topic band's "…" menu (Reply to topic, Open the bin, Archive topic…, Remove topic…). */
 const bandMenu = (band: HTMLElement, entry: RegExp) => {
   fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
@@ -823,7 +838,9 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
       expect(entered).toBe(true);
       expect(removal.pending()).toEqual([]);
       expect(disposed).toBe(false);
-      expect(notices.getSnapshot()[0]?.text).toContain('Telling demo.local');
+      // The toast stays up while it is told; its Undo ended with the window.
+      expect(toasts.current()).toMatchObject({ expired: true });
+      expect(toasts.current()?.text).toMatch(/^Removed “.*”.* is told in 5 s\.$/);
       await act(async () => { release(); await sending; await disposal; });
       expect(disposed).toBe(true);
       expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toHaveLength(1);
@@ -988,11 +1005,11 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     } });
     const band = topicRow('Continued context');
     expect(band.querySelector('.tree-topic-line')).not.toBeNull();
-    // Reply waits while the reply is on its way; Archive and Remove stay in the "…" menu.
+    // Reply to topic stays open while a reply is on its way (it opens the topic's Details, where that reply has its Undo); Archive and Remove stay too.
     fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
     expect(screen.getByRole('menuitem', { name: /^Remove topic/ })).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Archive topic/ }).disabled).toBe(false);
-    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(false);
   });
   const text = 'Keep the retry limits as they are';
   // The first input on item 8's topic becomes a queued reply to the whole topic.
@@ -1004,51 +1021,14 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     input.payload.target_snapshot.question_revision = null; input.payload.target_snapshot.item_question = null;
     return input.id;
   };
-  const cancels = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_cancel');
-  it('deletes a topic reply not sent yet from its band in one click', async () => {
-    let id = '';
-    const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
-    const band = topicRow('Continued context');
-    expect(within(band).getByRole('button', { name: /^More actions for/ })).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Delete' })); });
-    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
-    await waitFor(() => expect(within(topicRow('Continued context').parentElement!).queryByRole('button', { name: 'Delete' })).toBeNull());
-    expect(transport.preferences.drafts.filter(draft => draft.target.item_id === null)).toHaveLength(0);
-  });
-  it('keeps topic delivery status sticky while its recovery controls remain in the topic flow', async () => {
+  it('keeps topic delivery status sticky and offers no controls under the band: Undo and Retry are in the topic’s Details', async () => {
     await mount({ configure: queuedReply });
     const band = topicRow('Continued context'), group = band.parentElement!;
     expect(band.querySelector('.tree-topic-status')).not.toBeNull();
-    expect(band.querySelector('.stuck-note')).toBeNull();
-    const content = group.querySelector('.tree-topic-content')!;
-    expect(content.previousElementSibling).toBe(band);
-    expect(content.querySelector('.stuck-note')).not.toBeNull();
+    expect(group.querySelector('.stuck-note')).toBeNull();
+    expect(within(group).queryByRole('button', { name: 'Delete' })).toBeNull();
+    expect(within(group).queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(group.contains(row('8'))).toBe(true);
-  });
-  it('edits a topic reply not sent yet: the queued reply is taken back first, then its text goes into the topic’s reply box', async () => {
-    let id = '';
-    const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
-    await waitFor(() => expect((screen.getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe(text));
-    expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text });
-    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
-    // No draft held the words before the cancel went out: they could have been sent twice.
-    const cancelAt = transport.mutations.findIndex(request => request.command.command === 'input_cancel');
-    expect(transport.mutations.slice(0, cancelAt).some(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text))).toBe(false);
-    expect(transport.mutations.slice(cancelAt).some(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text))).toBe(true);
-  });
-  it('never overwrites a topic reply the owner already started: the queued one stays and its text is offered to copy', async () => {
-    const { transport, drafts, store } = await mount({ configure: queuedReply });
-    const session = store.getSnapshot().snapshot!.session, topic = session.items['8']!.topic_id;
-    await act(async () => { await drafts.load(); });
-    const started = drafts.beginTopic(session, topic)!;
-    await act(async () => { await drafts.editSaved(started, { text: 'Something else' }); });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
-    expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(text);
-    expect(drafts.findTopic(route, topic)?.draft.text).toBe('Something else');
-    expect(cancels(transport)).toHaveLength(0);
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
     const { calls } = await mount();
@@ -1371,16 +1351,18 @@ describe('session tree filters', () => {
       viewOf(transport).filters.statuses = ['waiting_on_me']; viewOf(transport).expanded_item_ids = [];
     } });
     expect(ids()).toEqual(['2']);
+    render(<Notices />);
     const reveal: RevealedItem = { kind: 'item', route: { ...route, item_id: '1.1' }, store, temporaryExpandedItemIds: ['1'] };
     rerender({ reveal, selectedId: '1.1' });
-    expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    expect(within(row('1.1')).getByText('Outside filter')).toBeTruthy();
     expect(ids()).toEqual(['1', '1.1', '2']);
     expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('64%');
-    fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide it again' }));
     expect(calls.resumed).toBe(1);
     await waitFor(() => expect(viewOf(transport).selected_item_id).toBeNull());
     rerender({ reveal: null, selectedId: null });
-    expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull(); expect(ids()).toEqual(['2']);
+    await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull()); expect(ids()).toEqual(['2']);
   });
   it('holds the chips while a preference write is unconfirmed', async () => {
     const { transport } = await mount();
@@ -1483,50 +1465,54 @@ describe('session tree lifecycle', () => {
     fireEvent.click(prompt); fireEvent.click(prompt);
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
     await act(async () => { releasePresence(); await pause; await store.refresh(); });
-    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text === `Archived “${topic.name}”.`)).toBe(true));
+    // E33: archiving always asks, even a closed topic; the two early clicks open one dialog.
+    const dialog = within(await screen.findByRole('dialog', { name: `Archive the “${topic.name}” topic?` }));
+    expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    await waitFor(() => expect(toasts.current()?.text).toBe(`Archived “${topic.name}”. It’s in Archive with all its history.`));
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(1);
     expect(topic.archived_at).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
-  it('archives a closed topic at once from its prompt, with Undo and View archive', async () => {
+  it('archives a closed topic from its prompt after asking, leaving a strip and a toast that both Undo', async () => {
     const transport = new HistoryTransport();
     const { calls } = await mount({ transport, configure: value => {
       const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
-    render(<Notices />);
     const band = topicRow('Continued context');
     expect(within(band.parentElement!).getByText('Everything here is closed.')).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' })); });
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(await screen.findByText('Archived “Continued context”.')).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Session tree' }).textContent).not.toContain('Archived “Continued context”.');
-    vi.useFakeTimers();
-    await act(async () => { await vi.advanceTimersByTimeAsync(6500); });
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
-    vi.useRealTimers();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
-    await waitFor(() => expect(screen.queryByText('Archived “Continued context”.')).toBeNull());
-    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
-    bandMenu(topicRow('Continued context'), /^Archive topic/);
-    await act(async () => {});
-    fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
-    expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
+    fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive the “Continued context” topic?' }));
+    expect(transport.mutations).toEqual([]);
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    await waitFor(() => expect(toasts.current()?.text).toBe('Archived “Continued context”. It’s in Archive with all its history.'));
+    // The topic's place holds one strip; clicking it is Undo.
+    const strip = await screen.findByRole('treeitem', { name: /^Archived “Continued context” · \d+ items? · Undo$/ });
     expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
+    await act(async () => { fireEvent.click(within(strip).getByRole('button', { hidden: true })); });
+    await waitFor(() => expect(screen.queryByRole('treeitem', { name: /^Archived “Continued context”/ })).toBeNull());
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
+    expect(calls.archive).toBe(0);
+    // The toast's Undo restores too.
+    bandMenu(topicRow('Continued context'), /^Archive topic/);
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive topic' })); });
+    await waitFor(() => expect(toasts.current()?.undo).toBeTruthy());
+    await act(async () => { toasts.runUndo(toasts.current()!.id); });
+    await waitFor(() => expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore', 'topic_archive', 'topic_restore']));
+    await waitFor(() => expect(screen.queryByRole('treeitem', { name: /^Archived “Continued context”/ })).toBeNull());
   });
-  it('dismisses an archive outcome without replaying it on an unrelated tree update', async () => {
+  it('keeps an archive strip on an unrelated tree update without archiving again', async () => {
     const transport = new HistoryTransport();
     const view = await mount({ transport, configure: value => {
       const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
-    render(<Notices />);
     bandMenu(topicRow('Continued context'), /^Archive topic/);
-    await act(async () => {});
-    await screen.findByText('Archived “Continued context”.');
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive topic' })); });
+    await screen.findByRole('treeitem', { name: /^Archived “Continued context”/ });
     view.rerender({ detailOpen: true });
-    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.getByRole('treeitem', { name: /^Archived “Continued context”/ })).toBeTruthy();
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
   });
   it('archives a topic with open work after one confirmation, leaving its items and cancelling its unsent messages', async () => {
@@ -1539,11 +1525,12 @@ describe('session tree lifecycle', () => {
     expect(unsent.length).toBeGreaterThan(1);
     // Archive is offered on a topic with open items; it asks first and never refuses.
     bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
-    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
-    expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' }));
+    expect(dialog.getByText(/^It leaves the Map, and its questions leave Waiting on me\. .* you can restore it any time from Archive\. Nothing is sent to /)).toBeTruthy();
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
-    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text.includes(`${unsent.length} unsent messages were cancelled.`))).toBe(true));
+    await waitFor(() => expect(toasts.current()?.text).toBe('Archived “Delivery decisions”. It’s in Archive with all its history.'));
+    // The cancelled messages keep their words on the inputs ("Put back in reply box" / Copy).
     expect(unsent.every(id => session.inputs[id]!.state === 'cancelled')).toBe(true);
     expect(Object.values(session.items).map(item => item!.status)).toEqual(statuses);
   });
@@ -1552,12 +1539,13 @@ describe('session tree lifecycle', () => {
     transport.replies.push({ api_version: 1, ok: false,
       error: { code: 'invalid_argument', message: 'Refused archive.', hint: '', retryable: false, field_errors: [] } });
     bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
-    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' }));
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Something in that isn’t valid. Check it and try again.');
-    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }).contains(alert)).toBe(true);
+    expect(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' }).contains(alert)).toBe(true);
     expect(notices.getSnapshot()).toEqual([]);
+    expect(toasts.current()).toBeNull();
   });
   it('asks before archiving a topic from its band, and the e key no longer does', async () => {
     const transport = new HistoryTransport();
@@ -1566,17 +1554,20 @@ describe('session tree lifecycle', () => {
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'e' });
     expect(screen.queryByRole('dialog')).toBeNull();
     bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
-    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Archive the “Delivery decisions” topic?' })).toBeTruthy();
   });
   it('offers Continue elsewhere on an earlier topic and asks which other session takes it', async () => {
     const { navigation, rerender } = await mount();
-    rerender({ summaries: navigation.getSnapshot().sessions!.sessions.items });
+    const summaries = navigation.getSnapshot().sessions!.sessions.items;
+    rerender({ summaries });
+    // Continue is one flow in the app's host, not in the Map (SPEC 10.7, 10.8).
+    render(<ContinueTopicHost navigation={navigation} actions={new SessionActionControllers(navigation.service)} />);
     expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue elsewhere' })).toBeNull();
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' }));
     expect(dialog.getAllByRole('button').map(button => button.getAttribute('aria-labelledby') ? button.textContent : null).filter(Boolean))
       .toEqual([expect.stringMatching(/^Separate session/)]);
-    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(dialog.getByRole('button', { name: /^Cancel/ }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
   it('offers Continue elsewhere on a topic from a session created today', async () => {
@@ -1631,76 +1622,46 @@ describe('stopped deliveries in the tree', () => {
     const band = topicRow(topicName), line = band.querySelector<HTMLElement>('.tree-topic-status')!;
     expect(line.textContent).toBe('demo.local has your message but hasn’t saved its answer yet. It may still be working.');
     expect(line.style.color).not.toBe('var(--a-warn)');
-    const fix = band.parentElement!.querySelector<HTMLElement>('.stuck-note[data-stuck="answer"]')!;
-    expect(fix.textContent).not.toMatch(/Couldn’t deliver|Not delivered/);
-    expect(within(fix).getByRole('button', { name: 'Ask for the answer' })).toBeTruthy();
-    expect(within(fix).queryByRole('button', { name: 'Cancel message' })).toBeNull();
+    // The decision lives in Details (and the banner), not under the row or the band (alpha.21 E17).
+    expect(band.parentElement!.querySelector('.stuck-note')).toBeNull();
   });
-  it('answers it on the item row: Couldn’t deliver, Retry in one click, without selecting the row', async () => {
-    // On its own (old) binding there is no presence: Retry is the owner's word that the agent is idle.
-    const { transport, calls } = await mount();
-    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
-    expect(fix.textContent).toContain('Couldn’t deliver “Followup request for item 7. Preserve…”. Ariadne isn’t sure it reached demo.local.');
-    expect(within(fix).getByRole('button', { name: 'Mark as done' })).toBeTruthy();
-    expect((within(fix).getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false);
-    await act(async () => { fireEvent.click(within(fix).getByRole('button', { name: 'Retry' })); });
-    expect(transport.mutations.find(request => request.command.command === 'input_resolve')!.command).toMatchObject({ params: {
-      input_id: stopped, attempt_id: '00000000-0000-4000-8000-000000000063', decision: 'resend', reason: '', evidence: { source: 'owner_attestation', owner_attested_idle: true } } });
+  it('shows a stopped delivery as a plain line on the item row, with no controls and without selecting it', async () => {
+    const { calls } = await mount();
+    expect(row('7').querySelector('.stuck-note')).toBeNull();
+    expect(row('7').querySelector('.tree-delivery')?.textContent).toMatch(/^Couldn’t deliver/);
+    expect(within(row('7').querySelector<HTMLElement>('.tree-delivery')!).queryAllByRole('button')).toHaveLength(0);
     expect(calls.selected).toHaveLength(0);
   });
-  it('keeps the decision on the row when a later message is queued behind it on the same item', async () => {
-    const { transport } = await mount({ configure: transport => {
-      const session = transport.sessions.get(route.session_id)!, successor = structuredClone(session.inputs[stopped]!);
-      successor.id = '00000000-0000-4000-8000-0000000000f4'; successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
-      successor.state = 'queued'; successor.attempts = []; successor.active_attempt_id = null;
-      session.inputs[successor.id] = successor;
-    } });
-    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
-    expect(fix.getAttribute('data-stuck-input')).toBe(stopped);
-    fireEvent.click(within(fix).getByRole('button', { name: 'Mark as done' }));
-    await waitFor(() => expect(transport.mutations.find(request => request.command.command === 'input_resolve')).toBeTruthy());
-  });
-  it('opens the audited form from More options, and keys typed there never reach the tree', async () => {
-    const { transport } = await mount({ configure: active });
-    fireEvent.click(within(row('7')).getByRole('button', { name: 'More options' }));
-    const dialog = screen.getByRole('dialog', { name: 'Resolve delivery' });
-    fireEvent.keyDown(within(dialog).getByLabelText('Reason'), { key: 'e' });
-    expect(screen.queryByRole('dialog', { name: /^Archive “/ })).toBeNull();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog', { name: 'Resolve delivery' })).toBeNull(); expect(transport.mutations).toHaveLength(0);
-  });
-  it('shows no recovery banner while the row is visible, and the banner when a filter hides the row', async () => {
+  it('lists a stopped delivery in the recovery banner whether or not its row is visible, and its audited form never leaks keys to the tree', async () => {
     const view = await mount({ configure: active });
     view.rerender({ notices: <RecoveryPanel actions={view.actions} /> });
-    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
-    expect(banner()).toBeNull();
-    // The agent is running on the active binding: Retry and Mark as done wait, and say why.
-    const retry = within(fix).getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
-    expect(retry.disabled).toBe(true); expect(retry.title).toBe('demo.local is still working. Wait, or stop it in the terminal first.');
-    expect((within(fix).getByRole('button', { name: 'Mark as done' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(chip('Open'));
-    await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
     await waitFor(() => expect(banner()).not.toBeNull());
     expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
+    expect(banner()).not.toBeNull();
     clearChips();
-    await waitFor(() => expect(banner()).toBeNull());
+    fireEvent.click(within(banner()!).getByRole('button', { name: 'Review recovery' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.keyDown(within(dialog).getAllByRole('textbox')[0]!, { key: 'e' });
+    expect(screen.queryByRole('dialog', { name: /^Archive “/ })).toBeNull();
+    expect(view.transport.mutations.filter(request => request.command.command.startsWith('input_'))).toHaveLength(0);
   });
 });
 
 describe('Reply to topic', () => {
-  const box = () => document.querySelector<HTMLElement>('[data-owner-input^="topic:"]');
-  it('keeps the reply composer and closed-topic prompt outside the sticky header in the same topic section', async () => {
-    await mount({ configure: transport => {
+  it('opens Details on the topic from the band menu, and keeps the closed-topic prompt in the topic section outside the sticky header', async () => {
+    const { calls } = await mount({ configure: transport => {
       for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
     } });
     const band = topicRow('Delivery decisions'), group = band.parentElement!;
     bandMenu(band, /^Reply to topic/);
+    expect(calls.topics).toEqual([band.getAttribute('data-topic-id')]);
     await waitFor(() => expect(box()).not.toBeNull());
+    expect(group.contains(box())).toBe(false);
     expect(band.querySelector('.tree-prompt')).toBeNull();
-    expect(band.contains(box())).toBe(false);
     const content = group.querySelector('.tree-topic-content')!;
     expect(content.previousElementSibling).toBe(band);
-    expect(content.contains(box())).toBe(true);
     expect(content.querySelector('.tree-prompt')).not.toBeNull();
     expect(group.contains(row('1'))).toBe(true);
     const css = ['tree.css', 'tree-band.css'].map(name => readFileSync(resolve(__dirname, '../../../src/ui/tree', name), 'utf8')).join('\n');
@@ -1714,7 +1675,7 @@ describe('Reply to topic', () => {
     bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
-    const text = within(box()!).getByLabelText('Reply to this topic');
+    const text = within(box()!).getByRole('textbox');
     await waitFor(() => expect((text as HTMLTextAreaElement).disabled).toBe(false));
     fireEvent.change(text, { target: { value: 'Keep the retry limit at three across this topic.' } });
     fireEvent.keyDown(text, { key: 'Enter', metaKey: true });
@@ -1724,24 +1685,25 @@ describe('Reply to topic', () => {
       kind: 'topic_reply', target: { topic_id: topicId, item_id: null }, text: 'Keep the retry limit at three across this topic.',
       expected_question_revision: null, supersedes_answer_id: null, selected_option_id: null,
     } });
-    await waitFor(() => expect(box()).toBeNull());
+    await waitFor(() => expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(''));
   });
-  it('closes on Escape and keeps the draft for next time', async () => {
-    await mount();
+  it('leaves the box on Escape for the topic’s row, and keeps the draft in the store', async () => {
+    const { drafts } = await mount();
     bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).disabled).toBe(false));
-    const text = within(box()!).getByLabelText('Reply to this topic');
+    await waitFor(() => expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false));
+    const text = within(box()!).getByRole('textbox');
     fireEvent.change(text, { target: { value: 'Half a thought' } });
     fireEvent.keyDown(text, { key: 'Escape' });
-    expect(box()).toBeNull(); expect(document.activeElement).toBe(topicRow('Delivery decisions'));
-    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe('Half a thought'));
+    expect(document.activeElement).toBe(topicRow('Delivery decisions'));
+    expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Half a thought');
+    // The words are the stored draft, so closing Details loses nothing.
+    expect(drafts.findTopic(route, topicRow('Delivery decisions').getAttribute('data-topic-id')!)?.draft.text).toBe('Half a thought');
   });
   it('keeps the words and the focus when typed while the session view refreshes, with no shortcut firing, and holds Send until it is fresh', async () => {
     const { transport, store, calls } = await mount(), user = userEvent.setup();
     bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
-    const text = within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement;
+    const text = within(box()!).getByRole('textbox') as HTMLTextAreaElement;
     await waitFor(() => expect(text.disabled).toBe(false));
     // The app's window-level routing, and every key that reaches something other than the box.
     const root = document.body.firstElementChild as HTMLElement, elsewhere: Element[] = [];
@@ -2456,9 +2418,10 @@ describe('item details in the tree', () => {
     // An item being worked on keeps its note beside its reply in flight.
     expect(row('3').textContent).toContain('Receipt lookup is underway.');
     expect(row('3').querySelector('.tree-delivery')?.textContent).toMatch(/^Your reply was received/);
-    // A stopped delivery shows its fix under the details, not in their place.
+    // A stopped delivery shows as a line under the details (its fix is in Details, alpha.21 E17).
     expect(row('7').textContent).toContain('Replaced by');
-    expect(row('7').querySelector('.stuck-note')).not.toBeNull();
+    expect(row('7').querySelector('.stuck-note')).toBeNull();
+    expect(row('7').querySelector('.tree-delivery')).not.toBeNull();
   });
 
   it('floats the shortcut icons over the row so the text never changes width on hover', async () => {
@@ -2764,15 +2727,16 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
-  it.each(['fold topic', 'collapse item', 'status chip', 'Resume filtered view'])(
+  it.each(['fold topic', 'collapse item', 'status chip', 'Hide it again'])(
   'never scrolls when %s dismisses the active tree reveal', async path => {
     const view = await opened();
+    render(<Notices />);
     fireEvent.click(row('8'));
     await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('8'));
     const reveal = view.calls.selected[0];
     view.rerender({ reveal, selectedId: '8', detailOpen: true });
     // A status filter that leaves the revealed item out (a search no longer filters the Map).
-    if (path === 'Resume filtered view') await act(async () => { const saved = structuredClone(viewOf(view.transport));
+    if (path === 'Hide it again') await act(async () => { const saved = structuredClone(viewOf(view.transport));
       await view.navigation.saveSessionView({ ...saved, filters: { ...saved.filters, statuses: ['decided'] } }, view.transport.preferences.revision); });
     const readingPosition = path === 'collapse item' ? 0 : 150;
     scroller().scrollTop = readingPosition;
@@ -2787,11 +2751,11 @@ describe('scrolling the tree', () => {
       case 'status chip':
         fireEvent.click(chip('Open'));
         break;
-      case 'Resume filtered view':
-        fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+      case 'Hide it again':
+        fireEvent.click(await screen.findByRole('button', { name: 'Hide it again' }));
         break;
     }
-    await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    await waitFor(() => expect(path === 'Hide it again' ? view.calls.resumed : view.calls.dismissed).toBe(1));
     // A chip removes rows above the reading row, and the Map's hold (D24) moves the scroll to keep that row in place; every
     // other path leaves the scroll where the owner put it. Either way, dismissing the reveal moves nothing further.
     const settledAt = scroller().scrollTop;
@@ -3000,9 +2964,11 @@ describe('scrolling the tree', () => {
       if (this.matches('.tree-topic-content')) return new DOMRect(0, 60, 300, 360);
       return rect.call(this);
     });
-    const view = await mount();
-    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
+    // A closed topic's "Everything here is closed" prompt is the block under the band (it was the open reply box before alpha.21).
+    const view = await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    await waitFor(() => expect(document.querySelector('.tree-topic-content')).not.toBeNull());
     scroller().scrollTop = 190;
     const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
     view.rerender({ reveal: target, historyReveal: target, selectedId: '2' });

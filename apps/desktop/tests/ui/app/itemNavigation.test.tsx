@@ -9,6 +9,9 @@ import { goToSession } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { changesFixture } from '../changes/fixture';
+import { closeDetailsWith } from '../shell/closeDetails';
+import { useWideWindow } from '../shell/wideWindow';
+useWideWindow();
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 async function click(element: Element) {
@@ -88,6 +91,9 @@ function inTree(id: string) {
   expect(rectangle.bottom).toBeLessThanOrEqual(400);
 }
 
+/** SPEC 11.4: the notice for an item the filter would leave out. */
+const outsideNotice = /^Showing “.+”, which is outside your filter\b.*\.$/;
+
 describe('composed item navigation', () => {
   it('opens and focuses the owner answer behind a change, then consumes the jump', async () => {
     const value = changesFixture(), transport = new AppTransport();
@@ -98,7 +104,7 @@ describe('composed item navigation', () => {
     await click(within(context).getByRole('button', { name: 'Changed after your typed answer ↗' }));
     selected(value.answer.item_id);
     expect(document.activeElement?.getAttribute('data-message-id')).toBe(value.answer.message_id);
-    const otherControl = screen.getByRole('button', { name: 'Close detail' });
+    const otherControl = screen.getByRole('button', { name: 'Fold Details' });
     otherControl.focus();
     const session = transport.sessions.get(route.session_id)!; ++session.revision;
     session.messages.find(message => message.id === value.answer.message_id)!.body += '\nAdditional words.';
@@ -115,11 +121,11 @@ describe('composed item navigation', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
     mark.mockClear();
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     await pick('2');
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).not.toHaveBeenCalled(); // Reopening the same read revision adds no observation.
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     const session = transport.sessions.get(route.session_id)!;
     ++session.items['2']!.revision; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
@@ -177,7 +183,7 @@ describe('composed item navigation', () => {
     } else session.topics[session.items['2']!.topic_id]!.archived_at = session.updated_at;
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['2']!.question} · Waiting on me` }));
     const detail = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     expect(within(detail).getByRole('region', { name: 'Conversation' })).toBeTruthy();
     expect(detail.querySelector('[data-owner-input]')).toBeNull();
@@ -200,7 +206,7 @@ describe('composed item navigation', () => {
     await setup(transport); await openSession(); await pick('8');
     session.state = 'closed'; session.closed_at = session.updated_at; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['2']!.question} · Waiting on me` }));
     const detail = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     expect(within(detail).getByRole('region', { name: 'Your answer' })).toBeTruthy();
     expect(within(detail).getByText(sessionClosedReason)).toBeTruthy();
@@ -215,17 +221,17 @@ describe('composed item navigation', () => {
     await setup(transport); await openSession(); await pick('4');
     expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')).toBeNull();
     const links = document.querySelector<HTMLElement>('.detail-related')!;
-    const hidden = within(links).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
+    const hidden = within(links).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` });
     expect(hidden.classList.contains('is-hidden')).toBe(true);
     await click(hidden); selected('1.1');
     expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(document.querySelector('.tree-hidden-group')!.getAttribute('aria-expanded')).toBe('true');
     expect(view().hidden_item_ids).toEqual(['1']);
     await click(control('Back')); selected('4');
-    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` })).toBeTruthy();
+    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` })).toBeTruthy();
     await click(control('Forward')); selected('1.1');
     // The reverse connection navigates through the same history even though only item 4 declared it.
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['4']!.question} · Open` })); selected('4');
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['4']!.question} · Open` })); selected('4');
     await click(control('Back')); selected('1.1');
     expect(view().hidden_item_ids).toEqual(['1']);
   });
@@ -261,7 +267,7 @@ describe('composed item navigation', () => {
 
   it('peek footer: "Go to" selects the item and leaves a closed Details closed, "Open details" opens it', async () => {
     const transport = await setup(); await openSession(); await pick('1');
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
     const peekOn = async (id: string) => { await keyDown(treeRow(id), ' '); return screen.findByRole('button', { name: 'Go to' }); };
     await click(await peekOn('1.1'));
@@ -306,7 +312,7 @@ describe('composed map reveal scrolling', () => {
     if (cause === 'search matching nothing') view.filters.search = 'no matching question';
     const saved = structuredClone(view);
     await setup(transport); await openSession();
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     // Opening the session reveals its saved selection. A search edit keeps that temporary reveal (a search hides no
     // row, SPEC §4), so a fold dismisses it here: the hidden group opened and closed, which saves nothing.
     const search = await searchBox();
@@ -318,7 +324,10 @@ describe('composed map reveal scrolling', () => {
     await click(control('Graph'));
     const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');
     expect(target()).toBeNull();
-    expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
+    // Opening the session under a status filter already raised the outside-filter notice (the Tree showed the saved selection);
+    // it shows after the store's 300 ms display delay, so wait for it rather than race the clock. Other causes never raise it.
+    if (cause === 'status') expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    else expect(screen.queryByText(outsideNotice)).toBeNull();
     const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
     // The Graph has no Reveal selected button (SPEC 1.3); an outside route (a link, the dock, a native route) reveals it.
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
@@ -344,10 +353,10 @@ describe('composed map reveal scrolling', () => {
     expect((await searchBox()).value).toBe(saved.filters.search);
     // Only a status filter puts the item outside the filters; a search, matching or not, filters nothing.
     if (cause === 'status') {
-      expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
-      await click(screen.getByRole('button', { name: 'Resume filtered view' }));
+      expect(await screen.findByText(outsideNotice)).toBeTruthy();
+      await click(screen.getByRole('button', { name: 'Hide it again' }));
       expect(target()).toBeNull();
-      expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
+      expect(screen.queryByText(outsideNotice)).toBeNull();
       expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.filters).toEqual(saved.filters);
     }
   });
@@ -367,7 +376,7 @@ describe('composed map reveal scrolling', () => {
     }
     const opening = treeScroll().scrollTop;
     expect(opening).toBeGreaterThan(0);
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     expect(treeScroll().scrollTop).toBe(opening);
     await readAt(150);
     await pick('8');
@@ -397,7 +406,7 @@ describe('composed map reveal scrolling', () => {
     await readAt(150); outsideTree('8');
     await pick('8');
     expect(treeScroll().scrollTop).toBe(150);
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     expect(treeScroll().scrollTop).toBe(150);
     await pick('8');
     expect(treeScroll().scrollTop).toBe(150);
@@ -408,7 +417,7 @@ describe('composed map reveal scrolling', () => {
     treeGeometry(); await setup(); await openSession(); await pick('2');
     for (let attempt = 0; attempt < 2; ++attempt) {
       // Details answers the selected question, so the dock holds it once Details closes.
-      await click(screen.getByRole('button', { name: 'Close detail' }));
+      await closeDetailsWith(click);
       await readAt(600); outsideTree('2');
       await fromDock(); selected('2');
       expect(treeScroll().scrollTop).toBeLessThan(600);
@@ -430,7 +439,7 @@ describe('composed map reveal scrolling', () => {
     const before = treeScroll().scrollTop;
     const detail = within(screen.getByLabelText('Item detail'));
     if (entry === 'related link') {
-      await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
+      await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['8']!.question} · Open` }));
     } else if (entry === 'Markdown reference') {
       await click(within(document.querySelector<HTMLElement>('.detail-question')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
     } else if (entry === 'child link') {
@@ -448,7 +457,7 @@ describe('composed map reveal scrolling', () => {
     transport.preferences.sessions[0]!.hidden_item_ids = ['1'];
     await setup(transport); await openSession(); await pick('4'); await readAt(150);
     expect(treeRow('1.1')).toBeNull();
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` }));
     selected('1.1'); inTree('1.1');
     expect(treeScroll().scrollTop).toBeGreaterThan(150);
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.hidden_item_ids).toEqual(['1']);
@@ -491,7 +500,7 @@ describe('composed map reveal scrolling', () => {
     selected('2'); inTree('2');
     expect(document.activeElement).toBe(treeRow('2'));
     await readAt(600);
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} · Open` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Open` }));
     selected('1.1'); inTree('1.1');
     await readAt(600);
     await click(control('Back')); selected('2'); inTree('2');

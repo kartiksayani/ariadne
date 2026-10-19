@@ -206,19 +206,58 @@ function mapWorld(fixture: DesignFixture, app: AppFixture): void {
     filters: { ...view.filters, ...(map.filter ? { statuses: [...map.filter] } : {}) } });
 }
 
+/**
+ * The bin (10.1, 10.11, 11.3): the agent removed each `binned` item, and what is below it, at 21:19. Each removal leaves the receipt notice
+ * 11.3 reads, and the owner's unsent message on the item that it cancelled (its words stay in the bin).
+ */
+function binWorld(fixture: DesignFixture, app: AppFixture, id: string): void {
+  const binned = app.items?.binned ?? [], route = fixture.route;
+  if (!binned.length || !route) return;
+  const session = fixture.transport.sessions.get(route.session_id)!, binding = session.bindings[session.active_binding_id!]!, removedAt = today('21:19');
+  const under = (root: string, itemId: string): boolean => {
+    for (let at: string | null = itemId; at; at = session.items[at]?.parent ?? null) if (at === root) return true;
+    return false;
+  };
+  binned.forEach((entry, at) => {
+    const item = session.items[entry.item];
+    if (!item) throw new Error(`final ${id}: binned item that is not in the session: ${entry.item}`);
+    const messageId = uuid(200 + at * 4), inputId = uuid(201 + at * 4), operationId = uuid(202 + at * 4);
+    item.removed_at = removedAt; item.removed_by = { binding_id: binding.id, message_id: messageId };
+    if (entry.words) {
+      session.inputs[inputId] = { id: inputId, seq: session.counters.next_input++, binding_id: binding.id, kind: 'reply',
+        target: { topic_id: item.topic_id, item_id: item.id }, message_id: uuid(203 + at * 4), answer_id: null, created_at: today('21:12'), expected_question_revision: null,
+        payload: { text: entry.words, intent: 'reply', selected_option_id: null,
+          target_snapshot: { topic_name: session.topics[item.topic_id]!.name, item_question: item.question, question_revision: item.question_revision, ask: null, options: [] },
+          context: { message_ids: [], item_ids: [item.id], round_id: null, continuation_operation_id: null } },
+        state: 'cancelled', cancel_cause: 'agent_removed', attempts: [], active_attempt_id: null, resolution_history: [] };
+    }
+    session.operation_receipts[operationId] = [{ operation_id: operationId, actor_scope: { kind: 'agent', binding_id: binding.id }, command_digest: 'a'.repeat(64),
+      result: { operation_id: operationId, session_id: session.id, revision: session.revision, data: { kind: 'apply',
+        agent_removals: [{ topic_id: item.topic_id, item_id: item.id, message_id: messageId, item_ids: Object.keys(session.items).filter(key => under(item.id, key)),
+          waiting_questions: 0, cancelled_input_ids: entry.words ? [inputId] : [] }],
+        allocated_refs: {}, messages: [], item_revisions: {}, topic_revisions: {}, input_result_state: null, queue_join_state: null } } }];
+  });
+}
+
 /** The app's state for one final-board state at one size: sessions and items from the world, the drafts typed in. */
 export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Variant): DesignFixture {
   const spec = finalSpec(state, variant), fixture = buildFixture(spec, worldData(state.app));
   // The board draws at the default text size (SPEC §1: --text-scale 0.8); the handoff harness pins 100%.
   fixture.transport.preferences.global.text_scale = 80;
+  // 12.7: the open session's file can't be read from the start, so there is no read at all; 12.8 loses it after a good read (`drive`).
+  fixture.transport.unreadable = fixture.route;
+  if (state.app.sessions?.connection === 'unreadable') fixture.transport.failReads = true;
   // First run has no projects, so nothing of the pages' world applies.
   if (state.app.chrome?.page && state.app.chrome.page !== 'first') pageWorld(fixture, state.app);
   const drafts = state.app.drafts ?? [];
   if (!fixture.route) return fixture;
   const route = fixture.route, session = fixture.transport.sessions.get(route.session_id)!;
+  // 12.2: no agent is connected to this session at all (the binding is gone), not merely stopped.
+  if (state.app.sessions?.connection === 'none') session.active_binding_id = null;
   // The board's agent is running and waiting for me: idle, so an answer sent now reads "Sent at", not queued behind a turn.
   fixture.transport.idle(route.session_id);
   mapWorld(fixture, state.app);
+  binWorld(fixture, state.app, state.id);
   // "Later" is the owner's own mark (a preference), not a status of the item.
   fixture.transport.preferences.later = (state.app.items?.later ?? []).map(item => {
     if (!session.items[item]) throw new Error(`final ${state.id}: later on an item that is not in the session: ${item}`);
@@ -229,8 +268,10 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
     const owner = session.items[draft.item] ? session : [...fixture.transport.sessions.values()].find(value => value.items[draft.item]);
     const item = owner?.items[draft.item];
     if (!owner || !item) throw new Error(`final ${state.id}: draft on an item that is in no session: ${draft.item}`);
-    return { op_id: uuid(100 + at), session: { project_id: owner.project_id, session_id: owner.id }, binding_id: owner.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id }, intent: 'answer',
-      text: draft.own ?? draft.note ?? '', selected_option_id: draft.pick === undefined ? null : item.options[draft.pick]?.id ?? null,
+    return { op_id: uuid(100 + at), session: { project_id: owner.project_id, session_id: owner.id }, binding_id: owner.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id },
+      // Words typed in the Details composer go out as what fits the item (a note on one in progress, a reply on an open or waiting one).
+      intent: draft.reply === undefined ? 'answer' : item.status === 'in_progress' ? 'note' : item.status === 'waiting_on_me' || item.status === 'open' ? 'reply' : 'followup',
+      text: draft.reply ?? draft.own ?? draft.note ?? '', selected_option_id: draft.pick === undefined ? null : item.options[draft.pick]?.id ?? null,
       target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null };
   });
   return fixture;

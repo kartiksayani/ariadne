@@ -1,15 +1,17 @@
-import { AgentBin, binView } from '../remove/AgentBin';
+import { binView } from '../remove/AgentBin';
+import { BinDialog } from '../remove/BinDialog';
+import { archiveRequests } from '../remove/requests';
+import { toasts } from '../shell/toast';
 import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../selectors/removed';
 // The session tree column (handoff "Session tree"): session bar, status menu,
 // banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
-import type { Input, SessionSummary } from '../../generated/domain/models';
+import type { SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
@@ -18,7 +20,7 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
+import { closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, stripAnchorFor, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
 import { Keycap } from '../parts/parts';
@@ -34,15 +36,14 @@ import { FocusButton } from './band/FocusButton';
 import { NextUnseen } from './band/NextUnseen';
 import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
-import { TopicReply } from '../answer/TopicReply';
-import { StuckNote } from '../answer/StuckNote';
-import { editQueued, inEditor } from '../answer/held';
-import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
+import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { Banner } from './Banner';
-import { FilterRow } from './FilterRow';
+import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
+import { ConnectionLineShown } from '../shared/connection';
+import { UnreadableMap } from './UnreadableMap';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
@@ -52,9 +53,9 @@ import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
-import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
-import { useHidden } from '../remove/queue';
-import { visibleSession } from '../remove/model';
+import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
+import { RemovalContext, useHidden } from '../remove/queue';
+import { hiddenKey, placeStrips, visibleSession } from '../remove/model';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
@@ -92,6 +93,10 @@ export interface TreeViewProps {
   readonly actingId?: string | null;
   /** Shows an item picked from Recent while the bigger view covers the tree (it leaves the bigger view). */
   readonly onOpenItem?: (itemId: string) => void;
+  /** "Reply to topic" and an Edit on a stuck topic reply open Details on the topic (alpha.21 E6). */
+  readonly onOpenTopic?: OpenTopicInDetails;
+  /** An item was hidden from the Map (saved): App says so with an Undo toast. */
+  readonly onHid?: (itemId: string) => void;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
@@ -101,7 +106,7 @@ export interface TreeViewProps {
   /** The tree selected an item; restoration preserves the current detail state. */
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void;
-  /** "Resume filtered view": drop the reveal and close its detail. */
+  /** "Hide it again" on the outside-filter notice: drop the reveal and close its detail. */
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
@@ -186,8 +191,6 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
-  const [continuing, setContinuing] = useState<string | null>(null);
-  const [replying, setReplying] = useState<string | null>(null);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -197,24 +200,19 @@ export function TreeView(props: TreeViewProps) {
   const runAck = (itemId: string) => { const item = session?.items[itemId]; if (item) hold.ack(item); };
   const noticeCallbacks = useRef({ lifecycle, onShowArchive });
   noticeCallbacks.current = { lifecycle, onShowArchive };
+  // E33: an archive leaves one strip in the topic's place with Undo, until Undo or a session switch, and a toast whose Undo
+  // lasts as long as the strip does.
   const archivedNotice = lifecycle.archived;
-  const archiveNoticeId = JSON.stringify(['tree-archived', route.project_id, route.session_id, archivedNotice?.topicId]);
-  useEffect(() => () => noticeStore.dismiss(archiveNoticeId), [archiveNoticeId]);
   useEffect(() => {
-    if (!archivedNotice) { noticeStore.dismiss(archiveNoticeId); return; }
-    noticeStore.push({ id: archiveNoticeId, icon: 'ph ph-archive', dismissible: true,
-      text: `Archived “${archivedNotice.name}”.`
-        + (archivedNotice.waiting ? ` Its ${archivedNotice.waiting} waiting question${archivedNotice.waiting > 1 ? 's' : ''} left your panel.` : '')
-        + (archivedNotice.cancelled ? ` ${archivedNotice.cancelled} unsent message${archivedNotice.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''),
-      onDismiss: () => noticeCallbacks.current.lifecycle.dismiss(),
-      actions: [{ label: 'Undo', disabled: lifecycle.busy, run: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } },
-        { label: 'View archive', dismissOnRun: true, run: () => { noticeCallbacks.current.lifecycle.dismiss(); noticeCallbacks.current.onShowArchive(); } }] });
-  }, [archiveNoticeId, archivedNotice]);
-  useEffect(() => {
-    const notice = noticeStore.getSnapshot().find(value => value.id === archiveNoticeId);
-    if (notice && notice.actions?.[0]?.disabled !== lifecycle.busy) noticeStore.push({ ...notice,
-      actions: notice.actions?.map(action => action.label === 'Undo' ? { ...action, disabled: lifecycle.busy } : action) });
-  }, [archiveNoticeId, lifecycle.busy]);
+    if (!archivedNotice) return undefined;
+    const toast = toasts.show({ text: `Archived “${archivedNotice.name}”. It’s in Archive with all its history.`,
+      undo: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } });
+    return () => { toasts.expire(toast); };
+  }, [archivedNotice]);
+  // "Archive instead" in the Remove-topic dialog opens this session's Archive dialog for that topic.
+  useEffect(() => archiveRequests.subscribe(request => {
+    if (request.route.project_id === route.project_id && request.route.session_id === route.session_id) noticeCallbacks.current.lifecycle.archive(request.topicId);
+  }), [route.project_id, route.session_id]);
   const actionState = useSessionActions(actions);
   const controllerFailure = !actionState.pending && isViewConflict(actionState.error) ? plainFailure(actionState.error) : null;
   const lifecycleNotice = lifecycle.reviewing || lifecycle.error === controllerFailure ? null : lifecycle.error;
@@ -222,7 +220,7 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => () => noticeStore.dismiss(lifecycleNoticeId), [lifecycleNoticeId]);
   useEffect(() => {
     if (!lifecycleNotice) { noticeStore.dismiss(lifecycleNoticeId); return; }
-    noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: lifecycleNotice });
+    noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: lifecycleNotice });
   }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const scrollRequested = useRef<string | null>(null);
@@ -245,10 +243,21 @@ export function TreeView(props: TreeViewProps) {
   const scope = useMemo<FilterScope | null>(() => session && view ? { session, view, later, local: localChips.chips } : null,
     [session, view, later, localChips.chips]);
   const filter = useMemo(() => scope ? filterOf(scope) : null, [scope]);
+  // E29: a strip stands where removed (in the Undo window), agent-removed (in the bin) and just-archived rows were.
+  const removals = useContext(RemovalContext);
+  const places = useMemo(() => raw ? placeStrips(raw, route, hidden, archivedMode ? null : lifecycle.archived, archivedMode) : [],
+    [raw, route, hidden, lifecycle.archived, archivedMode]);
+  const onPlace = (row: StripRow) => {
+    const place = row.place;
+    if (!place) return;
+    if (place.reason === 'removed') removals?.undoKey(place.itemId ? hiddenKey.item(route, place.itemId) : hiddenKey.topic(route, place.topicId));
+    else if (place.reason === 'archived') { if (!lifecycle.busy) lifecycle.undo(); }
+    else binView.reveal(route, place.itemId ? place.topicId : null);
+  };
   const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
-    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
+    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places }) : null,
+  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
@@ -259,10 +268,12 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => hold.showing(drawnItems ? drawnItems.split('\n') : []), [hold, drawnItems]);
   const names = useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
   const sections = useMemo(() => {
-    const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
+    const groups: ({ topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] } | { topic: null; place: StripRow })[] = [];
     for (const row of rows) {
       if (row.kind === 'topic') groups.push({ topic: row, items: [] });
-      else groups.at(-1)?.items.push(row);
+      // A whole topic's strip stands in the topic's place, between topics.
+      else if (row.kind === 'strip' && row.place && !row.place.itemId) groups.push({ topic: null, place: row });
+      else { const last = groups.at(-1); if (last?.topic) last.items.push(row); }
     }
     return groups;
   }, [rows]);
@@ -352,8 +363,9 @@ export function TreeView(props: TreeViewProps) {
     const groupKey = hiddenGroupKey(row.item.topic_id, row.item.parent);
     if (!row.hidden && !expandedHiddenGroups.has(groupKey) && element?.contains(document.activeElement)) hiddenFocus.current = groupKey;
     void navigation.setHidden({ ...route, item_id: row.item.id }, !row.hidden, current.preferences.revision).then(saved => {
-      if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+      if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
         text: 'The hidden items preference could not be saved. Try again.' }); }
+      else if (!row.hidden) props.onHid?.(row.item.id);
     });
   };
 
@@ -379,7 +391,7 @@ export function TreeView(props: TreeViewProps) {
         return;
       }
       edits.forEach(edit => edit.done(saved));
-      if (!saved && mounted.current) noticeStore.push({ id: 'tree-view-save-failed', icon: 'ph ph-warning-circle', dismissible: true,
+      if (!saved && mounted.current) noticeStore.push({ id: 'tree-view-save-failed', icon: 'ph ph-warning-circle',
         text: 'The view preference could not be saved. Try again.' });
     }).finally(() => { if (mounted.current) setWritingEdits([]); });
   }, [pendingEdits, writingEdits, viewBusy, savedView, preferences, navigation]);
@@ -441,7 +453,7 @@ export function TreeView(props: TreeViewProps) {
     }).catch((error: unknown) => {
       if (opening || !mounted.current || call !== request.current) return;
       focusRequested.current = null;
-      noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+      noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
         text: `“${latest.current.session?.items[id] ? shortLabel(latest.current.session.items[id]!) : 'This item'}” could not be opened. ${plainFailure(error, 'Try again.')}` });
     }).finally(() => {
       clearTimeout(timeout);
@@ -533,8 +545,6 @@ export function TreeView(props: TreeViewProps) {
 
   // ⇧F and c act on the current view's selected item: the bigger view's item while it covers the tree.
   const actingItem = () => { const id = covered ? props.actingId ?? null : selectedId; return id ? session?.items[id] : undefined; };
-  // The bigger view makes the Map inert; the dialogs its keys open (Recent, Continue) show above it instead.
-  const lift = (node: ReactNode) => covered ? createPortal(node, scroller.current?.closest('.product-app') ?? document.body) : node;
   const toggleSelectedFocus = () => {
     if (focusDisabled) return false;
     if (focusedId) { focusBranch(null); return true; }
@@ -549,7 +559,7 @@ export function TreeView(props: TreeViewProps) {
     // As the topic band offers it: not for a topic continued from elsewhere, nor while a topic reply is on its way.
     if (session?.topics[item.topic_id]?.origin) return false;
     if (latest.current.rows.some(row => row.kind === 'topic' && row.topic.id === item.topic_id && row.delivery)) return false;
-    setContinuing(item.topic_id); return true;
+    openContinueTopic({ source: route, topicId: item.topic_id }); return true;
   };
   useIntents({
     'focus.toggle': toggleSelectedFocus,
@@ -557,6 +567,8 @@ export function TreeView(props: TreeViewProps) {
     // n outlines the next unseen row; the Graph and the bigger view have none.
     'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
     'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
+    // The Details path's topic segment: the Tree scrolls back to its top (the owner asked; the Map never does it by itself).
+    'map.top': () => { if (graph || !scroller.current) return false; scroller.current.scrollTop = 0; return true; },
   });
 
   // ------------------------------------------------------------ keyboard
@@ -605,7 +617,7 @@ export function TreeView(props: TreeViewProps) {
     answer: onRow((row, _index, _intent, event) => {
       if (row.kind === 'item' && row.item.id === selectedId && session && ackTarget(session, row.item)) {
         if (!event.repeat) {
-          if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
+          if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle',
             text: 'Another view change is being saved. Wait for it, then try Ack again.' });
           else runAck(row.item.id);
         }
@@ -889,13 +901,23 @@ export function TreeView(props: TreeViewProps) {
     const element = elements.current.get(before.key);
     if (element) return { element, offset: before.offset };
     const { rows: now, session: current } = latest.current, item = current?.items[before.key];
+    // A removed or archived row hands the hold to the strip now in its place (E29); at commit, to the nearest survivor.
+    const anchor = current?.id === before.sessionId ? stripAnchorFor(now, before.key) : null, strip = anchor ? elements.current.get(anchor) : undefined;
+    if (strip) return { element: strip, offset: before.offset };
     if (!current || current.id !== before.sessionId) return null;
+    // A strip that went on Undo hands the hold back to the row whose place it kept.
+    const gone = before.rows.find(row => row.key === before.key);
+    if (gone?.kind === 'strip' && gone.place) for (const key of gone.place.covers) {
+      const back = elements.current.get(key);
+      if (back) return { element: back, offset: before.offset };
+    }
     const shown = new Map(now.map(row => [row.key, row]));
     for (let key = item ? item.parent ?? item.topic_id : null; key; key = current.items[key]?.parent ?? current.items[key]?.topic_id ?? null) {
       const row = shown.get(key);
       if (row?.kind === 'topic' ? !row.expanded : row?.kind === 'item' && row.hasKids && !row.expanded) return null;
     }
-    const keys = before.rows.flatMap(row => row.kind === 'item' ? [row.key] : []), at = keys.indexOf(before.key);
+    // A strip that went at commit keeps its order here, so the hold goes to the survivor next to it.
+    const keys = before.rows.flatMap(row => row.kind === 'item' || row.key === before.key ? [row.key] : []), at = keys.indexOf(before.key);
     for (const key of [...keys.slice(at + 1), ...keys.slice(0, Math.max(at, 0)).reverse()]) {
       const survivor = elements.current.get(key);
       if (survivor) return { element: survivor, offset: before.offsets.get(key) ?? before.offset };
@@ -934,7 +956,8 @@ export function TreeView(props: TreeViewProps) {
     if (revealedAnchor.current) revealedAnchor.current = { ...revealedAnchor.current, scrollTop: box.scrollTop };
     // An owner scroll back up (or rows growing into it) gives the spacer's room back; what is on screen stays.
     trimSpacer(box);
-    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
+    // A strip in a removed or archived row's place (E29) can be the reading row too: Undo puts the row back where it is.
+    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item' || row.kind === 'strip' && !!row.place);
     const panelKey = latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
     panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < visibleBottom(box)
@@ -1103,7 +1126,7 @@ export function TreeView(props: TreeViewProps) {
     setNextRevealId(id);
     if (!id) {
       setNextTarget(null); setNextPulse(false); nextScroll.current = null;
-      noticeStore.push({ id: 'tree-no-unseen', icon: 'ph ph-check', dismissible: true, text: 'No unseen items.' });
+      noticeStore.push({ id: 'tree-no-unseen', icon: 'ph ph-check', text: 'No unseen items.' });
       return;
     }
     noticeStore.dismiss('tree-no-unseen');
@@ -1140,7 +1163,7 @@ export function TreeView(props: TreeViewProps) {
   }, [route.project_id, route.session_id]);
   const edgeCallbacks = useRef({ updateEdge, holding });
   edgeCallbacks.current = { updateEdge, holding };
-  const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
+  const topicKeys = JSON.stringify(sections.map(section => section.topic ? section.topic.key : section.place.key));
   useEffect(() => {
     const box = scroller.current;
     if (!box || graph || typeof ResizeObserver === 'undefined') return;
@@ -1201,8 +1224,8 @@ export function TreeView(props: TreeViewProps) {
     const id = row.topic.id, unseen = unseenIn(id), at = nextTarget ? unseen.indexOf(nextTarget.id) : -1;
     const focusedName = focusedId ? names.get(focusedId) ?? (focusedItem ? shortLabel(focusedItem) : focusedId) : null;
     const focusedCount = focusedBranch ? [...focusedBranch].filter(itemId => !itemRemoved(session, itemId)).length : 0;
-    const replyBlocked = row.delivery ? 'a reply to this topic is on its way'
-      : session.state === 'active' && session.active_binding_id ? null : 'the agent is not running';
+    // A reply on its way never blocks this: the topic's Details shows that reply with its status and Undo, and takes a second one behind it.
+    const replyBlocked = session.state === 'active' && session.active_binding_id ? null : 'the agent is not running';
     const binItems = removedRoots(session, id).reduce((sum, item) => sum + removedSubtree(session, item.id).length, 0);
     return {
       // While focused, the counts line says so, in the counts' place (D9).
@@ -1213,43 +1236,36 @@ export function TreeView(props: TreeViewProps) {
       next: <NextUnseen position={at >= 0 ? at + 1 : null} total={unseen.length} onNext={() => nextCallbacks.current()} />,
       focus: <FocusButton focusedName={focusedName} canFocus={!!actingItem()} busy={focusDisabled} onToggle={() => { toggleSelectedFocus(); }} />,
       continue: row.topic.origin ? undefined
-        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => setContinuing(id)} />,
+        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => openContinueTopic({ source: route, topicId: id })} />,
       menu: <TopicMenu topicName={row.topic.name} dismissKey={row.key}
-        reply={{ run: () => setReplying(id), unavailable: replyBlocked }}
+        reply={{ run: () => props.onOpenTopic?.(id), unavailable: replyBlocked }}
         bin={{ count: binItems, open: () => binView.reveal(route, id) }}
         archive={() => lifecycle.archive(id)}
         remove={{ run: () => onRemove({ kind: 'topic', session: route, topic_id: id }), items: activeItems(session).filter(item => item.topic_id === id).length }} />,
     };
   };
-  // A stopped delivery, or a topic reply not sent yet, is answered on its row; keys there stay off the tree's shortcuts.
-  // Edit puts a topic reply back in the topic's reply box and opens it.
-  const editTopicReply = (input: Immutable<Input>) => async () => {
-    const outcome = await editQueued(drafts, store.getSnapshot().snapshot?.session, input, actions);
-    if (inEditor(outcome)) setReplying(input.target.topic_id);
-    return outcome;
-  };
-  const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
-    <StuckNote actions={actions} input={row.delivery.stuck.input} stuck={row.delivery.stuck.note}
-      onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
   const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={{ route: id => ({ ...route, item_id: id }), lookup: id => {
     const item = session?.items[id];
     return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
   }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
-    {sections.map(({ topic: row, items }) => {
+    {sections.map(section => {
+      if (!section.topic) return <div key={section.place.key} className="tree-topic-group tree-topic-place" role="presentation">
+        <Strip variant="row" row={section.place} focused={focusKey === section.place.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
+      </div>;
+      const { topic: row, items } = section;
       const eligible = !archivedMode && session ? ackAllItems(session, row.topic.id) : [];
       return <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)} slots={bandSlots(row)}
         ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={shortLabel(row.topic)} items={eligible} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
-        reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
-          agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
+        />
       {items.map(row => row.kind === 'strip'
-        ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} />
+        ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
-        actions={itemActions(row)} fix={fixOf(row)}
+        actions={itemActions(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         acked={ackHeld.has(row.key)} onUndoAck={id => { hold.undo(id); }}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
@@ -1257,16 +1273,16 @@ export function TreeView(props: TreeViewProps) {
         }}
         onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} />)}
-      {session && <AgentBin session={session} actions={actions} topicId={row.topic.id} onRemove={onRemove} />}
     </div>; })}
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 
   const loading = !session && state.status === 'loading';
-  // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
-  // (none in the graph, which has no rows; a filtered-out or folded row is not here).
-  const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
+  // No session and no read to show: the Map's place says so (SPEC 12.7); the line above carries the state.
+  const unreadable = !session && state.status === 'inaccessible';
+  // Where the line above the Map is on screen it reports an unsure save, and its "Try again" is the one place to check again.
+  const lineShown = useContext(ConnectionLineShown);
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
-  const graphShown = !!graph && !loading;
+  const graphShown = !!graph && !loading && !unreadable;
   const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
     [scope, filtersShown]);
   const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
@@ -1279,7 +1295,8 @@ export function TreeView(props: TreeViewProps) {
         <span className="tree-skeleton-badge" style={{ width: row.badge }} /></div>)}
       <div className="tree-loading-text" role="status"><i className="ph ph-circle-notch" />Reading the session…</div>
     </div>;
-  } else if (graph) body = null;
+  } else if (unreadable) body = <UnreadableMap error={state.error ? plainFailure(state.error) : null} />;
+  else if (graph) body = null;
   else if (model?.empty && !archivedMode) {
     body = <div className="tree-empty" role="status">
       <i className="ph ph-spiral" />
@@ -1303,6 +1320,22 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
+  // SPEC 11.4: an item shown only because it was opened. The notice floats, so the Map never moves; the row carries the tag.
+  const outsideRow = model?.rows.find(row => row.kind === 'item' && row.outside);
+  const outsideName = outsideRow?.kind === 'item' ? names.get(outsideRow.item.id) ?? shortLabel(outsideRow.item) : null;
+  const outsideFilter = scope ? pickedChips(scope).map(chipLabel).join(', ') : '';
+  const outsideNoticeId = JSON.stringify(['tree-outside-filter', route.project_id, route.session_id]);
+  const outsideCallbacks = useRef({ resume, clearChips });
+  outsideCallbacks.current = { resume, clearChips };
+  useEffect(() => () => noticeStore.dismiss(outsideNoticeId), [outsideNoticeId]);
+  useEffect(() => {
+    if (outsideName === null) { noticeStore.dismiss(outsideNoticeId); return; }
+    noticeStore.push({ id: outsideNoticeId, icon: 'ph ph-funnel', tone: 'neutral',
+      text: `Showing “${outsideName}”, which is outside your filter${outsideFilter ? ` (${outsideFilter})` : ''}.`,
+      actions: [{ label: 'Hide it again', dismissOnRun: true, run: () => { outsideCallbacks.current.resume(); } },
+        { label: 'Clear filter', dismissOnRun: true, run: () => { outsideCallbacks.current.clearChips(); } }] });
+  }, [outsideNoticeId, outsideName, outsideFilter]);
+
   // "↓ Back to “name” ." (SPEC §5.8 8.5): floats over the Map while the selected row is out of view, at the top or above the
   // dock by the side it went; `.` does the same. It covers rows rather than moving them. Not in the Graph.
   const selectedItem = selectedId ? session?.items[selectedId] : undefined;
@@ -1323,11 +1356,9 @@ export function TreeView(props: TreeViewProps) {
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
     {filterRow}
-    {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
-      Showing an item outside your current filters.</Banner>}
-    {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
+    {lifecycle.pending && !lineShown && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
-    <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
+    {notices}
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
     {graphShown ? graph : <div className="tree-scroll-shell">
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
@@ -1337,10 +1368,7 @@ export function TreeView(props: TreeViewProps) {
       }}>{body}</div>
       {backPill}
     </div>}
-    {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
+    {session && <BinDialog session={session} route={route} actions={actions} queue={removals} drafts={drafts} />}
     {lifecycle.dialog}
-    {continuing && lift(<ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
-      onCancel={() => setContinuing(null)}
-      onPick={target => { setContinuing(null); openContinueTopic({ source: route, topicId: continuing, target }); }} />)}
   </section></MapSearchContext.Provider>;
 }

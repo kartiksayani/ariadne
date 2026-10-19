@@ -61,8 +61,8 @@
   overflow-anchor: none;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 10px 18px 16px;
+  gap: 14px;
+  padding: 8px 14px 18px;
 }
 
 /* The owner's composer scrolls within its share of the pane; the conversation keeps the rest. */
@@ -83,28 +83,43 @@
   flex-shrink: 0;
 }
 
+/* A question waiting on the owner picks the composer out: a waiting-coloured top edge and a soft glow (SPEC 5.3). */
+.detail-dock-waiting {
+  border-top: 1.5px solid var(--st-waiting);
+  box-shadow: 0 -10px 24px color-mix(in srgb, var(--st-waiting) 8%, transparent);
+}
+
+
+/* The badge row and the title (SPEC 5.3 items 1 and 2). They scroll with the body: only the composer is pinned. */
 .detail-head {
   flex: none;
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 6px;
-  margin: -10px -18px 0;
-  padding: 8px 12px;
-  background: var(--a-side);
-  border-bottom: 1px solid var(--color-divider);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 6px;
+  margin: 0;
+  padding: 0;
 }
 
 .detail-status {
-  display: contents;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
 }
 
 .detail-badge {
-  grid-column: 1;
-  grid-row: 1;
+  flex: none;
+}
+
+/* New, Changed and Seen swap in this slot: one width fits the widest (Changed), so the swap never moves the words after it. */
+.detail-marker-slot {
+  flex: none;
+  display: inline-flex;
+  width: calc(72px * var(--text-scale));
 }
 
 .detail-badge-session-closed {
@@ -115,29 +130,24 @@
 }
 
 .detail-meta {
-  display: none;
-  grid-column: 1 / -1;
-  grid-row: 2;
   min-width: 0;
-  font-size: calc(11.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-.detail-head-expanded .detail-meta {
-  display: block;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
 .detail-question {
-  grid-column: 2;
-  grid-row: 1;
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
   margin: 0;
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: calc(14px * var(--text-scale));
-  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: calc(17px * var(--text-scale));
+  line-height: 1.35;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .detail-question > .md {
@@ -145,14 +155,13 @@
 }
 
 .detail-head-expanded .detail-question {
+  display: block;
   overflow: visible;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 .detail-title-toggle {
-  grid-column: 3;
-  grid-row: 1;
+  grid-column: 2;
+  grid-row: 2;
   padding: 2px;
 }
 
@@ -335,24 +344,39 @@
 
 .detail-composer-row {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 6px;
 }
 
 .detail-composer-row > textarea {
-  flex: 1;
   min-width: 0;
-  min-height: 34px;
   resize: none;
   font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
 }
 
-.detail-composer-row > .btn {
+/* The line under the box: where the words go, then Send. */
+.detail-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-composer-bar > .btn {
   flex: none;
-  height: 34px;
-  padding: 0 8px;
+  height: 30px;
+  padding: 0 10px;
   font-size: calc(12px * var(--text-scale));
+}
+
+/* Where the words came from: back after a restart, or taken back from the queue. */
+.detail-chip {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .detail-box-collapsed textarea {
@@ -398,6 +422,29 @@
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
+.detail-composer-bar > .detail-box-hint {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.detail-bar-short {
+  display: none;
+}
+
+@media (width < 1000px) {
+  .detail-bar-long {
+    display: none;
+  }
+
+  .detail-bar-short {
+    display: inline;
+  }
+}
+
 .detail-error {
   margin: 0;
   font-size: calc(12.5px * var(--text-scale));
@@ -410,10 +457,35 @@
 }
 
 /* — outcome, note, why — */
+.detail-outcome {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0 6px;
+}
+
+/* The outcome's label is read, not drawn: the elbow icon in the status colour stands in for it. */
+.detail-outcome-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.detail-outcome-icon {
+  grid-column: 1;
+  padding-top: 3px;
+  font-size: calc(14px * var(--text-scale));
+}
+
 .detail-outcome-text {
+  grid-column: 2;
   margin: 0;
-  font-size: calc(15px * var(--text-scale));
-  line-height: 1.6;
+  font-size: calc(14px * var(--text-scale));
+  line-height: 1.5;
   text-wrap: pretty;
 }
 
@@ -431,10 +503,37 @@
 
 .detail-why-text {
   margin: 0;
-  font-size: calc(14px * var(--text-scale));
-  line-height: 1.6;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.5;
   text-wrap: pretty;
-  color: color-mix(in srgb, var(--color-text) 84%, transparent);
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+/* "Why" runs into its text: the word in the label colour, then the reason at 66%, wrapping under the word (SPEC 5.3 item 3). */
+.detail-why {
+  display: block;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.5;
+}
+
+/* The board sets the reason 7px closer to the outcome than the body's 14px rhythm. */
+.detail-outcome + .detail-why {
+  margin-top: -7px;
+}
+
+.detail-why > .detail-label {
+  display: inline;
+  margin-right: 6px;
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--a-label);
+}
+
+.detail-why > .detail-why-text,
+.detail-why > .detail-why-text > :where(p) {
+  display: inline;
 }
 
 .detail-prev {
@@ -637,8 +736,13 @@
 }
 
 /* You: right, tinted. */
+.detail-msg:not(.detail-msg-you) {
+  padding-right: 10%;
+}
+
 .detail-msg-you {
   justify-content: flex-end;
+  padding-left: 14%;
 }
 
 .detail-bubble-you {
@@ -667,7 +771,7 @@
 }
 
 /* A message still on its way: dashed, with where it stands under it. */
-.detail-turn-pending .detail-bubble-you {
+.detail-turn-pending:not(.detail-turn-status) .detail-bubble-you {
   outline: 1px dashed color-mix(in srgb, var(--color-accent) 50%, transparent);
   outline-offset: -1px;
 }
@@ -729,14 +833,74 @@
   text-wrap: pretty;
 }
 
-/* Quiet metadata within the single chat. */
-.detail-agent-meta,
-.detail-chat-marker {
+/* What a bubble is ("Agent raised this", "You replied") and when, above it. */
+.detail-chat-label {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.detail-chat-label > span:first-child {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.detail-msg-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-msg-you .detail-msg-main {
+  align-items: flex-end;
+}
+
+/* The agent's round robot, beside the bubble's foot. */
+.detail-avatar {
+  display: flex;
+  flex: none;
+  align-self: flex-end;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: calc(13px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  background: color-mix(in srgb, var(--color-text) 9%, transparent);
+}
+
+/* Where an owner's message stands, under its bubble. */
+.detail-bubble-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.detail-bubble-status-problem {
+  color: var(--a-danger);
+}
+
+.detail-status-action {
+  min-height: 0;
+  padding: 0 2px;
+  font-size: inherit;
+  text-decoration: underline;
+}
+
+/* The divider before the first message the owner has not seen: an attention line and its text. */
+.detail-chat .conversation-unseen {
+  padding: 10px 0 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--attention) 60%, transparent);
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 500;
+  color: var(--attention);
 }
 
 .detail-related {
@@ -763,7 +927,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 5px 6px;
   border: 0;
   border-radius: 5px;
   font: inherit;
@@ -784,6 +948,9 @@
 
 .detail-related-hidden {
   flex: none;
+  padding: 0 5px;
+  border: 1px dashed var(--a-edge);
+  border-radius: 4px;
   font-size: calc(11px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
@@ -822,30 +989,132 @@
   background: linear-gradient(transparent, var(--a-side));
 }
 
-/* — agent reference — */
-.detail-reference {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: calc(11.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.detail-head .detail-reference {
-  grid-column: 4;
-  grid-row: 1;
-}
-
-.detail-reference > .detail-copy {
-  padding: 2px 6px;
-  font-size: calc(12px * var(--text-scale));
-}
-
-.detail-copy > i {
-  font-size: calc(13px * var(--text-scale));
-}
-
 .detail-saved-message .detail-message-copy {
   opacity: 1;
+}
+
+/* — the actions row (SPEC 5.3 item 5) — */
+.detail-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-primary {
+  height: 28px;
+  gap: 5px;
+  padding: 0 10px 0 8px;
+  border-radius: 6px;
+  font-size: calc(12.5px * var(--text-scale));
+  font-weight: 500;
+}
+
+/* Ack and Bring it up are filled (SPEC 5.3 item 5), as Ack all is on the band. */
+.detail-primary.btn-primary {
+  color: var(--a-bg);
+  background: var(--a-acc-text);
+}
+
+.detail-primary.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--a-acc-text) 88%, var(--a-bg));
+}
+
+.detail-icon-action {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-text);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+  cursor: pointer;
+}
+
+.detail-icon-action:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.detail-icon-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.detail-icon-action[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.detail-icon-action > i {
+  font-size: calc(15px * var(--text-scale));
+}
+
+/* — related, with a kind column (SPEC 5.3 item 6) — */
+.detail-related-count {
+  font-weight: 400;
+  letter-spacing: normal;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.detail-related-kind {
+  flex: none;
+  width: 82px;
+  font-size: calc(12px * var(--text-scale));
+  color: var(--a-label);
+}
+
+.detail-related-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+}
+
+.detail-related-item .detail-related-label {
+  font-weight: 500;
+  text-decoration: underline dotted var(--a-edge);
+  text-underline-offset: 3px;
+}
+
+/* A related row is a flat line in the board, not the peek chip's box: the chip class loads later, so these name it too. */
+.detail-related-item.name-chip {
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.detail-related-item.name-chip:hover {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+/* — a topic in Details (alpha.21 E5) — */
+.detail-topic-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.detail-badge-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--a-acc-text);
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 500;
+}
+
+.detail-topic-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  font-size: calc(12.5px * var(--text-scale));
 }

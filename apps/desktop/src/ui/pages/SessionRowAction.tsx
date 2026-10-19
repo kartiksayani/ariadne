@@ -29,7 +29,7 @@ export function SessionRowAction({ actions, act, naming, onDone }: SessionRowAct
   const began = useRef(lifecycle.errorCount);
   useEffect(() => {
     if (act === 'rename' || !lifecycle.error || lifecycle.errorCount === began.current || open) return;
-    notices.push({ id: `session-row-action:${actions.session.getSnapshot().route.session_id}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: lifecycle.error });
+    notices.push({ id: `session-row-action:${actions.session.getSnapshot().route.session_id}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', text: lifecycle.error });
     done.current();
   }, [act, lifecycle.error, lifecycle.errorCount, open, actions]);
   if (act === 'rename' && naming) return <NameSessionDialog unnamedAs={naming.unnamedAs} initialName={naming.name} initialDescription={naming.description}

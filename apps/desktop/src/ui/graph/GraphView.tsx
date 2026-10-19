@@ -160,7 +160,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   useEffect(() => () => notices.dismiss(errorNoticeId), [errorNoticeId]);
   useEffect(() => {
     if (!error) { notices.dismiss(errorNoticeId); return; }
-    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: error });
+    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: error });
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
@@ -170,8 +170,11 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   const shown = useMemo(() => applyChange(applyChange(view, inflight), pending), [view, inflight, pending]);
   const filterKey = filterSignature({ view: shown, local });
   const filterFolds = useFilterFolds(routes, shown.session, filterKey);
-  // An outside reveal wins immediately over an older selection whose preference write is still pending.
-  const optimisticSelection = localSelection?.external === reveal && (pending?.selected || inflight?.selected) ? localSelection.id : null;
+  // An outside reveal wins immediately over an older selection whose preference write is still pending. The owner's own selection
+  // keeps winning over the reveal that was current when they made it, while its write runs and once it is saved: that reveal
+  // is older, and its own (slower) reveal can land after the write (a ← then must act on the node they selected).
+  const optimisticSelection = localSelection?.external === reveal
+    && (pending?.selected || inflight?.selected || view.selected_item_id === localSelection.id) ? localSelection.id : null;
   const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
   const graph = useMemo(() => session && column !== null ? sessionGraph({ session, view: shown, later, local, selectedId, column,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,

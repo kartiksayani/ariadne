@@ -4,9 +4,10 @@ import { AckAll } from '../../../src/ui/navigation/AckAll';
 import { ACK_ALL_HOLD_MS, ackAllFor, ackAllItems } from '../../../src/ui/navigation/ackAllController';
 import { ACK_HOLD_MS } from '../../../src/ui/shared/ack';
 import { notices } from '../../../src/ui/pages/notices';
-import { acked, acks, itemOf, noticeTexts, ready, stores, type Ready } from './ackFixture';
+import { toasts } from '../../../src/ui/shell/toast';
+import { acked, acks, clearToast, heldToast, itemOf, noticeTexts, ready, stores, type Ready } from './ackFixture';
 
-afterEach(() => { cleanup(); stores.forEach(store => store.close()); stores.length = 0; notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); stores.forEach(store => store.close()); stores.length = 0; notices.clear(); clearToast(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 const mount = (r: Ready) => render(<div className="product-app"><div className="tree-topic">
   <AckAll actions={r.actions} topicId={r.topicId} topicName="Results" items={ackAllItems(r.store.getSnapshot().snapshot!.session, r.topicId)} /></div></div>);
@@ -117,10 +118,10 @@ describe('the Ack all review popover (D11, SPEC 4.3)', () => {
     fireEvent.click(within(open()).getByRole('button', { name: 'Ack all' }));
     view.unmount();
     await vi.advanceTimersByTimeAsync(400);
-    const notice = notices.getSnapshot().find(entry => entry.text.startsWith('Acked 2 results'));
-    expect(notice?.actions?.map(action => action.label)).toEqual(['Undo']);
+    const notice = heldToast('Acked 2 results');
+    expect(typeof notice?.undo).toBe('function');
     mount(r);
-    expect(notices.getSnapshot().find(entry => entry.text.startsWith('Acked 2 results'))).toBeUndefined();
+    expect(heldToast('Acked 2 results')).toBeUndefined();
     expect(screen.getByRole('button', { name: 'Undo Ack all' })).toBeTruthy();
     expect(noticeTexts().some(text => text.startsWith('Ack 2 results'))).toBe(false);
   });
@@ -131,7 +132,7 @@ describe('the Ack all review popover (D11, SPEC 4.3)', () => {
     fireEvent.click(within(open()).getByRole('button', { name: 'Ack all' }));
     view.unmount();
     await vi.advanceTimersByTimeAsync(400);
-    notices.getSnapshot().find(entry => entry.text.startsWith('Acked 2 results'))!.actions![0]!.run();
+    toasts.runUndo(heldToast('Acked 2 results')!.id);
     await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS * 2);
     expect(acks(r.transport)).toHaveLength(0);
   });
@@ -143,7 +144,7 @@ describe('the Ack all review popover (D11, SPEC 4.3)', () => {
     const other = render(<AckAll actions={r.actions} topicId="another-topic" topicName="Other" items={[]} />);
     other.unmount();
     await vi.advanceTimersByTimeAsync(400);
-    expect(notices.getSnapshot().find(entry => entry.text.startsWith('Acked'))).toBeUndefined();
+    expect(heldToast()).toBeUndefined();
     view.unmount();
   });
 });

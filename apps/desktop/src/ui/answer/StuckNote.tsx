@@ -30,6 +30,8 @@ export interface StuckNoteProps {
   readonly compactActions?: boolean;
   /** An answer bar above already says why and carries the Retry (`useStuckRetry`): the note keeps its other actions. */
   readonly retryInBar?: boolean;
+  /** A line above (a chat bubble's "Not sent. Retry") carries the Retry; the note keeps its explanation and its other actions. */
+  readonly retryAbove?: boolean;
 }
 
 /** What Edit ("Review and send again") says when it could not simply move the message. */
@@ -62,10 +64,13 @@ export interface StuckRetry {
   readonly acted: boolean;
 }
 
-/** StuckNote's Retry, lifted out so an answer bar can carry it; null when the stuck input offers no Retry. */
-export function useStuckRetry(actions: SessionActions, input: Immutable<Input> | null, stuck: Stuck | null): StuckRetry | null {
-  const state = useSession(actions.session), operation = useSessionActions(actions);
-  const [acted, setActed] = useState(false);
+/**
+ * What Retry would do now for a stopped delivery the agent never received: one `resend` of the same input. Null when the stuck
+ * input offers none (not stopped, no Retry, or the agent already has the words: that one asks first, "Send again").
+ */
+export function resendPlan(actions: SessionActions, input: Immutable<Input> | null, stuck: Stuck | null):
+  { readonly run: () => Promise<boolean>; readonly disabled: boolean; readonly title: string } | null {
+  const state = actions.session.getSnapshot(), operation = actions.getSnapshot();
   const session = state.snapshot?.session;
   const attempt = input ? stoppedAttempt(input) : null;
   const binding = input ? session?.bindings[input.binding_id] : undefined;
@@ -74,17 +79,21 @@ export function useStuckRetry(actions: SessionActions, input: Immutable<Input> |
   const agent = agentName(binding.adapter_id);
   const busy = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   const working = presence?.busy ? `${agent} is still working. Wait, or stop it in the terminal first.` : null;
-  return { acted, disabled: busy || !!working,
+  return { disabled: busy || !!working,
     title: working ?? (presence?.idle ? 'Send again ( ↵ )' : `Send again ( ↵ ). Use this only if ${agent} isn’t working on it now.`),
-    run: () => {
-      if (busy || working) return;
-      setActed(true);
-      void actions.execute(resolveCommand({ input_id: input.id, attempt_id: attempt.id, expected_revision: session.revision,
-        decision: 'resend', reason: '', evidence: presence?.idle ? null : attestIdle() }), session.revision);
-    } };
+    run: () => busy || working ? Promise.resolve(false) : actions.execute(resolveCommand({ input_id: input.id, attempt_id: attempt.id,
+      expected_revision: session.revision, decision: 'resend', reason: '', evidence: presence?.idle ? null : attestIdle() }), session.revision) };
 }
 
-export function StuckNote({ actions, input, stuck, onEdit, compactActions = false, retryInBar = false }: StuckNoteProps) {
+/** StuckNote's Retry, lifted out so an answer bar can carry it; null when the stuck input offers no Retry. */
+export function useStuckRetry(actions: SessionActions, input: Immutable<Input> | null, stuck: Stuck | null): StuckRetry | null {
+  useSession(actions.session); useSessionActions(actions);
+  const [acted, setActed] = useState(false);
+  const plan = resendPlan(actions, input, stuck);
+  return plan && { acted, disabled: plan.disabled, title: plan.title, run: () => { if (plan.disabled) return; setActed(true); void plan.run(); } };
+}
+
+export function StuckNote({ actions, input, stuck, onEdit, compactActions = false, retryInBar = false, retryAbove = false }: StuckNoteProps) {
   const state = useSession(actions.session), operation = useSessionActions(actions), dispatch = useDispatch(actions);
   /** This note wrote last: a failure of that write shows here. */
   const [acted, setActed] = useState(false);
@@ -144,7 +153,7 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
       {repair && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
         title={`Asks ${agent} to save its answer now. An answer it’s still working on won’t be linked to this message.`}
         onClick={quiet(() => resolve('request_result_repair'))}>Ask for the answer</button>}
-      {stuck.retry && !barred && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
+      {stuck.retry && !barred && !retryAbove && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
         title={working ?? (presence?.idle ? 'Send it again' : `Send it again. Use this only if ${agent} isn’t working on it now.`)}
         onClick={quiet(() => { if (received && attempt) setResending(attempt.id); else resolve('resend'); })}>{received ? 'Send again' : 'Retry'}</button>}
       {!waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !stopWithoutIdle && !!working}

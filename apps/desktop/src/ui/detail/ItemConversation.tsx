@@ -2,6 +2,9 @@ import { createPortal } from 'react-dom';
 import { Dialog } from '../dialogs/Dialog';
 import { ItemChanges } from '../changes/ItemChanges';
 import { AnswerChanges } from '../changes/AnswerChanges';
+import { ChangeMarker } from '../changes/ChangeMarker';
+import { useDetailMarker } from '../changes/useDetailMarker';
+import { answerInputId, latestChangedAnswer } from '../changes/model';
 import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
 import { itemRemoved } from '../../selectors/removed';
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
@@ -22,12 +25,10 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
 import { ackHoldFor, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
 import { STATUS } from '../shared/status';
-import { StuckNote } from '../answer/StuckNote';
-import { NotSentLine } from '../answer/NotSentLine';
-import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
-import { useGrow } from '../answer/useGrow';
+import { Chat } from './Chat';
+import { Composer } from './Composer';
 import { AnswerSlot, answerSlotError, changedText } from './AnswerSlot';
-import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
+import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
@@ -37,7 +38,9 @@ import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/ses
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
-import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
+import { hiddenSource } from '../tree/hidden';
+import { useHidden } from '../remove/queue';
+import { actionText, closedStatus, detailModel, type ActionKey, type Kid, type LinkView, type OpenMode } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
 import { ItemRefSession, usePeek } from '../peek/context';
@@ -45,6 +48,11 @@ import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
 import { useClipped } from './useClipped';
 import { useDockBudget } from './useDockBudget';
+import { ActionsRow } from './ActionsRow';
+import { useItemActions, type ItemActionsProps } from './itemActions';
+
+/** Opening scrolls so the "New since you last looked" divider sits this far below the top of the body (SPEC 5.3 item 7). */
+const NEW_DIVIDER_ABOVE = 140;
 
 /** The pane is scrolled to (nearly) its end. */
 const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
@@ -84,32 +92,12 @@ function focusRoot(itemId: string) {
   else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 }
 
-export function DetailPath({ store, itemId, onOpenItem }: { readonly store: SessionStore; readonly itemId: string; readonly onOpenItem: (itemId: string) => void }) {
-  const session = useSession(store).snapshot?.session;
-  const path = session ? detailPath(session, itemId) : [];
-  const labels = session ? peekNames(session) : new Map<string, string>();
-  const topicId = session?.items[itemId]?.topic_id;
-  const topicName = topicId ? session?.topics[topicId]?.name : undefined;
-  return <ItemRefSession.Provider value={session ? { project_id: session.project_id, session_id: session.id } : null}><ItemRefs.Provider value={{
-    lookup: id => { const target = session?.items[id]; return session && target && !itemRemoved(session, id) ? { label: target.question, status: displayStatus(session, target) } : null; },
-    route: id => ({ project_id: session!.project_id, session_id: session!.id, item_id: id }), onOpenItem,
-  }}><nav className="detail-path" aria-label="Item location">
-    {path.map((crumb, index) => {
-      const full = crumb.itemId ? session?.items[crumb.itemId]?.question : topicName;
-      return <span className="detail-crumb" key={crumb.itemId ?? 'topic'}>
-      {/* The topic crumb has no reveal target yet; item crumbs open their item. */}
-      {crumb.itemId !== null ? <ItemReference itemId={crumb.itemId} title={full} ariaLabel={full} inline preserveContent>{labels.get(crumb.itemId)}</ItemReference>
-        : <button type="button" title={full} aria-label={full}>{crumb.label}</button>}
-      {index < path.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}
-    </span>;
-    })}
-  </nav></ItemRefs.Provider></ItemRefSession.Provider>;
-}
-
-export interface ItemDetailProps {
+export interface ItemDetailProps extends ItemActionsProps {
   readonly expanded?: boolean;
   readonly onOpenConversation?: () => void;
   readonly dividerId?: string | null;
+  /** When the owner last looked, for the divider's "New since you last looked at 20:40". */
+  readonly dividerAt?: number | null;
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
@@ -130,11 +118,11 @@ export interface ItemDetailProps {
   readonly answerJump?: { readonly messageId: string; readonly token: number };
   readonly onAnswerJumpConsumed?: (token: number) => void;
   readonly onOpenAnswer?: (itemId: string, messageId: string) => void;
+  /** Saves "seen" for this item at the revision shown (the change box's Mark seen). Without it the box has no button. */
+  readonly onMarkSeen?: (itemId: string, revision: number) => void;
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
-
-const kindName: Readonly<Record<WordsKind, string>> = { reply: 'reply', note: 'note', followup: 'follow-up' };
 
 /** One answer eligibility rule for the pane, conversation and shell footer. */
 export function conversationAnswerState(session: Immutable<Session>, itemId: string, retained?: Pick<DraftEntry, 'uncertain' | 'error'>): { readonly showAnswer: boolean; readonly live: boolean } {
@@ -147,70 +135,6 @@ export function conversationAnswerState(session: Immutable<Session>, itemId: str
   const model = detailModel({ session, itemId, mode: null, saving: null, later: false, now: Date.now() });
   const showAnswer = !archived && (closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
   return { showAnswer, live: showAnswer && !!model?.answer && waitingOnOwner(session, item) };
-}
-
-interface WordsFieldProps {
-  readonly slot: Words;
-  /** What the words go out as now. */
-  readonly sentAs: WordsKind;
-  readonly first: boolean;
-  /** Hands the box's textarea to the panel, so a key can focus the draft it names. */
-  readonly register: (element: HTMLTextAreaElement | null) => void;
-  readonly sendOff: boolean;
-  /** The box was opened by a button and holds no words: it can be closed. */
-  readonly closable: boolean;
-  readonly onEdit: (text: string) => void;
-  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
-  readonly onSend: () => void;
-  readonly onCancel: () => void;
-  readonly onReview: () => void;
-}
-
-/**
- * One draft of the owner's words. It edits its own draft in place and is labelled by what it will be sent as, so the
- * owner sees the kind before sending. Its mount does not depend on the section around it, so typing and focus survive
- * the item changing status.
- */
-function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, onKeyDown, onSend, onCancel, onReview }: WordsFieldProps) {
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const attach = (element: HTMLTextAreaElement | null) => { ref.current = element; register(element); };
-  useGrow(ref, slot.text, !collapsed);
-  // A locked draft (an attempt in flight or awaiting a retry) goes out as the kind it was saved with: its label, button and
-  // hint name that kind, and it carries no note about a change.
-  const kind = slot.locked ? slot.kind : sentAs, text = boxText[kind], noteId = useId();
-  const note = slot.kind !== sentAs && !slot.locked;
-  return <>
-    {slot.changed && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review this question</button></div>}
-    <div className={`detail-box${collapsed ? ' detail-box-collapsed' : ''}`}>
-      {note && <p className="detail-box-note" id={noteId}>{`This will be sent as a ${kindName[sentAs]}, which fits the item now. You wrote it as a ${kindName[slot.kind]}.`}</p>}
-      <div className="detail-composer-row">
-        <textarea ref={attach} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
-          placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onFocus={() => setCollapsed(false)}
-          onChange={event => { setCollapsed(false); onEdit(event.target.value); }} onKeyDown={event => { if (event.key === 'Escape') setCollapsed(true); onKeyDown(event); }} />
-        <button type="button" className="btn btn-primary" disabled={sendOff} aria-label={first ? text.button : `${text.button}, another draft`} onClick={onSend}>
-          <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
-        {closable && <button type="button" className="btn btn-ghost detail-cancel" onClick={onCancel}>Cancel</button>}
-      </div>
-      <span className="detail-box-hint" title={text.hint}>⌘↵ sends · Esc keeps draft</span>
-    </div>
-  </>;
-}
-
-/** "You replied: “…”" for a one-paragraph reply; a longer reply keeps its paragraphs and lists below the words. */
-function OwnerReply({ text }: { readonly text: string }) {
-  return <ItemRefs.Provider value={null}>{singleParagraph(text)
-    ? <span>You replied: “<Markdown text={text} inline />”</span>
-    : <div className="detail-reply"><span>You replied:</span><Markdown text={text} /></div>}</ItemRefs.Provider>;
-}
-
-/** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
-function YouSaid({ how, text, note = '' }: { readonly how: PendingView['how']; readonly text: string; readonly note?: string }) {
-  return <>
-    <i className={`${how === 'chose' ? 'ph ph-check-circle' : 'ph ph-user'} detail-msg-icon detail-you-icon`} aria-hidden="true" />
-    {how === 'chose' ? <div className="detail-reply"><span>{`You chose “${text}”`}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : how === 'action' ? <div className="detail-reply"><span>{text}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : <OwnerReply text={text} />}
-  </>;
 }
 
 function KidButton({ kid }: { readonly kid: Kid }) {
@@ -261,8 +185,9 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId }: ItemDetailProps) {
+export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, dividerAt, onHide, onRemove, onActions, onMarkSeen }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
+  const pendingRemoval = useHidden();
   const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts, session);
@@ -311,7 +236,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   useEffect(() => () => notices.dismiss(laterNoticeId), [laterNoticeId]);
   useEffect(() => {
     if (!laterError) { notices.dismiss(laterNoticeId); return; }
-    notices.push({ id: laterNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Later was not saved. Keep the current view and try again.' });
+    notices.push({ id: laterNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: 'Later was not saved. Keep the current view and try again.' });
   }, [laterNoticeId, laterError]);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
@@ -360,6 +285,16 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const showLatest = () => {
     const pane = body.current;
     if (!pane) return;
+    // Opening: the view scrolls once to 140px above the "New since you last looked" divider (SPEC 5.3 item 7). The divider is
+    // fixed for this selection (W2 computes it before the dwell), so later arrivals leave a reader where they are.
+    const divider = !openingChangePositioned.current && !justSent.current ? pane.querySelector<HTMLElement>('[data-testid="new-divider"], .conversation-unseen') : null;
+    if (divider) {
+      openingChangePositioned.current = true;
+      pane.scrollTop = Math.max(0, pane.scrollTop + divider.getBoundingClientRect().top - pane.getBoundingClientRect().top - NEW_DIVIDER_ABOVE);
+      positionedScroll.current = pane.scrollTop;
+      followingAsk.current = false; atEnd.current = nearEnd(pane);
+      return;
+    }
     if (expanded) {
       if (justSent.current || openingChangePositioned.current && atEnd.current) pane.scrollTop = pane.scrollHeight;
       else if (!openingChangePositioned.current) pane.scrollTop = 0;
@@ -379,8 +314,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     const anchor = tag?.closest('.detail-bubble-agent') ?? waiting;
     followingAsk.current = !!anchor;
     if (anchor) {
-      const bounds = pane.getBoundingClientRect(), headHeight = pane.querySelector('.detail-head')?.getBoundingClientRect().height ?? 0;
-      const top = anchor.getBoundingClientRect().top - bounds.top - headHeight;
+      const bounds = pane.getBoundingClientRect();
+      const top = anchor.getBoundingClientRect().top - bounds.top;
       // A long ask can exceed the available height. Keep its waiting marker visible and leave all its words scrollable.
       const marker = tag?.getBoundingClientRect();
       const bottom = marker && pane.clientHeight > 0 ? marker.top + marker.height - bounds.top - pane.clientHeight : top;
@@ -443,8 +378,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     const target = body.current.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(answerJump.messageId)}"]`);
     if (!target) return;
     followingAsk.current = false; atEnd.current = false;
-    const pane = body.current, head = pane.querySelector('.detail-head')?.getBoundingClientRect().height ?? 0;
-    pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - head - 8;
+    const pane = body.current;
+    pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 8;
     target.tabIndex = -1;
     target.focus({ preventScroll: true });
     onAnswerJumpConsumed?.(answerJump.token);
@@ -468,6 +403,52 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     else if (action === 'reopen') void send('reopen', actionText('reopen', model.question));
     else openBox(action);
   };
+
+  const copy = () => {
+    if (!item) return;
+    const attempt = ++copyAttempt.current;
+    const currentCopy = () => copyMounted.current && attempt === copyAttempt.current;
+    void copyText(`${item.id} — ${item.question}`).then(() => {
+      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-check', text: 'Item copied.' });
+    }, () => {
+      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-warning-circle', tone: 'problem', text: 'Copy failed. Try again.' });
+    });
+  };
+  // One list of actions feeds the actions row here and the head's "…" menu (W2 renders it from `onActions`). Each action goes
+  // through the same path as before: a box opens, Bring it up and Back to Open send, Later toggles. What holds one back comes
+  // from the model, so the readiness rules stay where they were.
+  const openByKey = new Map((model?.open?.actions ?? []).map(action => [action.action, action] as const));
+  const boxAction = (['reply', 'note', 'followup'] as const).find(key => openByKey.has(key)) ?? null;
+  const holdFor = (key: ActionKey | null, ownReason: string | null = null): string | undefined => {
+    if (!model) return undefined;
+    const offered = key ? openByKey.get(key) : null;
+    if (key && !offered) return 'A message is on its way';
+    if (offered?.disabled) return 'Reconnecting to the agent';
+    if (key !== 'later' && !draftState.ready) return 'Your drafts are still loading';
+    return ownReason ?? undefined;
+  };
+  const held = {
+    ...(model?.followUp ? { followUp: model.followUp.disabled ? 'Reconnecting to the agent' : !draftState.ready ? 'Your drafts are still loading' : undefined }
+      : boxAction ? { followUp: holdFor(boxAction) } : {}),
+    bring: holdFor('bring', !submit.ready ? 'Sending is not ready yet' : null),
+    reopen: holdFor('reopen', submit.locked('reopen') ? 'Your request is on its way' : null),
+    drop: holdFor('drop'),
+  };
+  const heldActions = Object.fromEntries(Object.entries(held).filter(([, reason]) => !!reason)) as Partial<Record<'followUp' | 'bring' | 'reopen' | 'drop', string>>;
+  // Hidden by itself or by an ancestor: the "…" menu offers Unhide for both, as the Map's hover bar does.
+  const hiddenHere = !!session && hiddenSource(session, new Set(hiddenItemIds ?? []), itemId) !== null;
+  const actionList = useItemActions({ session, item, hidden: hiddenHere, later, held: heldActions,
+    replyApplies: model ? !!model.followUp || (model.status !== 'waiting' && !!boxAction) : false, replyLabel: model?.followUp?.label,
+    on: { followUp: () => { const box = model?.followUp ? 'reply' : boxAction; if (box) act(box); }, bring: () => act('bring'), later: () => act('later'),
+      reopen: () => act('reopen'), drop: () => act('drop'), copyRef: copy, hide: onHide, unhide: onHide, remove: onRemove } });
+  const emitActions = useRef(onActions);
+  emitActions.current = onActions;
+  useEffect(() => { emitActions.current?.(actionList); }, [actionList]);
+  useEffect(() => () => emitActions.current?.(null), []);
+  const marker = useDetailMarker(item, seen);
+  // The Because card shows once, under the newest answer that changed something (SPEC 5.3 item 8).
+  const becauseAt = useMemo(() => session && model ? latestChangedAnswer(session, model.chat) : null, [session, chatKey]);
+  const becauseInput = session && becauseAt ? answerInputId(session, becauseAt) : null;
 
   useEffect(() => {
     if (!focusBox) return;
@@ -493,15 +474,6 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   // A reopen that could not go out was written against an older item (OwnerInput's Review step). Only the Open section offers it.
   const reopenStale = !!model.open && submit.changed('reopen');
   const answerFocus = focusRequest && model.status === 'waiting' && (!model.followUp || answerOnly) && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
-  const copy = () => {
-    const attempt = ++copyAttempt.current;
-    const currentCopy = () => copyMounted.current && attempt === copyAttempt.current;
-    void copyText(`${model.id} — ${model.question}`).then(() => {
-      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-check', dismissible: true, text: 'Item copied.' });
-    }, () => {
-      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Copy failed. Try again.' });
-    });
-  };
   // The owner's boxes, docked in one place whatever section the item's status shows above them, so a box keeps its mount (and
   // the owner's focus and caret) when the status changes. data-owner-input marks them with their changed-target warnings, like the
   // answer slot (native tests).
@@ -509,7 +481,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const sendHeld = !!fit && !!model.open?.actions.find(value => value.action === fit)?.disabled;
   const closable = submit.written.length === 0 && !standingEmpty;
   // The Send button and the keys follow one rule: nothing goes out while this says no.
-  const sendOff = (slot: Words) => !submit.ready || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
+  // An item (or one above it, or its topic) in a pending removal's window sends nothing until Undo (alpha.21 E28).
+  const removing = !!session && pendingRemoval.item({ project_id: session.project_id, session_id: session.id }, session, itemId);
+  const sendOff = (slot: Words) => removing || !submit.ready || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
   const wordsKey = (slot: Words) => (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.stopPropagation(); event.preventDefault(); if (!sendOff(slot)) sendWords(slot); }
@@ -521,14 +495,13 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     }
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
-  const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
-    <PausedNote actions={actions} />
-    {reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review this question</button></div>}
-    {fit && slots.map((slot, index) => <WordsField key={slotKey(slot)} slot={slot} sentAs={fit} first={index === 0} sendOff={sendOff(slot)}
-      register={element => { const key = slotKey(slot); if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
-      closable={closable} onEdit={value => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey(slot)} onSend={() => sendWords(slot)} onCancel={closeBox}
-      onReview={() => submit.review(slot)} />)}
+  const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale);
+  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} expanded={expanded} removing={removing} sending={submit.saving !== null} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
+    sendOff={sendOff} closable={closable} register={(key, element) => { if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
+    onEdit={(slot, value) => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey} onSend={sendWords} onCancel={closeBox}
+    onReview={slot => submit.review(slot)}
+    before={reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review this question</button></div>}>
     {dropOpen && <div className="detail-box">
       {submit.changed('drop') && <div className="answer-warn" role="alert"><span>{changedText}</span>
         <button type="button" className="btn btn-secondary" onClick={() => submit.review('drop')}>Review this question</button></div>}
@@ -552,12 +525,15 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
         <span className="detail-box-hint">Enter drops · the agent confirms</span>
       </div></>}
     </div>}
-  </div>;
-  const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || submit.error);
+  </Composer>;
+  const docked = !!(showAnswer || savedAnswers.length > 0 || owner || submit.error || (expanded && model.delivery));
   const disabledActions = model.open?.actions.some(action => action.disabled);
   const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
     : model.chat.some(entry => entry.pending) ? model.delivery?.text : null;
   const relatedLabels = peekNames(session);
+  // The change box sits under the "why"; with no box, the bare history closes the body, after the conversation (SPEC 5.3, 9.11).
+  const changes = (part: 'box' | 'history') => <ItemChanges service={drafts.service} store={store} session={session} item={item} seen={seen}
+    onOpenAnswer={onOpenAnswer ?? ((id) => onOpenItem(id))} onMarkSeen={onMarkSeen} part={part} />;
   return <ItemRefSession.Provider value={{ project_id: session.project_id, session_id: session.id }}><ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
@@ -567,14 +543,12 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
       atEnd.current = nearEnd(pane);
     }}>
-    {!expanded && <>
     <div className={`detail-head${titleExpanded ? ' detail-head-expanded' : ''}`}>
-      {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
+      {/* The badge row (SPEC 5.3 item 1): status, New / Changed / Seen, and who raised it and when. */}
       <div className="detail-status"><div className={`detail-badge${closedSessionQuestion(session, item) ? ' detail-badge-session-closed' : ''}`}><StatusBadge status={model.display} label={model.badgeLabel} />
         {closedSessionQuestion(session, item) && <SessionClosedChip reason={sessionAnswerBlocked(session)} />}</div>
-        <span className="detail-meta" title={model.meta}>{model.meta}</span>
-        <span className="detail-reference"><button type="button" className="btn btn-ghost detail-copy" title="Copy the agent reference" onClick={copy}>
-          <i className="ph ph-copy" aria-hidden="true" />Copy reference</button></span></div>
+        {marker && <span className="detail-marker-slot"><ChangeMarker kind={marker} seenWhere="details" /></span>}
+        <span className="detail-meta" title={model.meta}>{model.meta}</span></div>
       <h2 className="detail-question" title={model.question}><Markdown text={model.question} inline compact={!titleExpanded} /></h2>
       <button type="button" className="btn btn-ghost detail-title-toggle" aria-label={titleExpanded ? 'Collapse title' : 'Expand title'}
         aria-expanded={titleExpanded} onClick={() => setTitleExpanded(value => !value)}>
@@ -582,10 +556,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       </button>
     </div>
 
-    <ItemChanges service={drafts.service} store={store} session={session} item={item} seen={seen}
-      onOpenAnswer={onOpenAnswer ?? ((id) => onOpenItem(id))} />
-
-    {model.steps && <section className="detail-section detail-steps" aria-label={model.stepsTitle}>
+    {!expanded && model.steps && <section className="detail-section detail-steps" aria-label={model.stepsTitle}>
       {sectionLabel(model.stepsTitle)}
       <div className="detail-stepper">{model.steps.map(step => <div className="detail-step" key={step.label}>
         <div className="detail-step-track"><span className="detail-step-dot" style={{ background: step.dotBg, boxShadow: step.dotRing }} />
@@ -597,13 +568,25 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     </section>}
 
     {model.outcome && <section className="detail-section detail-outcome" aria-label="Current outcome">
-      <div className="detail-label" style={{ color: model.outcome.color }}>{model.outcome.label}</div>
+      {/* The label is for a screen reader; the board draws the outcome with an elbow icon in the status colour (SPEC 5.3 item 3). */}
+      <div className="detail-label detail-outcome-label" style={{ color: model.outcome.color }}>{model.outcome.label}</div>
+      <i className="ph ph-arrow-elbow-down-right detail-outcome-icon" aria-hidden="true" style={{ color: model.outcome.color }} />
       <Markdown className="detail-outcome-text" text={model.outcome.text} />
     </section>}
 
     {model.note && <div className="detail-note"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={model.note} inline /></div>}
 
     {model.why && <section className="detail-section detail-why">{sectionLabel('Why')}<Markdown className="detail-why-text" text={model.why} /></section>}
+
+    {changes('box')}
+
+    {/* The actions (SPEC 5.3 item 5): the primary one, then the hover bar's icons. The pinned region below holds only the composer. */}
+    <ActionsRow actions={actionList} statusLabel={later ? 'Later' : STATUS[model.status].label} closed={closedStatus.has(model.status)} hint={dockHint ?? model.open?.hint} pressed={mode === 'drop' ? 'drop' : mode ? 'followUp' : null}
+      ack={ackTo ? { title: ackTitle(ackTo, item.status), held: ackHeld, disabled: actionState.writing || !!actionState.pending,
+        onAck: () => ackHold.ack(item), onUndo: () => ackHold.undo(item.id) } : null} />
+    {model.open && dockHint && <div className="detail-hint detail-delivery-hint" title={dockHint}>{dockHint}</div>}
+    {model.followUp && !answerOnly && <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div>}
+    {model.open && !owner && <PausedNote actions={actions} />}
 
     {model.replaced && <section className="detail-section">
       {sectionLabel('Replaced by')}
@@ -617,14 +600,16 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       <ChildrenBox kids={model.kids} />
     </section>}
 
-    {model.related.map(section => <section key={section.direction} className="detail-section detail-related" aria-label={section.label}>
-      {sectionLabel(section.label)}
-      {section.items.map(target => <ItemReference key={target.id} itemId={target.id} className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`} preserveContent
-        title={target.question} ariaLabel={`${target.question}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`}>
+    {model.related.length > 0 && <section className="detail-section detail-related" aria-label="Related items">
+      <div className="detail-label detail-label-row"><span>Related</span><span className="detail-related-count">{model.related.reduce((count, section) => count + section.items.length, 0)}</span></div>
+      {model.related.flatMap(section => section.items.map(target => <ItemReference key={`${section.direction}:${target.id}`} itemId={target.id} className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`} preserveContent
+        title={target.question} ariaLabel={`${section.kind}: ${target.question}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`}>
+        <span className="detail-related-kind">{section.kind}</span>
+        <span className="detail-related-icon"><StatusBadge status={target.status} variant="icon" size={15} /></span>
         <span className="detail-related-label">{relatedLabels.get(target.id)}</span>
-        {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
-      </ItemReference>)}
-    </section>)}
+        {target.hidden && <span className="detail-related-hidden">hidden</span>}
+      </ItemReference>))}
+    </section>}
 
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
       {sectionLabel('Links')}
@@ -641,98 +626,22 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       <Markdown className="detail-prev" text={model.prev.outcome} />
     </section>}
 
-    </>}
 
-    {(model.chat.length > 0 || onOpenConversation) && <section className="detail-section detail-chat" aria-label="Conversation">
-      {!expanded && <div className="detail-label detail-label-row"><span>Conversation</span>
+    {(model.chat.length > 0 || onOpenConversation) && <Chat entries={model.chat} session={session} itemId={itemId} expanded={expanded} dividerId={dividerId}
+      drafts={drafts} draftState={draftState} actions={actions} dividerAt={dividerAt}
+      after={entryId => entryId === becauseAt && becauseInput ? <AnswerChanges session={session} inputId={becauseInput} onOpenItem={onOpenItem} /> : null}
+      onOpenEditor={target => { if (target !== 'answer' && target !== 'topic_reply') openBox(target); }}
+      header={!expanded && <div className="detail-label detail-label-row"><span>Conversation</span>
         {onOpenConversation && <button type="button" className="btn btn-ghost btn-icon" aria-label="Open the conversation in a bigger view"
           title="Open the conversation in a bigger view" onClick={onOpenConversation}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M14 3h7v7M21 3l-8 8M10 21H3v-7M3 21l8-8" /></svg></button>}
-      </div>}
-      <ol className="detail-chat-list" onKeyDown={event => {
-        if (!expanded || !['ArrowUp', 'ArrowDown'].includes(event.key) || event.altKey || event.metaKey || event.ctrlKey
-          || (event.target instanceof Element && event.target.closest('input,textarea,button,a,select,[contenteditable="true"]'))) return;
-        const messages = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-message-id]')];
-        const current = event.target instanceof Element ? messages.indexOf(event.target.closest<HTMLElement>('[data-message-id]')!) : -1;
-        const next = current < 0 ? 0 : Math.max(0, Math.min(messages.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
-        event.preventDefault(); event.stopPropagation(); messages[next]?.focus({ preventScroll: true });
-        messages[next]?.scrollIntoView?.({ block: 'nearest' });
-      }}>
-        {model.chat.map(entry => <li key={entry.id} tabIndex={expanded ? -1 : undefined} data-message-id={entry.id} data-pending={entry.pending?.input.id}
-          data-round={entry.asks[0]?.ordinal}
-          data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}`}>
-          {entry.id === dividerId && <div className="conversation-unseen">New since you last looked</div>}
-          {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
-          <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
-            <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
-              {entry.you ? <>{expanded && <span className="detail-pending-caption">You · {entry.message.when}</span>}<YouSaid {...entry.you} />
-                {!expanded && <span className="detail-pending-caption">you · {entry.message.when}</span>}
-                {entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
-                : <><div className="detail-agent-meta">{expanded ? <span>Agent</span> : <><span>{entry.message.number}</span><span>{entry.message.who}</span></>}<span>{entry.message.when}</span></div>
-                  <Markdown text={entry.message.body} />
-                  {entry.asks.filter(ask => !ask.text && ask.now).map(ask => <span key={ask.ordinal} className="tag tag-accent detail-waiting-tag">Waiting on you</span>)}</>}
-            </div><CopyMessage text={entry.message.body} />
-          </div>
-          {entry.asks.filter(ask => ask.text || entry.you && ask.now).map(ask => <div className="detail-msg" key={ask.ordinal}>
-            <div className="detail-bubble detail-bubble-agent">{ask.text && <Markdown text={ask.text} />}
-              {ask.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>
-            {ask.text && <CopyMessage text={ask.text} />}
-          </div>)}
-          {entry.you && (() => {
-            const input = Object.values(session.inputs).find(value => value?.message_id === entry.id);
-            const answer = session.answers.find(value => value.message_id === entry.id);
-            const inputId = input?.id ?? answer?.input_id;
-            return inputId ? <AnswerChanges session={session} inputId={inputId} onOpenItem={onOpenItem} /> : null;
-          })()}
-          {entry.note && <div className="detail-chat-marker">{entry.note}</div>}
-          {entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
-            restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
-            onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
-              const outcome = await putBackCancelled(drafts, session, entry.unsent!.input);
-              if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
-              return outcome;
-            }} />}
-          {entry.pending?.stuck && <StuckNote actions={actions} input={entry.pending.input} stuck={entry.pending.stuck}
-            onEdit={async () => {
-              const outcome = await editQueued(drafts, session, entry.pending!.input, actions);
-              if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
-              return outcome;
-            }} />}
-          {entry.result && <div className="detail-msg detail-msg-result"><span aria-hidden="true">↳</span><Markdown className="detail-msg-text" text={entry.result} inline /><CopyMessage text={entry.result} /></div>}
-          {entry.forks.map(fork => <ItemReference itemId={fork.id} className="detail-fork" key={fork.id} preserveContent title={fork.question}
-            ariaLabel={`Branched into ${relatedLabels.get(fork.id)} · ${STATUS[fork.status].label}`}>
-            <i className="ph ph-git-fork" aria-hidden="true" /><span>Branched into {relatedLabels.get(fork.id)}</span><StatusBadge status={fork.status} variant="text" /></ItemReference>)}
-        </li>)}
-      </ol>
-    </section>}
+      </div>} />}
+
+    {changes('history')}
     </div>
 
-    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
+    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}${answerState.live ? ' detail-dock-waiting' : ''}`}>
     {expanded && model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
-    {!(expanded && showAnswer) && (ackTo || model.open) && <div className="detail-quick-actions">
-    {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
-      {ackHeld
-        ? <button type="button" className="btn btn-secondary detail-action detail-acked" title="Undo Ack" aria-label="Undo Ack" onClick={() => ackHold.undo(item.id)}>
-          <i className="ph ph-check" aria-hidden="true" />Acked · Undo
-        </button>
-        : <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
-          disabled={actionState.writing || !!actionState.pending} onClick={() => ackHold.ack(item)}>
-          <i className="ph ph-check" aria-hidden="true" />{ackTitle(ackTo, item.status)}<span className="detail-key" aria-hidden="true">a</span>
-        </button>}
-    </section>}
-    {model.open && <section className="detail-section detail-open" aria-label={model.open.title} title={dockHint ?? model.open.hint}>
-      <div className="detail-actions" role="group" aria-label="Item actions">
-        {model.open.actions.filter(action => !expanded || action.action !== 'later').map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
-          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!draftState.ready && action.action !== 'later') || (!submit.ready && action.action === 'bring') || (action.action === 'reopen' && submit.locked('reopen'))} title={action.title}
-          onClick={() => act(action.action)}>
-          <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
-        </button>)}
-      </div>
-    </section>}
-    </div>}
-    {model.open && dockHint && <div className="detail-hint detail-delivery-hint" title={dockHint}>{dockHint}</div>}
-    {model.open && !owner && <PausedNote actions={actions} />}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)
       || savedAnswers.some(entry => entry.error && submit.error === plainFailure(entry.error)))
       && <p className="detail-error" role="alert">{submit.error}</p>}
@@ -743,27 +652,13 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       {expanded && answerState.live && <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
         {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
         <ConversationQuestion key={itemId} text={item.ask || item.question} /></div>}
-      <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout={expanded ? 'wide' : 'details'} head blocked={model.answer?.blocked} focusRequest={answerFocus}
+      <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout={expanded ? 'wide' : 'details'} head blocked={removing ? 'Being removed · Undo first' : model.answer?.blocked} focusRequest={answerFocus}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}
 
-    {/* Below the answer: the way to say more while it is on its way, or once the agent handled it. */}
-    {model.followUp && !answerOnly && <><div className="detail-quick-actions">
-      <section className="detail-section detail-open" aria-label="Reply" title={model.followUp.hint}>
-        <div className="detail-actions" role="group" aria-label="Item actions">
-          <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !draftState.ready}
-            title="Reply in your own words" onClick={() => openBox('reply')}>
-            <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
-          </button>
-        </div>
-      </section></div>
-      <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div></>}
-
     {/* The one place the owner's boxes live: the same mount for every status, so typing and focus survive a status change. */}
-    {owner && <section className="detail-section detail-open" aria-label="Your message">
-      {owner}
-    </section>}
+    {composer}
     {savedAnswers.length > 0 && <section className="detail-section detail-open detail-saved-message" aria-label="Saved message">
       {sectionLabel('Saved message')}
       <p className="detail-hint">{!currentQuestionOpen && "The agent isn't waiting for this answer any more. "}Your draft is kept. Copy it into a reply if you still want to send it.</p>

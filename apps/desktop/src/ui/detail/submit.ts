@@ -28,6 +28,8 @@ export interface Words {
   readonly locked: boolean;
   /** The item or its binding changed since the draft was written; it must be reviewed before sending. */
   readonly changed: boolean;
+  /** Where the words came from, for the composer's chip: back after a restart, or taken back from the queue to edit. */
+  readonly origin?: DraftEntry['origin'];
 }
 /** An intent's own draft, or one specific draft of the owner's words. */
 export type DraftTarget = DetailIntent | Words;
@@ -102,7 +104,7 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
     && entry.draft.session.session_id === route.session_id && entry.draft.target.item_id === itemId);
   const failed = mine.find(entry => entry.draft.intent !== 'answer' && entry.error);
   const written = mine.filter(entry => !entry.receipt && WORDS.has(entry.draft.intent) && entry.draft.text.trim())
-    .map((entry): Words => ({ id: entry.draft.op_id, kind: entry.draft.intent as WordsKind, text: entry.draft.text, locked: lockedEntry(entry), changed: changedEntry(entry) }));
+    .map((entry): Words => ({ id: entry.draft.op_id, kind: entry.draft.intent as WordsKind, text: entry.draft.text, locked: lockedEntry(entry), changed: changedEntry(entry), origin: entry.origin }));
   return {
     ready,
     locked: target => target === 'reopen' && reopening || lockedEntry(entryOf(target)),
@@ -173,7 +175,7 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
     written,
     blank: kind => {
       const entry = find(kind), live = entry && !entry.receipt ? entry : undefined;
-      return { id: live?.draft.op_id ?? null, kind, text: live?.draft.text ?? '', locked: lockedEntry(entry), changed: changedEntry(live) };
+      return { id: live?.draft.op_id ?? null, kind, text: live?.draft.text ?? '', locked: lockedEntry(entry), changed: changedEntry(live), origin: live?.origin };
     },
     saving: (mine.find(entry => entry.saving)?.draft.intent as InputKind | undefined) ?? null,
     error: sendError ?? (failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null),

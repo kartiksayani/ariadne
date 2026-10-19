@@ -17,7 +17,8 @@ export const variantNames = Object.keys(variants) as readonly Variant[];
 export const finalNow = Date.UTC(2026, 9, 7, 21, 25);
 
 /** What the owner has typed in one waiting question's box (the board's `drafts`). `own` is "Write my own answer". */
-export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string }
+export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string;
+  /** Words typed in the item's Details composer (the reply, note or follow-up box), not in an answer's cards (3.3). */ readonly reply?: string }
 
 /** A step taken in the app after it mounts, to reach a state that is not data (an open menu, a hover). */
 export type Step =
@@ -25,9 +26,15 @@ export type Step =
   | { readonly click: string }
   | { readonly hover: string }
   | { readonly type: string }
+  /** Time passing in the app: milliseconds waited, for what a dwell does (the 1 s that clears a marker, 9.10). */
+  | { readonly wait: number }
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
-  | { readonly scroll: 'top' };
+  | { readonly scroll: 'top' }
+  /** A notice the app raises by itself in real life (alpha.21 W5, final.spec.mts `noticeSpecs`), put in the store with the board's words. */
+  | { readonly notice: 'save' | 'recovered' | 'agentrm' | 'stuck' }
+  /** The app's transport changes under it (12.8: a read fails after a good one; 12.9: the next save is lost on its way back). */
+  | { readonly drive: 'read-fails' | 'save-unsure' };
 
 /** Fields of a world item (final-world.ts) a state changes. */
 export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'open' | 'waiting_on_me' | 'replaced'; readonly q?: string; readonly o?: string; readonly why?: string }
@@ -46,7 +53,9 @@ export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'o
 export interface AppFixture {
   readonly sessions?: { readonly current?: string; readonly connection?: Connection; readonly unnamed?: boolean };
   readonly items?: { readonly edit?: Readonly<Record<string, ItemEdit>>; readonly afterAnswer?: boolean; readonly longText?: boolean; readonly hidden?: readonly string[]; readonly empty?: boolean;
-    /** Items the owner parked ("Later"): kept in the preferences, not on the item. */ readonly later?: readonly string[] };
+    /** Items the owner parked ("Later"): kept in the preferences, not on the item. */ readonly later?: readonly string[];
+    /** Items the agent removed into the bin at 21:19, each with the owner's unsent message the removal cancelled (10.1, 10.11, 11.3). */
+    readonly binned?: readonly { readonly item: string; readonly words?: string }[] };
   readonly questions?: { readonly sent?: readonly string[]; readonly failed?: readonly string[]; readonly othersSent?: boolean };
   readonly drafts?: readonly Draft[];
   readonly view?: {
@@ -87,20 +96,19 @@ export const notYet = {
   // Every overlay renders (the switcher, Help, the connection card, the Projects menu): the dock, the other-sessions popover
   // and the overlays are reached by the fixture and the spec's steps, and a mismatch in them is a real difference.
   overlay: [] as readonly Overlay[],
-  connection: ['unreadable', 'stale', 'unsaved'] as readonly Connection[]
+  connection: [] as readonly Connection[]
 };
 
 /**
  * The values a state's fixture sets that the fixture builder (final-fixtures.ts) accepts but cannot yet put the current app
- * in: the "Show more" links, a bigger Details, the connection states the app has no data for, and an open session other than
+ * in: the "Show more" links, the connection states the app has no data for, and an open session other than
  * the default. It is derived from the values the state sets: a field is flagged when its value is on the `notYet` list (`shown`
- * and `bigger` whenever set). A state that lists any of them cannot match the board until the app grows the feature; its frame
+ * whenever set). A state that lists any of them cannot match the board until the app grows the feature; its frame
  * JSON records them as `unhonoured`, so a builder knows the mismatch is the feature, not a fixture mistake.
  */
 export function unhonoured(app: AppFixture, list: typeof notYet = notYet): string[] {
   const { view, chrome, sessions } = app, out: string[] = [];
   if (view?.shown) out.push(`view.shown=${view.shown.join(',')}`);
-  if (view?.details === 'bigger') out.push('view.details=bigger');
   if (chrome?.overlay && list.overlay.includes(chrome.overlay)) out.push(`chrome.overlay=${chrome.overlay}`);
   if (sessions?.connection && list.connection.includes(sessions.connection)) out.push(`sessions.connection=${sessions.connection}`);
   if (sessions?.current && sessions.current !== 's2') out.push(`sessions.current=${sessions.current}`);
@@ -122,7 +130,9 @@ export interface FinalState {
   /** Which release 1 builder turns `pending` off. */
   readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details'
     // alpha.20, the Map: its rows (W2), the topic band (W3), the filter (W4), the changes (W5), the Graph (W1).
-    | 'rows' | 'band' | 'filter' | 'changes' | 'graph';
+    | 'rows' | 'band' | 'filter' | 'changes' | 'graph'
+    // alpha.21: remove, archive and the bin (W7).
+    | 'remove';
   readonly app: AppFixture;
   /**
    * The parts of the frame the app is held to. Absent: the whole frame is compared against the state's threshold. Present: only
@@ -195,20 +205,36 @@ const stateList: readonly FinalState[] = [
   { id: '2.10', part: 'Answering', sid: 'd-short', owner: 'dock', pending: false, title: 'The dock dragged short', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'short' }, drafts: [d(Q2, { pick: 0 })] } },
   // 3. An item's conversation: where Details sits (its content is a later release)
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
-  // 3.2 stays pending: the bigger view of Details is release 3.
-  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: false, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  // 3.3, 3.4, 3.5 and 3.7 stay pending (alpha.21 W4). The composer, the labels and the status line are built; what keeps the frame from matching is
+  // outside them: the Details body above (W3's badge row, change box, actions and Related), and in 3.3 the fixture's frozen clock, which reads the agent as
+  // reconnecting and greys Send. Run with FINAL_APP=1 to see them.
+  { id: '3.3', part: 'Conversation', sid: 'c-reply', owner: 'details', pending: true, title: 'Replying to an item from Details', app: { view: { selected: 'a6', details: 'open', dock: 'line' },
+    // Typed, not a saved draft: a draft the app loads at start is "back after a restart" (11.2), with its own chip and bar.
+    act: [{ key: 'r' }, { type: 'Also mention the per-workspace fallback, and link to the SOP once it’s on the wiki.' }] } },
+  { id: '3.4', part: 'Conversation', sid: 'c-wait', owner: 'details', pending: true, title: 'The item is waiting on me: answer it from Details', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0 })] } },
+  // 3.5: the app's fixture has no "queued" delivery stage (a sent answer is "received", which reads "Picked up"), so "Sent at … Undo" cannot be reached by data.
+  { id: '3.5', part: 'Conversation', sid: 'c-sent', owner: 'details', pending: true, title: 'Answered from Details: my answer shows as a sent message', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0, note: note1 })],
+    questions: { sent: [Q1] } } },
   { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: false, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
-  // 12. Connection. 12.2 to 12.9 stay pending: the connection states and their banners (the connect guide, the last good copy, the unsaved-change notice,
-  // the loading skeleton, "This session can't be read") are release 3 (ENGINEERING-PLAN: D3); 12.1's card is above.
-  { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: true, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' }, act: [{ click: 'Live' }] } },
-  { id: '12.2', part: 'R4-Connection', sid: 'c-none', owner: 'topbar', pending: true, title: 'Not connected', app: { sessions: { connection: 'none' } } },
-  { id: '12.3', part: 'R4-Connection', sid: 'c-off', owner: 'topbar', pending: true, title: 'Agent not running', app: { sessions: { connection: 'off' } } },
-  { id: '12.4', part: 'R4-Connection', sid: 'c-closed', owner: 'topbar', pending: true, title: 'Session closed', app: { sessions: { connection: 'closed' } } },
+  { id: '3.7', part: 'Conversation', sid: 'c-picked', owner: 'details', pending: true, title: 'After the agent picks the answer up', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0, note: note1 })],
+    questions: { sent: [Q1] } } },
+  // 11.2 and 11.5 stay pending: the notices come from the 5.7 hooks, which App.tsx mounts in W2's piece (the app side cannot show them before it).
+  { id: '11.2', part: 'R4-Notices', sid: 'n-recovered', owner: 'details', pending: true, title: 'Unsent words back after a restart', app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' }, drafts: [d('a2.2.1', { reply: 'Keep the SOP short.' })] } },
+  { id: '11.5', part: 'R4-Notices', sid: 'n-stuck', owner: 'details', pending: true, title: 'A reply that’s stuck', app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' } } },
+  // 12. Connection (alpha.21 D3): the top bar, the line above the Map, the dock line and, for 12.7, the Map's panel are held to the board (`regionsById`).
+  // 12.5 stays pending: the app reads the selected session before it draws anything (a hung read leaves the Projects page up), so the board's
+  // loading frame (Map skeleton, "Connecting…", the dock's skeleton) cannot be reached at start; the dock's skeleton is a unit test's
+  // (tests/ui/app/connection-line.test.tsx).
+  { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: false, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' }, act: [{ click: 'Live' }] } },
+  { id: '12.2', part: 'R4-Connection', sid: 'c-none', owner: 'topbar', pending: false, title: 'Not connected', app: { sessions: { connection: 'none' }, act: [{ click: 'How to connect' }] } },
+  { id: '12.3', part: 'R4-Connection', sid: 'c-off', owner: 'topbar', pending: false, title: 'Agent not running', app: { sessions: { connection: 'off' } } },
+  { id: '12.4', part: 'R4-Connection', sid: 'c-closed', owner: 'topbar', pending: false, title: 'Session closed', app: { sessions: { connection: 'closed' } } },
   { id: '12.5', part: 'R4-Connection', sid: 'c-loading', owner: 'topbar', pending: true, title: 'Loading', app: { sessions: { connection: 'loading' } } },
-  { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: true, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
-  { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: true, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
-  { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: true, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' } } },
-  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: true, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] } } },
+  { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: false, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
+  { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: false, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
+  { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: false, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' }, act: [{ drive: 'read-fails' }] } },
+  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: false, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] }, act: [{ drive: 'save-unsure' }, { hover: '.tree-item[data-item-id="a2.2.2"]' }, { click: 'Later' }, { hover: '.tb' }, { hover: '.tb' }] } },
   // 13. Session and project switcher
   { id: '13.1', part: 'R4-Switcher', sid: 's-open', owner: 'nav-state', pending: false, title: 'Open', app: { chrome: { overlay: 'switcher' }, act: [{ key: 'Meta+o' }] } },
   { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: false, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
@@ -287,6 +313,16 @@ const mapStateList: readonly FinalState[] = [
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
   { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: false, title: 'On Graph cards: the diamond alone, same shapes',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
+  // alpha.21 W3 (Details body): the markers in the dock and in Details. Pending until W2's head is merged: the body starts where the head ends, so
+  // the regions (the badge row, the change box, the actions row) are set on the integrated frame, not on this branch's.
+  { id: '9.7', part: 'Markers', sid: 'm-dock', owner: 'changes', pending: true, title: 'In the answer dock: a question that changed since I last saw it',
+    app: { view: { selected: null, dock: 'open', dockQuestion: 0 }, map: marked('base') } },
+  { id: '9.8', part: 'Markers', sid: 'm-details', owner: 'changes', pending: true, title: 'In Details: the marker beside the status, and what changed',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
+  { id: '9.10', part: 'Markers', sid: 'm-seen', owner: 'changes', pending: true, title: 'Clearing: a second in Details clears it and shows Seen',
+    app: { view: { selected: 'a6', details: 'open', dock: 'line' }, map: marked('base'), act: [{ wait: 1500 }] } },
+  { id: '9.11', part: 'Markers', sid: 'm-reword', owner: 'changes', pending: true, title: 'A rewording alone: no marker anywhere, noted in the item’s history',
+    app: { view: { selected: 'a8', details: 'open', dock: 'line' }, map: marked('base') } },
   { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: false, title: 'The topic’s … menu',
     // The board's R4 file draws this menu over the same marked Map as 5.1.
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'More actions for' }] } }
@@ -303,6 +339,8 @@ const topBarMain = (limits?: Limits) => [...box('top bar left', [0, 0, 276, 40],
 const topBarUnnamed = (limits?: Limits) => [...box('top bar logo', [0, 0, 40, 40], [0, 0, 40, 40], limits), ...box('top bar controls', [560, 0, 720, 40], [690, 0, 210, 40], limits)];
 /** The dock line's text and its other-sessions chip, without the sent chip: the board's token for the sent chip's colour resolves with dark-theme values in light frames. */
 const dockLineQuiet = (limits?: Limits) => [...box('dock line text', [0, 760, 700, 40], [0, 610, 690, 40], limits), ...box('dock line other-sessions chip', [1130, 760, 150, 40], [790, 610, 110, 40], limits)];
+/** Where the dock line says where answers wait: between the question's text and the other-sessions chip. */
+const dockChip = (limits?: Limits) => box('dock line chip: where answers wait', [700, 760, 390, 40], [600, 610, 160, 40], limits);
 /** The dock line's two ends: its pill and its chips. The text between is left out where the board's own files disagree (see `regionsById`). */
 const dockLineEnds = (limits?: Limits) => [...box('dock line pill', [0, 760, 100, 40], [0, 610, 100, 40], limits), ...box('dock line chip', [1090, 760, 150, 40], [740, 610, 128, 40], limits)];
 
@@ -335,11 +373,34 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '2.10': [...topBarMain(BAR), ...dockOpen(600, 450, [0.002, 0.002])],
   '3.1': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...detailsEdge([0.002, 0.002])],
   '3.6': [...topBarMain(BAR), ...dockOpen(572, 351, [0.002, 0.002]), ...detailsRail(572, 351)],
+  // The bigger view's head: the right-hand controls (Back and Forward draw greyed here, the board's enabled: under 1%). Masked: "← Map" (the app's button differs from the board's 26px ring button by about 12% of
+  // its pixels, a visual nit for alpha.22) and the path between (the app's own text). The body (badge row, title, chat) is W3's and W4's.
+  '3.2': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...box('details head, right', [1080, 40, 200, 40], [700, 40, 200, 40], [0.01, 0.012])],
   // The board's second file (R4, states 12 to 16) draws the dock line's question in 72% text; its first file (1 to 3) in full text.
   // The app draws it as the first file does, so these states hold the line's pill and chips and leave the text between.
   // The board's R4 file also draws the dock's chevron in full text colour (the first file and the app: muted), so the chip region stops before it.
-  // 12.1 stays pending: the connection card says other things (its last-message time, the queue sentence, "Disconnect" for "Close session" and "Copy session ID").
-  '12.1': [...topBar(), ...dockLineEnds(), ...box('connection card', [316, 36, 324, 142], [316, 36, 324, 142])],
+  // The line above the Map (D3) is held to the board's size and marks; its words differ from the board's only where data is missing (§3a: 12.6
+  // has no drop time, 12.7 no line number, path chip or "Show the file", 12.9 no data folder: the app says it isn't sure the change was saved).
+  // The dock's chip sits between the question's text (72% in R4's file, full in the app: left out) and the other-sessions chip.
+  // 12.1 holds the card's title row only: the card's lines name the last message and what is on its way, which the frame's data does not have, and
+  // its buttons say "Close session" and "Copy session ID" where the board says "Disconnect".
+  '12.1': [...topBar(BAR), ...dockLineEnds(), ...box('connection card title', [316, 36, 324, 34], [316, 36, 324, 34], [0.01, 0.01])],
+  // 12.2's steps: the head and the first step hold. The second step says where Codex's instruction comes from when no setup receipt is at hand
+  // (the board's has a Copy instruction button), so it and the foot below it sit at another height.
+  '12.2': [...topBar(BAR), ...box('connection line, head and first step', [0, 40, 1280, 82], [0, 40, 900, 82]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  '12.4': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLine()],
+  // 12.6 holds the line's icon and title and its button: the sentence between has no drop time (§3a).
+  '12.6': [...topBar(BAR), ...box('connection line title', [0, 40, 260, 56], [0, 40, 260, 56]), ...box('connection line button', [1180, 40, 100, 56], [800, 40, 100, 56]),
+    ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.7 holds the line's icon and title and the dock's words. Left out: the top bar's chip of waiting questions in other sessions and the dock's chip of
+  // them (not held here; the waiting list no longer gives up when one session can't be read), the line's sentence (no line number), its second
+  // button, and the Map panel (no path chip, so its centred lines sit higher).
+  '12.7': [...box('top bar left', [0, 0, 210, 40], [0, 0, 40, 40]), ...box('connection line title', [0, 40, 260, 56], [0, 40, 200, 32]),
+    ...box('dock line text', [0, 760, 700, 40], [0, 610, 690, 40])],
+  '12.8': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56], [0.001, 0.001]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.9: the top bar's right-hand controls are disabled while the save is unsure (the board draws them live), and the line says less (§3a).
+  '12.9': [...box('top bar left', [0, 0, 700, 40], [0, 0, 700, 40]), ...dockLineEnds()],
   '13.1': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 454], [31, 39, 398, 454], [0.004, 0.004])],
   '13.2': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 218], [31, 39, 398, 218], [0.003, 0.003])],
   // The R4 board's dock path runs to the question itself ("note on workspace keys"), the first file's and the app's to its parent ("which cache keys"): about 0.25% of the dock.
@@ -422,6 +483,7 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), // The pill's inside only: its rounded corners show the Map's rows behind it, which differ by D1 (row padding) and the scroll that follows.
     ...box('Back to selected pill', [336, 718, 208, 26], [176, 568, 208, 26], MAP),
     wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '9.7': [], '9.8': [], '9.10': [], '9.11': [],
   '9.2': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
   // The "…" menu, from its first row ("Reply to topic"); the band is compared left of the menu.
   '10.12': [...box('topic band', [0, 40, 1280, 38], [0, 40, 586, 62], MAP), ...box('menu: Reply to topic', [970, 78, 300, 58], [590, 78, 300, 58], TEXT),
@@ -468,8 +530,76 @@ const bandPieces = (region: FrameRegion): FrameRegion[] => {
  */
 const withoutFirstRow = (region: FrameRegion): boolean => !region.name.startsWith('first row');
 
+// alpha.21 W5: the notice stack (11.1, 11.4, 11.6) and two-step Continue (10.7, 10.8). Notices float over the Map below the topic band (ALPHA21-PLAN
+// §3a.1, E20), where the board draws them in flow above it, so the Map under them differs by design: these frames stay `pending` and are read from
+// the side-by-side PNGs (FINAL_APP=1), not asserted. 10.7's and 10.8's dialogs are compared where they sit (the card is centred).
+const noticeStateList: readonly FinalState[] = [
+  { id: '11.1', part: 'R4-Notices', sid: 'n-save', owner: 'shell', pending: true, title: 'A change that couldn’t be saved',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ notice: 'save' }] } },
+  { id: '11.4', part: 'R4-Notices', sid: 'n-outside', owner: 'shell', pending: true, title: 'Showing an item outside my filter',
+    app: { view: { selected: 'a4', details: 'open', dock: 'line' }, map: { filter: ['waiting_on_me'] } } },
+  // The board lists the notices recovered, agentrm, save and shows the first two; the app shows the newest on top, so they are raised in the reverse order.
+  { id: '11.6', part: 'R4-Notices', sid: 'n-many', owner: 'shell', pending: true, title: 'Several at once, with Details open',
+    app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' }, map: {}, act: [{ notice: 'save' }, { notice: 'agentrm' }, { notice: 'recovered' }] } },
+  { id: '10.7', part: 'R4-Dialogs', sid: 'd-continue', owner: 'shell', pending: true, title: 'Continue a topic: pick a session',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Continue elsewhere' }] } },
+  { id: '10.8', part: 'R4-Dialogs', sid: 'd-continue2', owner: 'shell', pending: true, title: 'Continue: review the summary',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Continue elsewhere' }, { click: 'schema review' }] } }
+];
+
+// alpha.21 remove, archive and the bin (W7). The dialogs sit over the Map, whose rows never line up (D1), so each state compares its dialog,
+// toast or strip only (`removeRegionsById`).
+const removeRow: Step = { hover: '[role="treeitem"][data-item-id="a2.2.1"]' };
+/** The board's bin: the agent removed "cache warm-up script", which cancelled one message of mine. */
+const binned = [{ item: 'a11', words: 'Skip the script; the deploy job can warm the cache. Keep the twenty-minute budget in mind.' }] as const;
+const openBin: readonly Step[] = [{ click: 'More actions for' }, { click: 'Open the bin' }];
+const removeStateList: readonly FinalState[] = [
+  { id: '10.1', part: 'R4-Dialogs', sid: 'd-confirm', owner: 'remove', pending: false, title: 'Confirm, for what can’t be undone: emptying the bin',
+    app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {}, act: [...openBin, { click: 'Empty the bin…' }] } },
+  { id: '10.11', part: 'R4-Dialogs', sid: 'd-bin', owner: 'remove', pending: false, title: 'The bin, from the topic’s … menu',
+    app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {}, act: openBin } },
+  // 11.3 stays pending: the notice is drawn where W5's notice placement (E20) puts it, which this piece does not have; it also keeps Restore.
+  { id: '11.3', part: 'R4-Notices', sid: 'n-agentrm', owner: 'remove', pending: true, title: 'The agent removed items: a notice, and a strip marks the spot',
+    app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {} } },
+  { id: '10.2', part: 'R4-Dialogs', sid: 'd-remove', owner: 'remove', pending: false, title: 'Remove an item and everything below it',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [removeRow, { click: 'Remove (⌫)' }] } },
+  { id: '10.3', part: 'R4-Dialogs', sid: 'd-removed', owner: 'remove', pending: true, title: 'After Remove: Undo for 5 seconds, a strip keeps the spot',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [removeRow, { click: 'Remove (⌫)' }, { click: 'Remove 5 items' }] } },
+  { id: '10.13', part: 'R4-Dialogs', sid: 'd-tarchive', owner: 'remove', pending: false, title: 'Archive a topic',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'More actions for' }, { click: 'Archive topic…' }] } },
+  { id: '10.14', part: 'R4-Dialogs', sid: 'd-tremove', owner: 'remove', pending: false, title: 'Remove a topic',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'More actions for' }, { click: 'Remove topic…' }] } }
+];
+/**
+ * A horizontal slice of a centred dialog `width` wide: from `top` (px below the dialog's top edge in the app) for `height` px. The app centres
+ * its dialog by its own height, so where the app's dialog is shorter than the board's (a data difference) a slice is moved by `dy`.
+ */
+const dialogSlice = (name: string, width: number, app: readonly [wideTop: number, narrowTop: number], top: number, height: number,
+  dy: readonly [wide: number, narrow: number] = [0, 0], limits: Limits = TEXT): FrameRegion[] => [
+  { name, rect: [640 - width / 2, app[0] + top, width, height], variants: WIDE, threshold: limits[0], ...(dy[0] ? { dy: dy[0] } : {}) },
+  { name: `${name} (narrow)`, rect: [450 - width / 2, app[1] + top, width, height], variants: NARROW, threshold: limits[1], ...(dy[1] ? { dy: dy[1] } : {}) }];
+const removeRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
+  '10.13': dialogSlice('archive dialog', 520, [292, 217], 0, 215),
+  '10.14': dialogSlice('remove topic dialog', 520, [286, 211], 0, 228),
+  // (b) The app's world has no unsent message on "write the SOP", so its warning is one line (the board's two): the dialog is 14px shorter
+  // and centred 7px lower. The head and the list with the buttons are compared, each where the board draws it.
+  '10.2': [...dialogSlice('remove dialog head', 520, [215, 140], 0, 120, [-7, -7]), // The board's rows sit at fractional heights (12.5px at 80% text): a row a pixel apart is sub-pixel noise, measured 2.6%.
+    ...dialogSlice('remove dialog list', 520, [215, 140], 168, 137, [7, 7], [0.03, 0.03]),
+    ...dialogSlice('remove dialog buttons', 520, [215, 140], 308, 62, [7, 7])],
+  // (b) and §3a.3: the bin holds the agent's removal only (no "removed by you" row), and the world's "cache warm-up script" has nothing below it
+  // (the board's "3 items in all"), so the dialog is shorter. Its head and its buttons are compared.
+  '10.11': [...dialogSlice('bin head', 560, [271, 196], 0, 90, [-34, -34]), ...dialogSlice('bin buttons', 560, [271, 196], 193, 63, [34, 34])],
+  // (b) "The 2 removed items" on the board, "The removed item" in the app: the title, and the quote with the buttons, are compared.
+  '10.1': [...dialogSlice('empty dialog title', 520, [283, 208], 0, 52), ...dialogSlice('empty dialog quote and buttons', 520, [283, 208], 100, 130)],
+  // The strip alone (D1 puts the app's rows 7px higher here). 10.3 stays pending: the toast is W5's (no trash icon, a text Undo), and the
+  // narrow strip's "· 5 items" wording is not built.
+  '10.3': [{ name: 'removed strip', rect: [75, 353, 325, 24], variants: WIDE, threshold: TEXT[0], dy: 7 }]
+};
+
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
-  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) }))];
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) })),
+  ...noticeStateList,
+  ...removeStateList.map(state => removeRegionsById[state.id] ? { ...state, regions: removeRegionsById[state.id]! } : state)];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 

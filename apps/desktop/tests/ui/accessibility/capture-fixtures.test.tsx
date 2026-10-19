@@ -35,10 +35,13 @@ it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores'
   if (spec.selected) await waitFor(() => expect(document.querySelector<HTMLElement>('.shell-detail .item-detail')?.dataset.detailItemId).toBe(spec.selected));
   if (id === '1m' || id === 'delivery-stopped') {
     const kind = spec.acceptedFailure ? 'stopped' : 'decision';
-    for (const selector of ['.tree-item[data-item-id="3.1"]', '.shell-detail']) {
+    // The Map row no longer carries the note (alpha.21 E17): Details does.
+    for (const selector of ['.shell-detail']) {
       const note = document.querySelector(`${selector} .stuck-note[data-stuck="${kind}"]`);
       expect(note?.querySelector('[role="status"]')?.textContent).toContain(spec.acceptedFailure ? 'got your message but stopped before answering' : 'Couldn’t deliver');
-      expect([...note!.querySelectorAll('button')].map(button => button.textContent)).toContain(spec.acceptedFailure ? 'Send again' : 'Retry');
+      // In Details a stopped delivery the agent never received carries its Retry in the bubble's "Not sent" line, above the note.
+      const controls = selector === '.shell-detail' && !spec.acceptedFailure ? note!.closest('li')! : note!;
+      expect([...controls.querySelectorAll('button')].map(button => button.textContent)).toContain(spec.acceptedFailure ? 'Send again' : 'Retry');
     }
   }
 });

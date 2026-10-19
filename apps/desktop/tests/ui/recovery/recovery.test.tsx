@@ -541,11 +541,12 @@ describe('edge states preserve mounted content', () => {
       expect(view.container.querySelector('[data-edge-state]')?.getAttribute('data-edge-state')).toBe(kind);
     }); expect(headings.size).toBe(9);
   });
-  it.each(['corrupt_session', 'future_schema'] as const)('shows malformed separately from inaccessible for %s', async code => {
+  it.each(['corrupt_session', 'future_schema'] as const)('says nothing in the page for %s: the line above the Map and the Map’s panel tell it', async code => {
     const { store } = await setup(); const state = store.getSnapshot();
     const error = new CoreFailure({ code, message: 'Unreadable store.', hint: 'Preserve stored data.', field_errors: [], retryable: false });
-    render(<SessionNotice state={{ ...state, status: 'stale', error }} refresh={() => {}} />);
-    expect(screen.getByText('Session cannot be read')).toBeDefined();
+    const view = render(<SessionNotice state={{ ...state, status: 'stale', error }} refresh={() => {}} />);
+    expect(view.container.querySelector('[data-edge-state]')).toBeNull();
+    expect(screen.queryByText('Session cannot be read')).toBeNull();
   });
   it('does not qualify a wrong-generation observation as idle', () => {
     const binding = currentBinding(fixture());
@@ -589,13 +590,13 @@ describe('binding lifecycle surface (P4.7 acceptance gaps)', () => {
     expect(transport.mutations).toEqual([{ session: route, command: { command: 'binding_disconnect', api_version: 1, op_id: opId,
       params: { binding_id: binding.id, expected_generation: binding.generation } } }]);
   });
-  it('maps each non-ready session status to its own edge state and renders nothing when ready', async () => {
+  it('keeps its own notice only for the first read: stale and unreadable are told by the line above the Map, once', async () => {
     const { store } = await setup(); const base = store.getSnapshot();
     const kind = (status: typeof base.status) => {
       const view = render(<SessionNotice state={{ ...base, status, error: null }} refresh={() => {}} />);
       const found = view.container.querySelector('[data-edge-state]')?.getAttribute('data-edge-state') ?? null; view.unmount(); return found;
     };
-    expect(kind('loading')).toBe('loading'); expect(kind('stale')).toBe('stale');
-    expect(kind('inaccessible')).toBe('unavailable'); expect(kind('closed')).toBe('unavailable'); expect(kind('ready')).toBeNull();
+    expect(kind('loading')).toBe('loading'); expect(kind('stale')).toBeNull();
+    expect(kind('inaccessible')).toBeNull(); expect(kind('closed')).toBeNull(); expect(kind('ready')).toBeNull();
   });
 });

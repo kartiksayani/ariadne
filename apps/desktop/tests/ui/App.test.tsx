@@ -11,6 +11,9 @@ import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
 import { goToPage, goToSession } from './app/open';
 import { page as historyPage, projections } from './history/fixtures';
+import { closeDetails } from './shell/closeDetails';
+import { useWideWindow } from './shell/wideWindow';
+useWideWindow();
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
@@ -382,7 +385,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await screen.findAllByRole('tree', { name: / graph$/ });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     fireEvent.click(document.querySelector('.graph-node[data-item-id="1"]')!);
     expect(await screen.findByRole('group', { name: 'Item actions' })).toBeTruthy();
@@ -396,7 +399,7 @@ describe('ordinary desktop composition', () => {
     const writes = mutations(transport, 'preferences_patch').length;
     fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
   });
@@ -586,7 +589,7 @@ describe('ordinary desktop composition', () => {
     if (completion === 'reconciled') transport.failNext = 'preferences_patch';
     await act(async () => { release(); await gate; });
     if (completion === 'reconciled') {
-      const reconcile = await screen.findByRole('button', { name: 'Check again' });
+      const reconcile = await screen.findByRole('button', { name: /^(Check|Try) again$/ });
       lockedWhileUnsure = search.disabled;
       expect(search.value).toBe('missing pending needle');
       expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + 1);
@@ -747,7 +750,7 @@ describe('ordinary desktop composition', () => {
     if (completion === 'reconciled') transport.failNext = 'preferences_patch';
     await act(async () => { release(); await gate; });
     if (completion === 'reconciled') {
-      fireEvent.click(await screen.findByRole('button', { name: 'Check again' }));
+      fireEvent.click(await screen.findByRole('button', { name: /^(Check|Try) again$/ }));
     }
     await waitFor(() => expect(transport.preferences.global).toMatchObject({ text_scale: 100, theme: 'light' }));
     await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('retain this typed search'));
@@ -760,7 +763,7 @@ describe('ordinary desktop composition', () => {
     await screen.findByRole('group', { name: 'Item actions' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const filters = structuredClone(transport.preferences.sessions[0].filters);
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
@@ -867,7 +870,7 @@ describe('ordinary desktop composition', () => {
       if (outcome === 'confirmed') expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: -20 });
     } else {
       if (outcome === 'uncertain') {
-        const reconcile = await screen.findByRole('button', { name: 'Check again' });
+        const reconcile = await screen.findByRole('button', { name: /^(Check|Try) again$/ });
         const frozen = structuredClone(mutations(transport, 'preferences_patch').at(-1));
         expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
         fireEvent.click(reconcile);
@@ -952,10 +955,10 @@ describe('ordinary desktop composition', () => {
       expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBe(selectionCapture);
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
     } else {
-      await screen.findByRole('button', { name: 'Check again' });
+      await screen.findByRole('button', { name: /^(Check|Try) again$/ });
       const writes = mutations(transport, 'preferences_patch').length;
       await act(async () => {});
-      await screen.findByRole('button', { name: 'Check again' });
+      await screen.findByRole('button', { name: /^(Check|Try) again$/ });
       expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
       expect(selections()).toHaveLength(0);
       expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
@@ -1080,7 +1083,7 @@ describe('ordinary desktop composition', () => {
     if (completion === 'reconciled') transport.failNext = 'preferences_patch';
     await act(async () => { release(); await gate; });
     if (completion === 'reconciled') {
-      const reconcile = await screen.findByRole('button', { name: 'Check again' });
+      const reconcile = await screen.findByRole('button', { name: /^(Check|Try) again$/ });
       expect(parent.getAttribute('aria-disabled')).toBe('true');
       fireEvent.click(parent); fireEvent.keyDown(parent, { key: 'Enter' });
       expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(revealReads);
@@ -1183,7 +1186,7 @@ describe('ordinary desktop composition', () => {
     expect(document.activeElement?.getAttribute('data-item-id')).toBe('8');
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull());
-    expect(screen.queryByRole('button', { name: 'Close detail' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
     fireEvent.click(document.querySelector('[data-item-id="8"]')!);
     fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
     expect((await screen.findByLabelText('Reply message') as HTMLTextAreaElement).value).toBe('Retain this draft when Escape closes detail.');

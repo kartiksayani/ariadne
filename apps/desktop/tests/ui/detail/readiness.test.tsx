@@ -7,6 +7,7 @@ import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { useDetailSubmit } from '../../../src/ui/detail/submit';
+import type { ItemActionView } from '../../../src/ui/detail/itemActions';
 import { AppTransport, route } from '../app/transport';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
@@ -112,34 +113,39 @@ describe('detail actions while the owner view is stale', () => {
     expect(input.state).toBe('handled');
     expect(drafts.find(route, '2', 'answer')?.receipt?.data.kind).toBe('input_submit');
   });
-  it('copies an item with generic toast feedback and a stable copy button', async () => {
+  // Copy reference is a row of the actions list Details hands to the head's "…" menu (alpha.21 §5.6), not a button in the body.
+  const withActions = () => {
+    const seen: { list: readonly ItemActionView[] | null } = { list: null };
+    return { onActions: (list: readonly ItemActionView[] | null) => { seen.list = list; }, copy: () => seen.list!.find(action => action.id === 'copyRef')!.run() };
+  };
+  it('copies an item with generic toast feedback through the Copy reference action', async () => {
     const { store, drafts } = await setup();
     const writeText = vi.fn(async () => {});
     vi.stubGlobal('navigator', { clipboard: { writeText } });
-    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
-    const button = screen.getByRole('button', { name: 'Copy reference' }), before = button.innerHTML;
-    fireEvent.click(button);
+    const { onActions, copy } = withActions();
+    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} onActions={onActions} />);
+    expect(screen.queryByRole('button', { name: 'Copy reference' })).toBeNull();
+    act(() => copy());
     await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Item copied.']));
     expect(writeText).toHaveBeenCalledOnce();
-    expect(button.innerHTML).toBe(before);
     expect(screen.queryByText('Copied')).toBeNull();
   });
-  it('reports a copy failure with generic toast feedback and leaves the copy button stable', async () => {
+  it('reports a copy failure with generic toast feedback', async () => {
     const { store, drafts } = await setup();
     vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => { throw new Error('Clipboard failed with private item text.'); }) } });
-    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
-    const button = screen.getByRole('button', { name: 'Copy reference' }), before = button.innerHTML;
-    fireEvent.click(button);
+    const { onActions, copy } = withActions();
+    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} onActions={onActions} />);
+    act(() => copy());
     await waitFor(() => expect(notices.getSnapshot().map(notice => [notice.text, notice.tone])).toEqual([['Copy failed. Try again.', 'problem']]));
-    expect(button.innerHTML).toBe(before);
   });
   it.each(['item', 'unmount'] as const)('ignores a copy completion after the detail changes by %s', async change => {
     const { store, drafts } = await setup();
     let finish!: () => void;
     vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) } });
-    const props = { store, drafts, itemId: '1.1', later: false, onOpenItem: vi.fn() };
+    const { onActions, copy } = withActions();
+    const props = { store, drafts, itemId: '1.1', later: false, onOpenItem: vi.fn(), onActions };
     const view = render(<ItemDetail {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy reference' }));
+    act(() => copy());
     if (change === 'item') view.rerender(<ItemDetail {...props} itemId="1" />);
     else view.unmount();
     await act(async () => { finish(); });

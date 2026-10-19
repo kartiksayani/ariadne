@@ -1,7 +1,7 @@
 // The answer dock (board screen 2, §5.2, §6.4): a 40px line, or the open dock at one waiting question of this session,
 // floating over the Map and Details. It never opens by itself, and it never selects, focuses or scrolls anything in the
 // Map: only the owner's own clicks on a path segment or on the question's title do (`onOpenItem`).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useWaiting, type WaitingStore } from '../../selectors/waiting/store';
 import { receiptWithdrawn, useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
@@ -12,13 +12,20 @@ import { AnswerSlot } from '../detail/AnswerSlot';
 import { QuestionDelivery } from '../answer/QuestionDelivery';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { useSeenDwell } from '../changes/useSeenDwell';
+import { ChangeMarker } from '../changes/ChangeMarker';
+import { useDetailMarker } from '../changes/useDetailMarker';
+import { peekChange } from '../peek/change';
+import type { SeenState } from '../../selectors/changes/seen';
+import type { Immutable } from '../../data/session-store';
+import type { Item, Session } from '../../generated/domain/models';
 import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
 import { ownerName } from '../shell/model';
 import { agentProduct } from '../../state/navigation/switcher';
 import { useDockModel } from './api';
 import { useIntents } from '../intents';
-import { compareOtherGroups, dockPath, dockQuestions, sentWaiting, waitingAge } from './model';
+import { closedLine, compareOtherGroups, dockPath, dockQuestions, dockStateChip, sentWaiting, waitingAge } from './model';
+import { connectionKind } from '../shared/connection';
 import './dock.css';
 
 export { dockQuestions } from './model';
@@ -31,6 +38,8 @@ export interface AnswerDockProps {
   readonly answering?: string | null;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   readonly onSeen?: (itemId: string, revision: number) => void;
+  /** What the owner has seen (the reading lane): the question's New / Changed / Seen pill and its change strip read it. */
+  readonly seen?: SeenState;
   /** A path segment: select that item. */
   readonly onOpenItem?: (itemId: string) => void;
   /** Test clock. */
@@ -40,7 +49,21 @@ export interface AnswerDockProps {
 const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="dialog"],[role="alertdialog"]';
 const quote = (text: string) => `“${text}”`;
 
-export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNotRunning, onSeen, onOpenItem, now = Date.now }: AnswerDockProps) {
+/**
+ * The question's title with its marker at the right (SPEC 9.7): New or Changed, then "Seen" once the dock's 1 s dwell has cleared
+ * it. For a change, the strip under the title ("Options changed at 21:12. …") stays for as long as this question is open. Mounted
+ * per question, so what it opened with is this visit's.
+ */
+function DockQuestionHead({ session, item, seen, children }: { readonly session: Immutable<Session>; readonly item: Immutable<Item>; readonly seen: SeenState; readonly children: ReactNode }) {
+  const marker = useDetailMarker(item, seen), [opening] = useState(seen);
+  const strip = useMemo(() => peekChange(session, item, opening).strip, [session, item, opening]);
+  return <>
+    <div className="dock-question-head">{children}{marker && <ChangeMarker kind={marker} seenWhere="dock" />}</div>
+    {strip && <p className="dock-question-change"><strong>{strip.label.replace(' · ', ' at ')}</strong> {strip.text}</p>}
+  </>;
+}
+
+export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNotRunning, onSeen, seen, onOpenItem, now = Date.now }: AnswerDockProps) {
   const context = useDockModel();
   const [local] = useState(() => context ? null : new DockStore());
   const model = context?.store ?? local!;
@@ -142,23 +165,24 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
     && entry.draft.session.session_id === route.session_id && !entry.receipt && (entry.draft.text.trim() || entry.draft.selected_option_id)
     && entry.draft.target.item_id !== state.current?.itemId);
   const sent = sentWaiting(session, drafts);
-  // A failed answer stays on its own question in the dock, with its Retry; it is not also "sent".
-  const inDock = new Set(questions.map(question => question.itemId));
+  // Stuck deliveries are not listed here: a notice says so after 2 minutes and Details holds the controls (alpha.21 E17).
   const standing = session ? Object.values(session.inputs).filter(input => !!input && input.target.item_id
-    && ['queued', 'in_flight', 'needs_attention'].includes(input.state)
-    && !(input.state === 'needs_attention' && input.kind === 'answer' && inDock.has(input.target.item_id))).sort((a, b) => b!.seq - a!.seq) : [];
+    && ['queued', 'in_flight'].includes(input.state)).sort((a, b) => b!.seq - a!.seq) : [];
   // The pager reads the model's list, which keeps a just-sent question in its place: "1 of N" stays true during the hold.
   const paged = state.session === sessionKey ? state.questions : questions;
   const index = paged.findIndex(question => question.id === state.current?.id);
   const item = open ? session?.items[state.current!.itemId] : undefined;
-  const waitingNow = unsent.length > 0;
+  // The connection decides what the line says first (SPEC 5.12): loading, closed and unreadable take its place; the rest add a chip.
+  // Unreadable with no read at all has no questions to show; with a last read the dock keeps them and a chip says answers wait.
+  const kind = connectionKind(current), blind = kind === 'unreadable' && !session, replaced = kind === 'loading' || kind === 'closed' || blind;
+  const stateChip = dockStateChip(kind);
+  const waitingNow = unsent.length > 0 && !replaced;
   const toggle = (name: 'others' | 'drafts' | 'sent') => setPopover(value => value === name ? null : name);
-  // "N sent" counts answers not picked up yet; with none, the chip still opens the list of picked-up or stuck ones.
-  const sentCount = sent.length || standing.length;
-  const sentChip = sentCount > 0 && <button type="button" className="dock-sent" aria-expanded={popover === 'sent'} onClick={() => toggle('sent')}
-    title={sent.length ? 'Answers sent and not picked up yet' : 'Sent, picked up or needing a look'}>
-    <i className="ph ph-paper-plane-tilt" aria-hidden="true" /><span className="dock-wide">{sentCount} sent{sent.length ? ', waiting for the agent' : ''}</span>
-    <span className="dock-narrow" aria-hidden="true">{sentCount} sent</span></button>;
+  // "N sent" counts answers not picked up yet; with none, there is no chip.
+  const sentChip = sent.length > 0 && <button type="button" className="dock-sent" aria-expanded={popover === 'sent'} onClick={() => toggle('sent')}
+    title="Answers sent and not picked up yet">
+    <i className="ph ph-paper-plane-tilt" aria-hidden="true" /><span className="dock-wide">{sent.length} sent, waiting for the agent</span>
+    <span className="dock-narrow" aria-hidden="true">{sent.length} sent</span></button>;
   const othersChip = otherRows.length > 0 && <button type="button" className="dock-others" aria-expanded={popover === 'others'} onClick={() => toggle('others')}
     title="Questions waiting on you in other sessions">
     <i className="ph ph-squares-four" aria-hidden="true" /><span className="dock-wide">{otherRows.length} in other sessions</span><span className="dock-narrow" aria-hidden="true">{otherRows.length} elsewhere</span></button>;
@@ -168,6 +192,8 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
     if (kept.length === 1 && target) model.show(target.id); else toggle('drafts');
   }}><i className="ph ph-pencil-simple" aria-hidden="true" /><span className="dock-wide">Draft kept on {quote(nameOf(kept[0]!.draft.target.item_id ?? ''))}{kept.length > 1 ? ` +${kept.length - 1}` : ''}</span>
     <span className="dock-narrow" aria-hidden="true">Draft kept</span></button>;
+  const stateNote = stateChip && <span className="dock-state" data-kind={kind}><i className={stateChip.icon} aria-hidden="true" />
+    <span className="dock-wide">{stateChip.wide}</span><span className="dock-narrow" aria-hidden="true">{stateChip.narrow}</span></span>;
   const visibleHeight = open ? drag ?? height : null;
   const first = unsent[0] ?? null;
   return <section ref={root} className="answer-dock" aria-label="Answer dock" data-open={open || undefined} data-waiting={waitingNow || open || undefined}
@@ -193,7 +219,12 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         setHeight(result.height); saveDockHeight(result.height);
       }}><span aria-hidden="true" /></div>}
     {!open ? <div className="answer-dock-line">
-      {waitingNow ? <>
+      {kind === 'loading' ? <span className="dock-line-text dock-line-quiet dock-line-loading" role="status">
+        <i className="ph ph-circle-notch dock-muted" aria-hidden="true" /><span className="dock-skeleton" aria-hidden="true" />Checking for questions…</span>
+        : kind === 'closed' ? <span className="dock-line-text dock-line-quiet"><i className="ph ph-lock-simple dock-muted" aria-hidden="true" />{closedLine(session)}</span>
+          : blind ? <span className="dock-line-text dock-line-quiet"><i className="ph ph-warning-circle dock-danger" aria-hidden="true" />
+            <span className="dock-wide">Questions in this session can’t be read until its file can.</span><span className="dock-narrow">Questions can’t be read right now.</span></span>
+            : waitingNow ? <>
         <button type="button" className="dock-pill" title="Open the answer dock at this question" onClick={() => model.show(first!.id)}>
           <i className="ph-fill ph-question" aria-hidden="true" />{answering ? `${unsent.length} more waiting` : `${unsent.length} waiting`}</button>
         <span className="dock-line-text">{first!.question}</span>
@@ -201,7 +232,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         <i className="ph-fill ph-question" aria-hidden="true" />Answering {quote(nameOf(answering))} in Details</span>
         : <span className="dock-line-text dock-line-quiet"><i className="ph ph-check-circle dock-done" aria-hidden="true" /><span>Nothing waiting on you<span className="dock-wide">. New questions open here.</span></span></span>}
       <span className="dock-spacer" />
-      {keptChip}{sentChip}{othersChip}
+      {blind ? <>{keptChip}{othersChip}</> : kind === 'closed' ? keptChip : replaced ? null : <>{stateNote}{keptChip}{sentChip}{othersChip}</>}
       {waitingNow && <button type="button" className="dock-icon" aria-label="Open the answer dock" title="Open the answer dock at the next waiting question ( ] )"
         onClick={() => model.show()}><i className="ph ph-caret-up" aria-hidden="true" /></button>}
     </div> : <>
@@ -223,15 +254,17 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
               : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}</span>)}</nav>}
         <span className="dock-spacer" />
         {item?.waiting_since && <span className="dock-age dock-wide">Waiting {waitingAge(Date.parse(item.waiting_since), now())}</span>}
-        {sentChip}{othersChip}
+        {stateNote}{sentChip}{othersChip}
         <button type="button" className="dock-icon" aria-label="Fold the dock" title="Fold the dock" onClick={() => model.fold()}><i className="ph ph-caret-down" aria-hidden="true" /></button>
       </div>
       {/* Keyed by item, not question revision: a revised question keeps the owner's field, its text and its focus. */}
       {item && <div className="answer-dock-current" key={state.current!.itemId}>
         <div className="dock-question">
-          <h2 className="dock-question-title">{onOpenItem
-            ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
-            : item.question}</h2>
+          <DockQuestionHead session={session!} item={item} seen={seen}>
+            <h2 className="dock-question-title">{onOpenItem
+              ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
+              : item.question}</h2>
+          </DockQuestionHead>
           {item.ask && <p className="dock-question-ask">{item.ask}</p>}
           {item.note && item.note.split(/\n{2,}/).map((paragraph, at) => <p key={at} className="dock-question-body">{paragraph}</p>)}
         </div>

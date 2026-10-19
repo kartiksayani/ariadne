@@ -219,11 +219,6 @@
   background: var(--a-side);
 }
 
-.tree-fix .stuck-note {
-  position: relative;
-  margin: 2px 0;
-}
-
 /* Item row. Its padding is fixed per depth (SPEC 3.4 with the opening rows' values): whether a box opens or closes at a
    row never changes its height, which depends only on its text and the Map's width. The tinted boxes are slices behind it
    (tree-rows.css), so the row is its own stacking context. */
@@ -434,6 +429,36 @@
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
 
+.tree-unreadable {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+  text-align: center;
+}
+
+.tree-unreadable > i {
+  font-size: calc(28px * var(--text-scale));
+  color: var(--a-danger);
+}
+
+.tree-unreadable-title {
+  font-size: calc(13.5px * var(--text-scale));
+  font-weight: 500;
+}
+
+.tree-unreadable p {
+  max-width: 460px;
+  margin: 0;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
 .tree-empty-connection {
   display: flex;
   align-items: center;
@@ -519,13 +544,6 @@
   min-height: 0;
 }
 
-/* The row already has an icon gutter. Let recovery text use the full body column. */
-.tree-fix .stuck-note > i {
-  position: absolute;
-  top: 0.25em;
-  left: calc(-1em - 8px);
-}
-
 /* "↑ Back to “name” ." (SPEC §5.8 8.5): floats centred over the Map, so it appearing or going never moves a row. Above:
    12px under the sticky band (TreeView keeps --tree-header-height on the shell); below: 14px above the floating dock. An
    opaque surface in every state, including the global button reset. */
@@ -554,7 +572,8 @@
   transform: translateX(-50%);
 }
 
-.tree-back[data-edge="above"] { top: calc(var(--tree-header-height, 0px) + 12px); }
+/* Above: under the band, or under the notice stack when one hangs there (Body publishes --notice-stack-bottom), so a card never covers the pill. */
+.tree-back[data-edge="above"] { top: max(calc(var(--tree-header-height, 0px) + 12px), calc(var(--notice-stack-bottom, 0px) + 6px)); }
 .tree-back[data-edge="below"] { bottom: calc(var(--dock-inset, 0px) + 14px); }
 
 .tree-back-arrow {

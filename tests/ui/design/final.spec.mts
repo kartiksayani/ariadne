@@ -72,21 +72,47 @@ async function appContext(browser: { newContext: (options: object) => Promise<Br
 }
 
 /** Steps the state's spec takes in the app after it mounts (a key, a click on a named control, a hover, typed words). */
+/** The notices the app raises on its own, with the board's words (SPEC 11.1 to 11.5), for states that need one on screen. */
+const noticeSpecs = {
+  save: { tone: 'problem', icon: 'ph ph-warning-circle', text: 'Couldn’t save your Ack on “entries without a version”. It still shows as To ack; nothing else changed.', actions: ['Try again'] },
+  recovered: { tone: 'neutral', icon: 'ph ph-arrow-counter-clockwise', text: 'Ariadne restarted. Your unsent reply about “write the SOP” is back in Details’ composer, as you left it. Nothing was sent.', actions: [] },
+  agentrm: { tone: 'neutral', icon: 'ph ph-trash', text: 'Claude Code removed “cache warm-up script” and its work (3 items). 1 unsent message was cancelled; your words are kept in the bin.', actions: ['Open the bin'] },
+  stuck: { tone: 'warn', icon: 'ph ph-warning', text: 'Your reply about “write the SOP” hasn’t reached Claude Code after 2 minutes. It’s kept, and Retry sends that same message once.', actions: ['Retry', 'Edit'] }
+} as const;
+
 async function perform(page: Page, step: Step): Promise<void> {
-  if ('key' in step) await page.keyboard.press(step.key);
+  if ('notice' in step) {
+    const spec = noticeSpecs[step.notice], before = await page.getByTestId('notice').count();
+    await page.evaluate(({ id, spec }) => {
+      (window as unknown as { __designNotices: { push: (notice: object) => void } }).__designNotices.push({ id, icon: spec.icon, tone: spec.tone, text: spec.text, actions: spec.actions.map(label => ({ label, run: () => {} })) });
+    }, { id: `design-${step.notice}`, spec });
+    // The store shows a notice 300 ms after it is raised; the third of three folds into the pill, so the count only rises while fewer than two show.
+    await page.waitForTimeout(450);
+    expect(await page.getByTestId('notice').count(), `the ${step.notice} notice is on screen`).toBeGreaterThanOrEqual(Math.min(before + 1, 2));
+  }
+  else if ('key' in step) await page.keyboard.press(step.key);
   else if ('click' in step) {
     const named = (exact: boolean) => page.getByRole('button', { name: step.click, exact }).or(page.getByRole('tab', { name: step.click, exact })).or(page.getByRole('menuitem', { name: step.click, exact })).filter({ visible: true }).first();
     // A control named exactly so, if one is on screen; else the first whose name contains it. At the narrow width the top bar
     // folds Archive, text size, theme and Help into its "More" menu, whose own name contains "archive": open it first.
-    // Not while a dialog is open (What changed, Ack all): its controls are in the dialog, and the menu's Escape would close it.
+    // Not while a dialog is open (What changed, Ack all) or a menu (the topic's "…"): its controls are in it, and the menu's Escape would close it.
     const more = page.getByRole('button', { name: /^More:/ });
-    if (!(await named(true).isVisible()) && !(await page.getByRole('dialog').first().isVisible()) && await more.isVisible()) {
+    if (!(await named(true).isVisible()) && !(await page.getByRole('dialog').first().isVisible()) && !(await page.getByRole('menu').first().isVisible())
+      && await more.isVisible()) {
       await more.click();
       if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
+    }
+    // With a menu open, its own row wins over a same-named button elsewhere (the agent-removed notice has an "Open the bin" button too).
+    const open = page.getByRole('menu').first();
+    if (await open.isVisible()) {
+      // A row's name carries its detail line ("Open the bin 1 removed · Restore or empty"), so the match is by prefix.
+      const row = open.getByRole('menuitem', { name: new RegExp(`^${step.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) });
+      if (await row.count()) { await row.first().click({ timeout: 20_000 }); return; }
     }
     // A control the app does not draw yet (a pending Map state) fails here in 20 s, not at the test's 240 s.
     await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
+  else if ('wait' in step) await page.waitForTimeout(step.wait);
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else if ('scroll' in step) {
     // The Map's scroller is the nearest ancestor of the item tree (or of the Graph's topic) that scrolls.
@@ -96,6 +122,7 @@ async function perform(page: Page, step: Step): Promise<void> {
       if (scroller) { scroller.scrollTop = 0; scroller.scrollLeft = 0; }
     });
   }
+  else if ('drive' in step) await page.evaluate(change => (window as unknown as { __designFixture: { transport: { drive(change: string): void } } }).__designFixture.transport.drive(change), step.drive);
   else await page.keyboard.type(step.type);
   await settle(page);
 }
@@ -124,6 +151,8 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
     await page.getByRole('button', { name: other.q }).click();
     await settle(page);
   }
+  // The bigger view opens from the Read toggle in Details' head, as the owner opens it.
+  if (view.details === 'bigger') { await page.getByRole('button', { name: 'Read in a bigger view' }).click(); await settle(page); }
   for (const step of state.app.act ?? []) await perform(page, step);
   await page.mouse.move(0, 0);
   return page.screenshot({ animations: 'disabled' });
