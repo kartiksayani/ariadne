@@ -10,7 +10,7 @@ import { SessionStore } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { PeekProvider, usePeek } from '../../../src/ui/peek/Peek';
-import { ItemRefSession } from '../../../src/ui/peek/context';
+import { ItemRefSession, PEEK_OPEN_MS } from '../../../src/ui/peek/context';
 import { Markdown } from '../../../src/ui/shared/MarkdownText';
 import { notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route } from '../app/transport';
@@ -62,7 +62,7 @@ describe('peek in the Map: never marks seen, Recent only on an explicit open, th
     let anchor: HTMLElement = value.row;
     if (open === 'hover') {
       fireEvent.mouseEnter(value.row);
-      await sleep(400);
+      await sleep(PEEK_OPEN_MS + 100);
     } else if (open === 'click') {
       anchor = value.tree.querySelector<HTMLElement>('[data-item-id="3"] .name-chip')!;
       fireEvent.click(anchor);
@@ -176,7 +176,7 @@ describe('answering in the peek: one send, and the owner’s words and pick surv
   const closings = ['Escape', 'scroll', 'pointer', 'outside click', 'close all'] as const;
   it.each(closings)('closed by %s keeps the typed words and the pick, and sends nothing', async closing => {
     const value = await setup();
-    if (closing === 'pointer') { fireEvent.mouseEnter(value.chip()); await sleep(400); } else fireEvent.click(value.chip());
+    if (closing === 'pointer') { fireEvent.mouseEnter(value.chip()); await sleep(PEEK_OPEN_MS + 100); } else fireEvent.click(value.chip());
     expect(card()).not.toBeNull();
     pick();
     if (closing === 'Escape') fireEvent.keyDown(document.body, { key: 'Escape' });

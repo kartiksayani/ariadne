@@ -3,7 +3,7 @@ import type { ItemRoute, SessionRef } from '../../generated/core';
 import type { DisplayStatus } from '../../selectors/waiting/replied';
 
 /** A name under a resting pointer opens its card after this long. */
-export const PEEK_OPEN_MS = 350;
+export const PEEK_OPEN_MS = 1000;
 /** A card the pointer left closes after this long, unless the pointer reaches the card first. */
 export const PEEK_CLOSE_MS = 260;
 
