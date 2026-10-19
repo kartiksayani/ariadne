@@ -1,6 +1,6 @@
 // All sessions (SPEC 5.14): grouped by project, Open / Closed / All, and a row of actions on each session: Rename, Copy
 // session ID, Close or Reopen, Archive. Pure props in, callbacks out (contract C8).
-import { RunDot, WaitPill } from '../parts/parts';
+import { RunDot, WaitPill, copyIcon, useCopy } from '../parts/parts';
 import { PageColumn, PageHead } from './PageHead';
 import { SESSION_TABS } from './sessionTabs';
 import type { PageSession, SessionGroupData, SessionsListProps } from './page-types';
@@ -11,6 +11,8 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 function Row<R>({ session, narrow, props }: { readonly session: PageSession<R>; readonly narrow: boolean; readonly props: SessionsListProps<R> }) {
   const closed = session.run === 'closed';
   const status = session.status ? (narrow ? `${session.agent} · ${session.status}` : session.status) : '';
+  const [copied, copy] = useCopy();
+  const copyTitle = copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Couldn’t copy' : session.id ? 'Copy session ID' : 'This session has no ID yet';
   return <div className={session.current ? 'sl-row sl-current' : 'sl-row'}>
     <span className="sl-who">
       <RunDot run={session.run} />
@@ -22,7 +24,10 @@ function Row<R>({ session, narrow, props }: { readonly session: PageSession<R>; 
     <span className="sl-wait">{session.waiting > 0 && <WaitPill count={session.waiting} label={`${plural(session.waiting, 'question')} waiting on you`} />}</span>
     <span className="sl-acts">
       <button type="button" className="p-iconbtn sl-act" title="Rename" aria-label={`Rename ${session.name}`} onClick={() => props.onRename(session)}><i className="ph ph-pencil-simple" aria-hidden="true" /></button>
-      {/* SPEC 14.2: a closed row keeps Close, greyed; Reopen and Copy ID live on the connection card of the opened session. */}
+      {/* Every row copies its session ID, closed ones too (the owner pastes it into /ariadne-connect). A row with no ID greys it. */}
+      <button type="button" className="p-iconbtn sl-act" title={copyTitle} aria-label={`Copy session ID of ${session.name}`}
+        disabled={!session.id} onClick={() => { copy(() => props.onCopyId(session)); }}><i className={copyIcon(copied, 'ph ph-copy')} aria-hidden="true" /></button>
+      {/* SPEC 14.2: a closed row keeps Close, greyed; Reopen lives on the connection card of the opened session. */}
       <button type="button" className="p-iconbtn sl-act" title={closed ? 'Already closed' : 'Close session'} aria-label={`Close ${session.name}`}
         disabled={closed} onClick={() => props.onClose(session)}><i className="ph ph-x-circle" aria-hidden="true" /></button>
       <button type="button" className="p-iconbtn sl-act" title="Archive session" aria-label={`Archive ${session.name}`} onClick={() => props.onArchive(session)}><i className="ph ph-archive" aria-hidden="true" /></button>

@@ -415,7 +415,11 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // The board's first run offers "Copy instruction" for Codex, but there is nothing to copy before a project is registered, so the
   // app says to register first and offers "Register a project". The taller card re-centres the page, so only the top bar compares
   // (dark measured 0.13%: the right-hand glyphs' anti-aliasing).
-  '15.1': [...topBar([0.002, 0.002])]
+  '15.1': [...topBar([0.002, 0.002])],
+  // The owner asked for Copy session ID on every row (2026-10-19), so each row draws four action buttons where the board draws three.
+  // The actions column (x 1024-1144 wide, 752-870 narrow) is left out; the rest of the page is held to the board (the top bar's glyphs measure under 0.003%).
+  '14.2': [...box('sessions page, left of the actions', [0, 0, 1024, 800], [0, 0, 752, 650], [0.0001, 0.0001]),
+    ...box('sessions page, right of the actions', [1144, 0, 136, 800], [870, 0, 30, 650], [0.0001, 0.0001])]
 };
 
 /**
