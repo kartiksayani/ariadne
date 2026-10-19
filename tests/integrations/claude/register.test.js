@@ -548,6 +548,8 @@ describe('conversation changes, relaunch and removal', () => {
       expect(summary).not.toContain(helperPath);
       expect(h.appended.at(-1).message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
       await hooks.get('session.end')(h.$,{reason:'clear'},next);
+      // The kept conversation ID reconnects once its first turn starts.
+      await hooks.get('turn.start')(h.$,{turnId:'first-turn-after-clear'},next);
       await h.timer().callback();
       await vi.waitFor(() => expect(h.appended).toHaveLength(2));
       expect(h.appended.at(-1).message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
@@ -640,16 +642,40 @@ describe('conversation changes, relaunch and removal', () => {
     expect(h.events[1]).toMatchObject({attempt_id:ids.attempt,generation:ids.generation,host_turn_id:null});
     expect(JSON.stringify(h.events)).not.toContain('Answer for the new conversation');
   });
-  it('reconnects on the next poll tick when /clear keeps the conversation ID', async () => {
+  // Claude may still return the ended ID for a moment after /clear, so the poll
+  // tick never binds it alone. A build that keeps the ID reconnects at the first
+  // main-thread turn (on the next tick) or at a heartbeat 5 s or more after the end.
+  it.each(['first turn','heartbeat'])('reconnects a /clear that keeps the conversation ID at the %s, never on the tick alone', async release => {
+    vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(0);
     const h = rotatingApp();const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
     await hooks.get('session.end')(h.$,{reason:'clear'},next);
-    expect(connects(h)).toHaveLength(1);
+    const beat = h.timers().find(timer => timer.ms === 30000);
     await h.timer().callback();
+    // A sub-agent turn and an early heartbeat show nothing about the main conversation.
+    await hooks.get('turn.start')(h.$,{turnId:'sub-agent-turn',agentId:'helper-agent'},next);
+    vi.setSystemTime(4999);await beat.callback();await h.timer().callback();
+    expect(connects(h)).toHaveLength(1);
+    if (release === 'first turn') {
+      await hooks.get('turn.start')(h.$,{turnId:'first-turn-after-clear'},next);
+      await h.timer().callback();
+    } else {
+      vi.setSystemTime(5000);await beat.callback();
+    }
     await vi.waitFor(() => expect(connects(h)).toHaveLength(2));
     expect(connects(h)[1]).toMatchObject({external_session_id:'original-host-session',existing_session_id:ids.session});
     await vi.waitFor(() => expect(h.appended).toHaveLength(2));
     expect(h.appended.at(-1).message.content[0].text).toContain(`generation ${ids.attempt}`);
+    await h.timer().callback();await beat.callback();
+    expect(connects(h)).toHaveLength(2);
+  });
+  it('an explicit /ariadne-connect right after a /clear that keeps the ID is never held', async () => {
+    const h = rotatingApp();const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+    await hooks.get('session.end')(h.$,{reason:'clear'},next);
+    expect((await hooks.get('ariadne-connect')(h.$,{args:ids.session})).text).toContain('connected to Ariadne');
+    expect(connects(h)).toHaveLength(2);
+    expect(connects(h)[1]).toMatchObject({external_session_id:'original-host-session',existing_session_id:ids.session});
   });
   it('retries the routing note on the poll tick while the engine has no conversation to take it', async () => {
     let refuse = true;
@@ -716,7 +742,7 @@ describe('conversation changes, relaunch and removal', () => {
     expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(1);
     await hooks.get('ariadne-disconnect')(h.$);
     expect([...store.keys()].filter(key => key.startsWith('binding:')).length).toBe(0);
-    expect((await hooks.get('ariadne-disconnect')(h.$)).text).toBe('This conversation is not connected to Ariadne.');
+    expect((await hooks.get('ariadne-disconnect')(h.$)).text).toBe("This conversation's connection isn't known here (the plugin may have been reloaded). If Ariadne still shows this session connected, choose Disconnect on it in Ariadne.");
     const relaunched = rotatingApp({store});
     await callbacks(descriptor).get('session.start')(relaunched.$,{},next);
     expect(connects(relaunched)).toEqual([]);

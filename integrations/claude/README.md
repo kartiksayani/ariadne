@@ -77,8 +77,15 @@ remembered conversation (`claude --resume`) reconnects automatically; a new one 
 announces itself and stays discoverable through its heartbeat while idle. `/clear`
 and `/resume` (`session.end` with that reason) end the conversation, not the
 process: the Mod reports the old conversation's end, follows the new conversation
-ID to the same Ariadne session and announces it at once (when Claude keeps the
-conversation ID, on the next poll tick). Each reconnect rotates the generation, so
+ID to the same Ariadne session and announces it at once. Claude reports the end
+before `$.session.id()` returns the new ID, so automatic reconnect never binds the
+ended ID until a conversation shows it runs there: the ID changes, a main-thread
+turn starts, or a heartbeat comes 5 s or more after the end (a Claude build that
+keeps the ID across `/clear` reconnects then). `/ariadne-connect` is never held. A
+connect for the ended conversation that may have saved (a reply lost or still
+running at the change) is looked up, never sent again; a saved one gets its
+session-end report, and one the app has not saved 60 s after its send is dropped.
+Each reconnect rotates the generation, so
 the Mod adds a note with the new routing to the conversation with
 `$.session.append` (a meta row Claude reads on its next turn, not a prompt) and
 retries it on the poll tick while the engine has no conversation to take it. If the app refuses the

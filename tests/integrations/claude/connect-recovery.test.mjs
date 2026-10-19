@@ -15,6 +15,8 @@ function hooks() {
 }
 const next = async event => event;
 const mutations = h => h.calls.filter(call => call.argv[2] === 'connect' && !call.argv.includes('--replay-only'));
+// binding_conflict without a session name: one plain step that frees the session.
+const CONFLICT = 'Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection…, then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).';
 function receipt(request, session = ids.session, generation = ids.generation) {
   return success({operation_id:request.command.op_id,session_id:session,revision:2,
     data:{kind:'binding_connect',binding_id:ids.binding,generation,capabilities:capabilities(),setup_instruction:'Use Ariadne commands.'}});
@@ -356,8 +358,7 @@ test('a saved connection awaiting publication retries the exact same operation a
 test('a live connection in another conversation is refused with a useful next step', async () => {
   const h = host({handler:argv => argv[2] === 'connect' ? failure('binding_conflict') : undefined});
   const result = await hooks().get('ariadne-connect')(h.$,{args:ids.session});
-  assert.match(result.text,/disconnect its current conversation before trying again/);
-  assert.match(result.text,/start another Claude conversation, then run \/ariadne-connect there/);
+  assert.equal(result.text,`That did not complete. ${CONFLICT}`);
   plain(result.text);
   assert.deepEqual(h.prompts,[]);
 });
@@ -375,7 +376,8 @@ test('a previously saved conversation cannot move sessions silently and gets a w
   await commands.get('ariadne-connect')(h.$,{args:ids.session});
   missing = false;
   const result = await commands.get('ariadne-connect')(h.$,{args:ids.input});
-  assert.match(result.text,/start another Claude conversation, then run \/ariadne-connect there/);
+  // An older helper names no session: the one plain step still frees it.
+  assert.equal(result.text,`That did not complete. ${CONFLICT}`);
   plain(result.text);
   assert.equal(mutations(h).length,2);
   assert.notEqual(mutations(h)[0].options.stdin,mutations(h)[1].options.stdin);
@@ -420,7 +422,7 @@ test('malformed session names and old helpers fall back to a plain refusal witho
       return response;
     }});
     const result = await hooks().get('ariadne-connect')(h.$,{args:ids.input});
-    assert.match(result.text,/Check this session in Ariadne/);
+    assert.equal(result.text,`That did not complete. ${CONFLICT}`);
     assert.doesNotMatch(result.text,/raw|diagnostics|Planning/);
     plain(result.text);
   }
@@ -443,7 +445,7 @@ test('a discarded request that commits late can be recovered by reconnecting the
   await commands.get('ariadne-connect')(h.$,{args:ids.session});
   const refused = await commands.get('ariadne-connect')(h.$,{args:ids.input});
   assert.equal(committed,true);
-  assert.match(refused.text,/session you chose earlier.*copy that session in Ariadne and run \/ariadne-connect followed by what you copied to reconnect here/);
+  assert.equal(refused.text,`That did not complete. ${CONFLICT}`);
   plain(refused.text);
   const result = await commands.get('ariadne-connect')(h.$,{args:ids.session});
   assert.match(result.text,/connected to Ariadne/);

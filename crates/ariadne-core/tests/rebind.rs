@@ -1,7 +1,8 @@
 //! Rebind after /clear disconnects the old conversation first. Pending work
 //! follows the session to the new binding.
 use ariadne_agent_protocol::{
-    Availability, Compatibility, EventPayload, NormalizedEvent, TurnFinishedStatus,
+    claude_session_end_event_id, Availability, Compatibility, EventPayload, NormalizedEvent,
+    TurnFinishedStatus,
 };
 use ariadne_core::{
     apply::ApplyService,
@@ -442,6 +443,60 @@ fn clear_rebind_asks_the_owner_about_sent_work_without_a_result_on_the_new_bindi
             assert!(s.try_claim(&new, 105).unwrap().is_none());
         }
     }
+}
+
+/// A stale bind of the ended conversation (the plugin bound its ID before Claude
+/// switched to the next one) rotates the old binding. The plugin's session-end
+/// report for that generation needs no route and frees the session; then queued
+/// text moves to the next conversation once, in order, and text already sent
+/// waits for the owner instead of being sent again.
+#[test]
+fn stale_clear_bind_ended_by_its_session_end_moves_queued_text_once_and_holds_sent_text() {
+    let s = Setup::new();
+    let sent = s.queue(100);
+    let queued = s.queue(101);
+    let p = s.claim(&id(3), 102);
+    assert_eq!(
+        s.connect("claude_code_mod", "existing-thread", 103)
+            .unwrap(),
+        id(3)
+    );
+    let stale = s.generation(&id(3));
+    assert_ne!(stale, p.binding_generation);
+    // While that generation is not ended, the next conversation is refused.
+    assert!(s.connect("claude_code_mod", "cleared-thread", 104).is_err());
+    let ended = NormalizedEvent {
+        event_id: claude_session_end_event_id(&id(3), &stale),
+        binding_id: id(3),
+        generation: stale.clone(),
+        input_id: None,
+        attempt_id: None,
+        host_turn_id: None,
+        observed_at: at("04"),
+        event: EventPayload::Disconnected {
+            reason: Some("Original Claude session ended.".into()),
+        },
+    };
+    let context = AdapterContext::from_trusted_entrypoint(route(), id(3), stale, None);
+    DeliveryService::new(&s.registry)
+        .report(&context, &ended, || s.uuid())
+        .unwrap();
+    let before = s.saved();
+    let new = s.connect("claude_code_mod", "cleared-thread", 105).unwrap();
+    let saved = s.saved();
+    assert_ne!(new, id(3));
+    assert_eq!(saved.inputs.0.len(), before.inputs.0.len());
+    assert_eq!(saved.messages, before.messages);
+    let moved = &saved.inputs.0[&queued];
+    assert_eq!(moved.binding_id, new);
+    assert_eq!(moved.state, InputState::Queued);
+    assert_eq!(moved.payload, before.inputs.0[&queued].payload);
+    let waiting = &saved.inputs.0[&sent];
+    assert_eq!(waiting.binding_id, new);
+    assert_eq!(waiting.state, InputState::NeedsAttention);
+    assert_eq!(waiting.active_attempt_id, Some(p.attempt_id.clone()));
+    // Nothing reaches the next conversation until the owner answers.
+    assert_eq!(s.blocked(&new, 106), Some(BarrierReason::RecoveryRequired));
 }
 
 #[test]

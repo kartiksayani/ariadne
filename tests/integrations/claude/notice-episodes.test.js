@@ -284,7 +284,7 @@ it.each(['disconnect','session end'])('stopping an automatic reconnect with %s r
   h.switchSession('resumed-conversation');down = true;
   const beat = h.timers().find(timer => timer.ms === 30000).callback;
   await beat();
-  if (stop === 'disconnect') expect((await hooks.get('ariadne-disconnect')(h.$)).text).toBe('This conversation is not connected to Ariadne.');
+  if (stop === 'disconnect') expect((await hooks.get('ariadne-disconnect')(h.$)).text).toBe("This conversation's connection isn't known here (the plugin may have been reloaded). If Ariadne still shows this session connected, choose Disconnect on it in Ariadne.");
   else await hooks.get('session.end')(h.$,{reason:'exit'},async event => event);
   const calls = h.calls.length;await beat();
   expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(2);

@@ -14,20 +14,29 @@
 // Claude Code 2.1.303 (read from its bundle): /clear runs SessionEnd (Mod session.end,
 // payload reason/sessionId/resume) before it switches the conversation ID, and does
 // not raise Mod session.start afterwards; a tick in between reads the ended ID.
-// Tests marked it.fails reproduce the bug: they pass once the fix lands, and then
-// must become plain it().
-import { describe, it, expect, vi } from 'vitest';
+// alpha.22 fix: automatic reconnect never binds the ended ID until a conversation
+// shows it runs there (ID change, main-thread turn, heartbeat 5 s or more after the
+// end); a stale bind that still happens (slow ID switch, plugin reloaded in that
+// moment, lost reply) is ended by its session-end report, never by a disconnect.
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { capabilities, descriptor, failure, success } from './fixtures.js';
 
+afterEach(() => vi.useRealTimers());
 const OLD = 'conversation-before-clear', NEW = 'conversation-after-clear';
+const CONFLICT = 'That did not complete. Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection…, then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).';
 const uuid = () => globalThis.crypto.randomUUID();
 
 function appModel() {
   const project = uuid(), session = uuid();
   const bindings = new Map();
   const app = {project,session,bindings,active:null,published:new Set(),ended:new Set(),receipts:new Map(),
-    connects:[],reports:[],loseNextConnectReply:false,
+    connects:[],reports:[],claims:[],lookups:0,loseNextConnectReply:false,
+    // gate: a deferred the next connect waits on before it commits (a send in flight).
+    // commitLater: the next connect saves nothing now and answers host_unreachable;
+    // app.late() commits it afterwards. lookupFails: replay-only lookups fail.
+    // onLookup: runs after each lookup answers.
+    gate:null,commitLater:false,late:null,lookupFails:false,onLookup:null,
     // What $.session.id() returns, and the conversation Claude is really running.
     claude:{id:OLD,real:OLD}};
   app.binding = () => bindings.get(app.active);
@@ -36,8 +45,11 @@ function appModel() {
       data:{kind:'binding_connect',binding_id:binding.id,generation:binding.generation,capabilities:capabilities(),setup_instruction:'Use Ariadne.'}};
   }
   function connect(request) {
+    app.connects.push(request.command.params);
+    return commit(request);
+  }
+  function commit(request) {
     const op = request.command.op_id, params = request.command.params;
-    app.connects.push(params);
     const old = app.binding();
     // Only connects naming this one Ariadne session are modelled.
     if (params.existing_session_id !== session) throw new Error('Model covers explicit connects to its session only');
@@ -95,7 +107,20 @@ function appModel() {
     if (noun === 'project') return success({operation_id:JSON.parse(options.stdin).command.op_id,project_id:project,registry_revision:1});
     if (noun === 'binding' && verb === 'connect') {
       const request = JSON.parse(options.stdin);
-      if (argv.includes('--replay-only')) return success(app.receipts.get(request.command.op_id) ?? null);
+      if (argv.includes('--replay-only')) {
+        app.lookups += 1;
+        if (app.lookupFails) return failure('host_unreachable');
+        const answer = success(app.receipts.get(request.command.op_id) ?? null);
+        app.onLookup?.(answer);
+        return answer;
+      }
+      if (app.commitLater) {
+        app.commitLater = false;
+        app.connects.push(request.command.params);
+        app.late = () => { app.late = null; return commit(request); };
+        return failure('host_unreachable');
+      }
+      if (app.gate) { const gate = app.gate; app.gate = null; await gate.promise; }
       return connect(request);
     }
     if (noun === 'binding' && verb === 'disconnect') {
@@ -116,7 +141,7 @@ function appModel() {
       return success({id,generation,adapter_id:'claude_code_mod',external_session_id:binding.external,dispatch_state:'enabled',
         owner_paused:false,pause_reason:null,connection_state:binding.state,presence:null});
     }
-    if (verb === 'claim') return routed(flag('--binding'),flag('--generation')) ?? success(null);
+    if (verb === 'claim') { app.claims.push(flag('--generation')); return routed(flag('--binding'),flag('--generation')) ?? success(null); }
     if (verb === 'report') return report(JSON.parse(options.stdin));
     throw new Error(`Unexpected helper argv ${argv.join(' ')}`);
   };
@@ -125,9 +150,9 @@ function appModel() {
 
 // One plugin instance (one Claude process load of the plugin). /reload-plugins
 // drops an instance and loads another against the same app, Claude and store.
-function instance(app, store) {
+function instance(app, store, publish = {waitMs:0,pollMs:0}) {
   const hooks = new Map(), timers = [], logs = [], appended = [];
-  createRegister(descriptor,{waitMs:0,pollMs:0})((name, pattern, handler) => {
+  createRegister(descriptor,publish)((name, pattern, handler) => {
     if (typeof pattern === 'function') {handler = pattern;pattern = null;}
     hooks.set(pattern?.command ?? name,pattern?.command ? ($,event = {args:''}) => handler($,event) : handler);
   });
@@ -150,10 +175,13 @@ function instance(app, store) {
   };
   return {logs,appended,
     start:() => hooks.get('session.start')($,{},next),
-    end:reason => hooks.get('session.end')($,{reason},next),
+    end:(reason, sessionId) => hooks.get('session.end')($,sessionId === undefined ? {reason} : {reason,sessionId},next),
+    turn:(event = {turnId:'main-turn'}) => hooks.get('turn.start')($,event,next),
     command:(name, args = '') => hooks.get(name)($,{args}),
     tick:() => fire(1000),
-    heartbeat:() => fire(30000)};
+    heartbeat:() => fire(30000),
+    // A heartbeat whose helper calls may still be waiting (not awaited).
+    beat:() => Promise.all(timers.filter(timer => timer.ms === 30000 && !timer.cancelled).map(timer => timer.callback()))};
 }
 
 async function connectedThenCleared(app, plugin) {
@@ -168,36 +196,57 @@ async function connectedThenCleared(app, plugin) {
 }
 const connectsFor = (app, external) => app.connects.filter(params => params.external_session_id === external);
 const settled = async (plugin, times = 4) => { for (let i = 0; i < times; i += 1) { await plugin.tick(); await plugin.heartbeat(); } };
+const deferred = () => { let resolve;const promise = new Promise(done => { resolve = done; });return {promise,resolve}; };
+const endReports = (app, binding) => app.reports.filter(event => event.kind === 'disconnected' && event.binding_id === binding.id && event.generation === binding.generation);
+// Fake only Date: the 5 s hold and the late-commit window read it; helper calls keep real timers.
+function clock() { vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(0);return at => vi.setSystemTime(at); }
+// Claude switches the ID later than the next heartbeat (5 s or more after the
+// end): that heartbeat binds the ended ID. The binding is the dead one.
+async function staleHeartbeatBind(app, plugin, setTime) {
+  await connectedThenCleared(app,plugin);
+  expect(connectsFor(app,OLD)).toHaveLength(1);
+  setTime(5000);
+  await plugin.heartbeat();
+  expect(connectsFor(app,OLD)).toHaveLength(2);
+  return {...app.binding()};
+}
 
 describe('/clear while Claude still reports the ended conversation', () => {
-  it.fails('(a) never binds the ended conversation again after its end was reported', async () => {
+  it('(a) never binds the ended conversation again after its end was reported', async () => {
     const app = appModel(), plugin = instance(app,new Map());
     await connectedThenCleared(app,plugin);
     app.claude.id = NEW;
     await settled(plugin);
     // Only the owner's original connect names the ended conversation.
     expect(connectsFor(app,OLD)).toHaveLength(1);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
     expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
   });
 
-  it('(b) when the same plugin instance sees the new id, the dead scope\'s end report saves without a route and the new conversation connects', async () => {
-    // Pins current behaviour: the retired loop's session-end report is
-    // disk-native, so the stuck state needs more than a stale first tick.
-    const app = appModel(), plugin = instance(app,new Map());
+  it('(a) neither the tick nor a heartbeat inside 5 s of the end binds the ended id', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
     await connectedThenCleared(app,plugin);
-    const dead = {...app.binding()};
+    for (const at of [1000,2000,4999]) { setTime(at); await plugin.tick(); await plugin.heartbeat(); }
+    expect(connectsFor(app,OLD)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:OLD,state:'disconnected'});
+  });
+
+  it('(b) id switch slower than the next heartbeat: the dead bind is ended by its session-end report without a route, then the new conversation connects', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    const dead = await staleHeartbeatBind(app,plugin,setTime);
     expect(dead).toMatchObject({external:OLD,state:'unknown'});
-    expect(connectsFor(app,OLD)).toHaveLength(2);
     app.claude.id = NEW;
     await settled(plugin);
-    expect(app.ended.has(`${dead.id}:${dead.generation}`)).toBe(true);
+    expect(endReports(app,dead)).toHaveLength(1);
     expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    // The dead generation never had a route, so nothing was claimed through it.
+    expect(app.claims).not.toContain(dead.generation);
   });
 
-  it.fails('(c) after /reload-plugins, the new conversation\'s explicit connect is not refused by the dead binding', async () => {
+  it('(c) /reload-plugins after the id switched: the new instance connects, nothing stale is left', async () => {
     const app = appModel(), store = new Map(), plugin = instance(app,store);
     await connectedThenCleared(app,plugin);
-    expect(app.binding()).toMatchObject({external:OLD,state:'unknown'});
+    expect(app.binding()).toMatchObject({external:OLD,state:'disconnected'});
     // /reload-plugins drops the instance with no session.end; the new one reads the new id.
     app.claude.id = NEW;
     const reloaded = instance(app,store);
@@ -205,50 +254,251 @@ describe('/clear while Claude still reports the ended conversation', () => {
     const answer = (await reloaded.command('ariadne-connect',app.session)).text;
     expect(answer).toContain('connected to Ariadne');
     expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(connectsFor(app,OLD)).toHaveLength(1);
   });
 
-  it('(c) today: the explicit connect after /reload-plugins gets the generic binding_conflict text until the app disconnects', async () => {
+  it('(c) /reload-plugins before the id switched: the new instance may bind the ended id, then ends it on the switch and connects', async () => {
     const app = appModel(), store = new Map(), plugin = instance(app,store);
     await connectedThenCleared(app,plugin);
+    // The reloaded instance has no ended id; it reconnects the remembered conversation.
+    const reloaded = instance(app,store);
+    await reloaded.start();
+    await vi.waitFor(() => expect(connectsFor(app,OLD)).toHaveLength(2));
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD,state:'unknown'});
+    app.claude.id = NEW;
+    await settled(reloaded);
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+  });
+
+  it('(c) a dead binding left by an older plugin: one plain step, then the app\'s Disconnect frees the session', async () => {
+    const app = appModel(), store = new Map(), plugin = instance(app,store);
+    await connectedThenCleared(app,plugin);
+    // What an alpha.21 plugin's stale tick left: the ended conversation bound again, never announced.
+    app.run(['helper','binding','connect'],{stdin:JSON.stringify({session:null,command:{op_id:uuid(),params:{...app.connects[0]}}})});
+    expect(app.binding()).toMatchObject({external:OLD,state:'unknown'});
     app.claude.id = NEW;
     const reloaded = instance(app,store);
     await reloaded.start();
-    const answer = (await reloaded.command('ariadne-connect',app.session)).text;
-    expect(answer).toMatch(/^That did not complete\. Check this session in Ariadne and disconnect its current conversation/);
-    // The plugin's own disconnect knows nothing after the reload.
-    expect((await reloaded.command('ariadne-disconnect')).text).toBe('This conversation is not connected to Ariadne.');
+    expect((await reloaded.command('ariadne-connect',app.session)).text).toBe(CONFLICT);
+    // The plugin's own disconnect knows nothing after the reload, and says so.
+    expect((await reloaded.command('ariadne-disconnect')).text).toBe("This conversation's connection isn't known here (the plugin may have been reloaded). If Ariadne still shows this session connected, choose Disconnect on it in Ariadne.");
     expect(app.binding()).toMatchObject({external:OLD,state:'unknown'});
-    // Only the app's Disconnect (owner binding_disconnect) frees the session.
-    const dead = app.binding();
-    dead.state = 'disconnected';
+    // The app's Disconnect (owner binding_disconnect) frees the session.
+    app.binding().state = 'disconnected';
     expect((await reloaded.command('ariadne-connect',app.session)).text).toContain('connected to Ariadne');
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
   });
 
-  it.fails('(c) without a reload: a lost connect reply for the ended conversation does not block the new one', async () => {
-    // alpha.21 path with no plugin reload: the stale bind is saved but its reply
-    // is lost, so no loop holds it; the conversation change then forgets the
-    // retained request (setup.js:267-272) and nothing ever reports its end.
+  it('(c) without a reload: a lost connect reply for the ended conversation does not block the new one', async () => {
+    // The stale bind is saved but its reply is lost, so no loop holds it. The
+    // conversation change hands the kept request back; its lookup finds the
+    // binding and its session-end report frees the session.
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.loseNextConnectReply = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD,state:'unknown'});
+    app.claude.id = NEW;
+    setTime(6000);
+    await settled(plugin,6);
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    // Looked up, never sent again.
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+  });
+});
+
+describe('a connect request of the ended conversation is kept until it can no longer commit', () => {
+  it('connect in flight, id switch, next tick retires: the late reply is ended, never armed or remembered for the new id', async () => {
+    const setTime = clock(), app = appModel(), store = new Map(), plugin = instance(app,store);
+    await connectedThenCleared(app,plugin);
+    const gate = deferred();
+    app.gate = gate;
+    setTime(5000);
+    const beating = plugin.beat();
+    await vi.waitFor(() => expect(connectsFor(app,OLD)).toHaveLength(1));
+    await new Promise(resolve => setTimeout(resolve,20));
+    app.claude.id = NEW;
+    // The tick follows the switch while the old connect is still running.
+    await plugin.tick();
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    gate.resolve();
+    await beating;
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD});
+    await vi.waitFor(() => expect(endReports(app,dead)).toHaveLength(1));
+    // The next tick connects the new conversation.
+    await plugin.tick();
+    await vi.waitFor(() => expect(app.binding()).toMatchObject({external:NEW,state:'connected'}));
+    await settled(plugin,2);
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.claims).not.toContain(dead.generation);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+    expect(store.get(`binding:${NEW}`)).toMatchObject({session_id:app.session});
+    expect(plugin.appended.map(note => note.message.content[0].text).join('\n')).not.toContain(dead.generation);
+  });
+
+  it('retire while the saved bind waits for its route: the wait stops and the binding is ended once', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map(),{waitMs:60000,pollMs:0});
+    await connectedThenCleared(app,plugin);
+    setTime(5000);
+    const beating = plugin.beat();
+    // Saved, announced from the conversation Claude really runs, so never published.
+    await vi.waitFor(() => expect(connectsFor(app,OLD)).toHaveLength(2));
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD,state:'unknown'});
+    app.claude.id = NEW;
+    await plugin.tick();
+    await beating;
+    await settled(plugin,2);
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it('a late receipt within the window: lookups find nothing, the app commits later, the next lookup ends it', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.commitLater = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    expect(app.binding()).toMatchObject({external:OLD,state:'disconnected'});
+    setTime(6000);
+    app.claude.id = NEW;
+    const before = plugin.logs.length;
+    await plugin.tick();
+    // The request may still commit: automatic reconnect waits, quietly.
+    expect(app.lookups).toBeGreaterThan(0);
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    setTime(20000);
+    app.late();
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD,state:'unknown'});
+    setTime(35000);
+    await plugin.heartbeat();
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+    expect(plugin.logs.slice(before)).toEqual(['Ariadne: this conversation is connected to its Ariadne session again.']);
+  });
+
+  it('nothing found 60 s after the send ended: the request is dropped and the new conversation connects', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.commitLater = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    setTime(6000);
+    app.claude.id = NEW;
+    await plugin.tick();
+    setTime(35000);
+    await plugin.heartbeat();
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    setTime(65000);
+    await plugin.heartbeat();
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    // A commit after the drop is refused by the app while the new conversation is connected.
+    app.late();
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it('a commit landing right after the drop leaves the manual case: the plain step, then the app\'s Disconnect', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.commitLater = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    setTime(6000);
+    app.claude.id = NEW;
+    await plugin.tick();
+    setTime(65000);
+    app.onLookup = answer => { if (JSON.parse(answer.stdout).data === null && app.late) app.late(); };
+    await plugin.heartbeat();
+    const dead = app.binding();
+    expect(dead).toMatchObject({external:OLD,state:'unknown'});
+    expect((await plugin.command('ariadne-connect',app.session)).text).toBe(CONFLICT);
+    dead.state = 'disconnected';
+    expect((await plugin.command('ariadne-connect',app.session)).text).toContain('connected to Ariadne');
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it('a lookup that fails is retried; once it answers, the binding is ended and the new conversation connects', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.loseNextConnectReply = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    const dead = {...app.binding()};
+    app.lookupFails = true;
+    setTime(6000);
+    app.claude.id = NEW;
+    await settled(plugin,2);
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    // The explicit connect is not held by the plugin; the app still refuses it.
+    expect((await plugin.command('ariadne-connect',app.session)).text).toBe(CONFLICT);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+    app.lookupFails = false;
+    setTime(40000);
+    await plugin.heartbeat();
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+  });
+});
+
+describe('other conversation changes stay as they were', () => {
+  it.each([['before','the end event'],['after','the end event']])('/resume, Claude switching the id %s %s, connects the resumed conversation once', async order => {
+    const RESUMED = 'conversation-resumed';
     const app = appModel(), plugin = instance(app,new Map());
     await plugin.start();
     await plugin.command('ariadne-connect',app.session);
-    app.claude.real = NEW;
-    await plugin.end('clear');
-    app.loseNextConnectReply = true;
+    app.claude.real = RESUMED;
+    if (order === 'before') app.claude.id = RESUMED;
+    await plugin.end('resume',OLD);
     await plugin.tick();
-    expect(app.binding()).toMatchObject({external:OLD,state:'unknown'});
-    app.claude.id = NEW;
-    await settled(plugin,6);
-    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    app.claude.id = RESUMED;
+    await settled(plugin,2);
+    expect(connectsFor(app,OLD)).toHaveLength(1);
+    expect(connectsFor(app,RESUMED)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:RESUMED,state:'connected'});
+  });
+
+  it('a conversation with no session.end (/compact keeps it) keeps its loop and never reconnects', async () => {
+    const app = appModel(), plugin = instance(app,new Map());
+    await plugin.start();
+    await plugin.command('ariadne-connect',app.session);
+    await settled(plugin,2);
+    expect(connectsFor(app,OLD)).toHaveLength(1);
+    expect(app.claims.length).toBeGreaterThan(0);
+    expect(app.binding()).toMatchObject({external:OLD,state:'connected'});
   });
 });
 
 describe('same-ID /clear builds stay supported', () => {
-  it('reconnects the kept conversation id on the next tick (pinned in register.test.js too)', async () => {
+  it('reconnects the kept conversation id at its first turn (pinned in register.test.js too)', async () => {
     const app = appModel(), plugin = instance(app,new Map());
     await plugin.start();
     await plugin.command('ariadne-connect',app.session);
     await plugin.end('clear');
+    await plugin.tick();
+    expect(connectsFor(app,OLD)).toHaveLength(1);
+    await plugin.turn();
     await vi.waitFor(async () => { await plugin.tick(); expect(app.binding()).toMatchObject({external:OLD,state:'connected'}); });
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+  });
+
+  it('reconnects the kept conversation id at the first heartbeat 5 s after the end, with no turn', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await plugin.start();
+    await plugin.command('ariadne-connect',app.session);
+    await plugin.end('clear');
+    setTime(5000);
+    await plugin.heartbeat();
+    expect(app.binding()).toMatchObject({external:OLD,state:'connected'});
     expect(connectsFor(app,OLD)).toHaveLength(2);
   });
 });
