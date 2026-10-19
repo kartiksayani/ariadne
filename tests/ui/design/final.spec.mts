@@ -113,6 +113,7 @@ async function perform(page: Page, step: Step): Promise<void> {
     await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
   else if ('wait' in step) await page.waitForTimeout(step.wait);
+  else if ('see' in step) await expect(page.getByRole(step.see).first()).toBeVisible();
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else if ('scroll' in step) {
     // The Map's scroller is the nearest ancestor of the item tree (or of the Graph's topic) that scrolls.
