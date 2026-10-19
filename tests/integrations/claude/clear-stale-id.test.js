@@ -185,7 +185,13 @@ function instance(app, store, publish = {waitMs:0,pollMs:0}) {
     ui:{log:text => logs.push(text)},command:{register:async () => {}},
     clock:{every:(ms,callback) => {const timer = {ms,callback,cancelled:false,cancel() {this.cancelled = true;}};timers.push(timer);return timer;}},
     prompt:{submit:async () => ({text:''})},
-    store:{get:async key => store.has(key) ? JSON.parse(JSON.stringify(store.get(key))) : undefined,set:async (key,value) => {store.set(key,JSON.parse(JSON.stringify(value)));},
+    // store.setGate: a deferred the next conversation-memory write waits on (a slow store write).
+    store:{get:async key => store.has(key) ? JSON.parse(JSON.stringify(store.get(key))) : undefined,
+      set:async (key,value) => {
+        const gate = store.setGate;
+        if (gate && key.startsWith('binding:')) { store.setGate = null; gate.reached = true; await gate.promise; }
+        store.set(key,JSON.parse(JSON.stringify(value)));
+      },
       delete:async key => {store.delete(key);},keys:async () => [...store.keys()]},
     process:{run:(argv,options) => app.run(argv,options)},
   };
@@ -657,6 +663,51 @@ describe('a connect that spans a conversation end never sends for the ended conv
     expect(connectsFor(app,NEW)).toHaveLength(0);
     expect(connectsFor(app,THIRD)).toHaveLength(1);
     expect(app.binding()).toMatchObject({external:THIRD,state:'connected'});
+  });
+
+  it('an explicit /ariadne-connect whose remember waits across /clear and the id switch: no note in the new conversation, "not finished", the binding is ended, the new one connects', async () => {
+    const app = appModel(), store = new Map(), plugin = instance(app,store), gate = deferred();
+    await plugin.start();
+    store.setGate = gate;
+    const answering = plugin.command('ariadne-connect',app.session);
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    const ended = {...app.binding()};
+    app.claude.real = NEW;
+    await plugin.end('clear');
+    app.claude.id = NEW;
+    await plugin.tick();
+    gate.resolve();
+    expect((await answering).text).toBe(CONNECT_AGAIN);
+    expect(plugin.appended).toHaveLength(0);
+    expect(endReports(app,ended)).toHaveLength(1);
+    expect(store.has(`binding:${OLD}`)).toBe(false);
+    await settled(plugin,2);
+    expect(endReports(app,ended)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(plugin.appended.some(row => JSON.stringify(row).includes(ended.generation))).toBe(false);
+    expect(store.has(`binding:${OLD}`)).toBe(false);
+  });
+
+  it('a reconnect whose remember waits across /clear and the id switch: no note, the ended id is not remembered again, the new one connects', async () => {
+    const app = appModel(), store = remembered(app), plugin = instance(app,store), gate = deferred();
+    store.setGate = gate;
+    await plugin.start();
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    const ended = {...app.binding()};
+    expect(ended).toMatchObject({external:OLD});
+    app.claude.real = NEW;
+    await plugin.end('clear');
+    app.claude.id = NEW;
+    await plugin.tick();
+    gate.resolve();
+    await new Promise(resolve => setTimeout(resolve,20));
+    expect(plugin.appended).toHaveLength(0);
+    expect(endReports(app,ended)).toHaveLength(1);
+    expect(store.has(`binding:${OLD}`)).toBe(false);
+    await settled(plugin,2);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(plugin.appended.some(row => JSON.stringify(row).includes(ended.generation))).toBe(false);
+    expect(store.has(`binding:${OLD}`)).toBe(false);
   });
 });
 

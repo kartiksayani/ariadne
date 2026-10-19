@@ -423,7 +423,7 @@ async function reconnect(state, $, h, conversation, counter) {
     // The conversation ended while its reports drained: the next one reconnects itself.
     if (state.conversation !== counter || !state.target) return OK;
     const result = await bind(state,$,state.target.session_id,{background:true,conversation:counter});
-    if (state.health !== conversation || !state.loop || result.text) return OK;
+    if (state.health !== conversation || state.conversation !== counter || !state.loop || result.text) return OK;
     state.note = {binding:result.result.binding,tries:0,sending:false};
     await deliverNote(state,$);
     if (state.health === conversation) h.ui.log(TEXT.reconnected);
@@ -491,10 +491,11 @@ async function bind(state, $, requestedSessionId, options) {
   }
   // The conversation this connect was for ended while it ran: end the binding
   // it saved, and never arm a loop for it or remember it for the next one.
-  if (spanned()) {
+  const fenced = async () => {
     await fence(state,h,result.binding);
     return {text:TEXT.connectAgain};
-  }
+  };
+  if (spanned()) return fenced();
   const reason = busy(state);
   if (reason) return {text:BUSY[reason]};
   const replaced = state.loop;
@@ -502,13 +503,23 @@ async function bind(state, $, requestedSessionId, options) {
   state.loopBinding = result.binding;
   state.pending = null;
   state.announcementScope = {binding_id:result.binding.binding_id,generation:result.binding.generation};
+  // From here a conversation end retires the loop armed above, which reports
+  // the binding's end; each await is fenced again so nothing of this binding
+  // reaches the next conversation.
   if (replaced && replaced !== state.loop) await replaced.stop(h);
   if (state.sessionEnded) await state.loop.stop(h,true);
   else {
+    if (spanned()) return fenced();
     state.target = result.binding.session;
-    await remember(h,state.claudeSessionId,result.binding.session);
+    await remember(h,id,result.binding.session);
+    if (spanned()) {
+      // The conversation change already forgot the ended ID; a write landing
+      // after that must not bring it back.
+      if (state.claudeSessionId !== id) await forget(h,id);
+      return fenced();
+    }
   }
-  return {result};
+  return {result,spanned};
 }
 function sameScope(a, b) {
   return a?.binding_id === b.binding_id && a?.generation === b.generation;
@@ -537,6 +548,11 @@ async function connectTransition(state, $, requestedSessionId) {
   const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
   state.note = {binding,explicit:true,tries:0,sending:false};
   await deliverNote(state,$);
+  // The conversation ended while the note was sent: its retire ended the binding.
+  if (bound.spanned()) {
+    await fence(state,host($,false),binding);
+    return {text:TEXT.connectAgain};
+  }
   const summary = 'This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.';
   return {text:summary + guidance};
 }
