@@ -26,6 +26,11 @@ import type { WaitingState } from '../../selectors/waiting/store';
 import { hasFamily, readArchived, type FamilyCheck } from './words';
 
 export const UNDO_MS = 5000;
+/** How long the family check waits for a settling waiting reader, before and after asking it to read again. */
+const FAMILY_SETTLE_MS = 5000;
+/** The reader is only catching up: 'stale' or 'loading' with no error and nothing known to be unreadable. */
+const settling = (waiting: WaitingState) => (waiting.status === 'stale' || waiting.status === 'loading') && waiting.error == null
+  && waiting.unavailableProjects.length === 0 && (!waiting.counts || waiting.counts.completeness === 'complete' && waiting.counts.unavailable_session_ids.length === 0);
 type Mode = 'tell' | 'queued' | 'closed' | 'local';
 type Stage = 'pending' | 'sending' | 'done' | 'failed';
 type Params = { readonly gone: true; readonly changed?: true } | { readonly gone: false; readonly call: () => Promise<unknown> };
@@ -73,6 +78,10 @@ export interface RemovalDeps {
   readonly toasts?: Pick<typeof toastStore, 'show' | 'expire' | 'dismiss'>;
   /** The cross-session reader, for the continuation-family test (E34); without it the family is unknown. */
   readonly waiting?: () => WaitingState;
+  /** Told whenever the waiting reader publishes; the family check waits on it while the reader settles. */
+  readonly subscribeWaiting?: (receive: () => void) => () => void;
+  /** Asks the waiting reader to read again (called at most once per family check). */
+  readonly refreshWaiting?: () => Promise<void>;
 }
 export interface ScheduleOptions {
   /** Undo puts the selection, detail or page back. */
@@ -124,11 +133,32 @@ export class RemovalQueue {
     return entry.opId;
   }
   private get toasts() { return this.deps.toasts ?? toastStore; }
-  /** E34: whether removing `topic` would reach other sessions; archived sessions are read now (5 s at most). */
+  /**
+   * E34: whether removing `topic` would reach other sessions; archived sessions are read now (5 s at most), once. A waiting reader that is
+   * only 'stale' or 'loading' (no error) is waited for, up to 5 s; then it is asked to read once more and given up to 5 s again. A real
+   * error, an unavailable project or session, a reader that never settles or an unread archive count as family.
+   */
   async family(topic: Immutable<Topic>, session: Immutable<Session>): Promise<FamilyCheck> {
-    const waiting = this.deps.waiting?.();
-    if (!waiting) return { family: true, sessions: [] };
-    return hasFamily(topic, [session], waiting, await readArchived(this.deps.service));
+    const read = this.deps.waiting;
+    if (!read) return { family: true, sessions: [] };
+    const archived = readArchived(this.deps.service);
+    let waiting = await this.untilSettled(read, FAMILY_SETTLE_MS);
+    if (settling(waiting) && this.deps.refreshWaiting) {
+      void this.deps.refreshWaiting().catch(() => {});
+      waiting = await this.untilSettled(read, FAMILY_SETTLE_MS);
+    }
+    return hasFamily(topic, [session], waiting, await archived);
+  }
+  /** The waiting state as soon as it is not merely settling (immediately when it already is not), else what it is after `ms`. */
+  private untilSettled(read: () => WaitingState, ms: number): Promise<WaitingState> {
+    const subscribe = this.deps.subscribeWaiting;
+    if (!settling(read()) || !subscribe) return Promise.resolve(read());
+    return new Promise(resolve => {
+      let unsubscribe = () => {};
+      const done = () => { clearTimeout(timer); unsubscribe(); resolve(read()); };
+      unsubscribe = subscribe(() => { if (!settling(read())) done(); });
+      const timer = setTimeout(done, ms);
+    });
   }
   /** Undo for the pending removal that hides `key` (a strip's click). */
   undoKey(key: string): void {

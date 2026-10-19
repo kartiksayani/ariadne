@@ -782,6 +782,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
       },
       // E28: the commit waits for any send being saved in the session, then compares a fresh read with the review.
       settled: route => draftsSettled(drafts, route), waiting: () => waiting.getSnapshot(),
+      subscribeWaiting: waiting.subscribe, refreshWaiting: () => waiting.refresh(),
       review: (session, target) => removeReview(session, target, drafts.getSnapshot())?.pinned ?? null,
       again: target => { againRequests.forEach(ask => ask(target)); },
       // After the command: the tree drops the rows, removed sessions lose their tabs, the pages recount.
