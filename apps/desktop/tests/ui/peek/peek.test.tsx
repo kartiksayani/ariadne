@@ -164,7 +164,7 @@ describe('name chips and item peek', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(500));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseEnter(chip()); fireEvent.blur(window); act(() => vi.advanceTimersByTime(500));
+    fireEvent.mouseEnter(chip()); fireEvent.blur(window); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
     expect(screen.queryByRole('dialog')).toBeNull();
     // Moving over the same name does not restart the wait.
     fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS - 150));

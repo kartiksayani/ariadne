@@ -28,6 +28,8 @@ export type Step =
   | { readonly type: string }
   /** Time passing in the app: milliseconds waited, for what a dwell does (the 1 s that clears a marker, 9.10). */
   | { readonly wait: number }
+  /** Wait until a dialog is on screen (12.9: the peek card a resting pointer opens after PEEK_OPEN_MS), however long a slow runner takes. */
+  | { readonly see: 'dialog' }
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
   | { readonly scroll: 'top' }
@@ -234,7 +236,7 @@ const stateList: readonly FinalState[] = [
   { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: false, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
   { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: false, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
   { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: false, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' }, act: [{ drive: 'read-fails' }] } },
-  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: false, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] }, act: [{ drive: 'save-unsure' }, { hover: '.tree-item[data-item-id="a2.2.2"]' }, { wait: 1100 }, { click: 'Later' }, { hover: '.tb' }, { hover: '.tb' }] } },
+  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: false, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] }, act: [{ drive: 'save-unsure' }, { hover: '.tree-item[data-item-id="a2.2.2"]' }, { see: 'dialog' }, { click: 'Later' }, { hover: '.tb' }, { hover: '.tb' }] } },
   // 13. Session and project switcher
   { id: '13.1', part: 'R4-Switcher', sid: 's-open', owner: 'nav-state', pending: false, title: 'Open', app: { chrome: { overlay: 'switcher' }, act: [{ key: 'Meta+o' }] } },
   { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: false, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
