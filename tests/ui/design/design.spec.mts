@@ -272,6 +272,7 @@ for (const theme of ['dark', 'light'] as const) {
   test(`What changed popover structure: a change is a card with time and check at the right (${theme})`, async ({ page, origin }) => {
     await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
     const popover = await openChanges(page);
+    await page.evaluate(() => document.fonts.ready);
     const card = popover.getByTestId('changes-row').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
     const box = (locator: Locator) => locator.evaluate(element => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; });
     const check = await box(card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }));
