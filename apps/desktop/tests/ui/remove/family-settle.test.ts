@@ -1,6 +1,7 @@
 // The continuation-family check while the waiting reader is settling (alpha.21 E34): a reader that is 'stale' or 'loading' with no error is
-// waited for (the Remove dialog says "Checking other sessions…" meanwhile); a real error, unavailable sessions or a reader that never settles
-// still block, as before. The archived sessions are read once per check.
+// waited for (the Remove dialog says "Checking other sessions…" meanwhile). A stale reader that kept a read error (a session changed while
+// it was read: it heals on the next read) is asked to read again once; it blocks only if that read still fails. Unavailable sessions and a
+// reader that never settles still block. The archived sessions are read once per check.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Immutable } from '../../../src/data/session-store';
@@ -8,7 +9,7 @@ import type { RendererService } from '../../../src/data/service';
 import type { Session, Topic } from '../../../src/generated/domain/models';
 import type { WaitingState } from '../../../src/selectors/waiting/store';
 import { NoticeStore } from '../../../src/ui/pages/notices';
-import { RemovalQueue } from '../../../src/ui/remove/queue';
+import { FAMILY_SETTLE_MS as LIMIT, RemovalQueue } from '../../../src/ui/remove/queue';
 
 const session = demo as unknown as Immutable<Session>;
 const T10 = '00000000-0000-4000-8000-000000000010';
@@ -48,7 +49,6 @@ describe('family() while the waiting reader settles', () => {
   });
 
   it.each([
-    ['stale with an error', state({ status: 'stale', error: new Error('read failed') as never })],
     ['unavailable', state({ status: 'unavailable' })],
     ['stale with an unavailable project', state({ status: 'stale', unavailableProjects: ['p'] as never })],
     ['stale with sessions that cannot be read', state({ status: 'stale', counts: { completeness: 'partial', unavailable_session_ids: ['x'] } as never })],
@@ -59,22 +59,50 @@ describe('family() while the waiting reader settles', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('an error that arrives while waiting blocks at once', async () => {
-    const { queue, set } = setup(state({ status: 'stale' }));
-    const result = queue.family(topic, session);
-    await settle();
-    set(state({ status: 'stale', error: new Error('boom') as never }));
-    expect(await result).toMatchObject({ family: true });
+  const failed = () => state({ status: 'stale', error: new Error('read failed') as never });
+
+  it('stale with a kept read error: the reader is asked to read again at once, and the fresh read decides', async () => {
+    const { queue, refresh } = setup(failed(), state());
+    expect(await queue.family(topic, session)).toEqual({ family: false, sessions: [] });
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('never settling: after 5 s the reader is refreshed once; still not ready: blocked with the current text', async () => {
+  it('stale with a kept read error that the fresh read repeats: blocked after one refresh, without waiting out the limit', async () => {
+    const { queue, refresh } = setup(failed(), failed());
+    expect(await queue.family(topic, session)).toMatchObject({ family: true });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('stale with a kept read error and a refresh that never returns: blocked after the limit', async () => {
+    const { queue, refresh } = setup(failed());
+    refresh.mockImplementation(() => new Promise<void>(() => {}));
+    const result = queue.family(topic, session);
+    await vi.advanceTimersByTimeAsync(LIMIT - 1);
+    let done = false; void result.then(() => { done = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toMatchObject({ family: true });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('an error that arrives while waiting is read again once, then decides', async () => {
+    const { queue, set, refresh } = setup(state({ status: 'stale' }), failed());
+    const result = queue.family(topic, session);
+    await settle();
+    set(failed());
+    expect(await result).toMatchObject({ family: true });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('never settling: after the limit the reader is refreshed once; still not ready: blocked with the current text', async () => {
     const { queue, refresh } = setup(state({ status: 'stale' }));
     const result = queue.family(topic, session);
-    await vi.advanceTimersByTimeAsync(4999);
+    await vi.advanceTimersByTimeAsync(LIMIT - 1);
     expect(refresh).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(refresh).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(LIMIT);
     expect(await result).toMatchObject({ family: true });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -82,7 +110,7 @@ describe('family() while the waiting reader settles', () => {
   it('the refresh settles it: the check decides on the refreshed state', async () => {
     const { queue, refresh } = setup(state({ status: 'stale' }), state());
     const result = queue.family(topic, session);
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(LIMIT);
     expect(await result).toEqual({ family: false, sessions: [] });
     expect(refresh).toHaveBeenCalledTimes(1);
   });

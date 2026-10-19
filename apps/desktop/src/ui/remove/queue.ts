@@ -26,11 +26,16 @@ import type { WaitingState } from '../../selectors/waiting/store';
 import { hasFamily, readArchived, type FamilyCheck } from './words';
 
 export const UNDO_MS = 5000;
-/** How long the family check waits for a settling waiting reader, before and after asking it to read again. */
-const FAMILY_SETTLE_MS = 5000;
-/** The reader is only catching up: 'stale' or 'loading' with no error and nothing known to be unreadable. */
-const settling = (waiting: WaitingState) => (waiting.status === 'stale' || waiting.status === 'loading') && waiting.error == null
+/**
+ * How long the family check waits for a catching-up waiting reader, before and after asking it to read again. The reader re-reads
+ * every session after each change (a 2,000-item session takes seconds on a busy machine), so this is longer than a usual read.
+ */
+export const FAMILY_SETTLE_MS = 10000;
+/** A read can still fix this reader: 'stale' or 'loading' with nothing known to be unreadable (a kept error may be a read that raced a write). */
+const catchingUp = (waiting: WaitingState) => (waiting.status === 'stale' || waiting.status === 'loading')
   && waiting.unavailableProjects.length === 0 && (!waiting.counts || waiting.counts.completeness === 'complete' && waiting.counts.unavailable_session_ids.length === 0);
+/** The reader is only catching up: no error so far, so it publishes again by itself. */
+const settling = (waiting: WaitingState) => catchingUp(waiting) && waiting.error == null;
 type Mode = 'tell' | 'queued' | 'closed' | 'local';
 type Stage = 'pending' | 'sending' | 'done' | 'failed';
 type Params = { readonly gone: true; readonly changed?: true } | { readonly gone: false; readonly call: () => Promise<unknown> };
@@ -135,16 +140,21 @@ export class RemovalQueue {
   private get toasts() { return this.deps.toasts ?? toastStore; }
   /**
    * E34: whether removing `topic` would reach other sessions; archived sessions are read now (5 s at most), once. A waiting reader that is
-   * only 'stale' or 'loading' (no error) is waited for, up to 5 s; then it is asked to read once more and given up to 5 s again. A real
-   * error, an unavailable project or session, a reader that never settles or an unread archive count as family.
+   * only 'stale' or 'loading' (no error) is waited for, up to FAMILY_SETTLE_MS; then, or at once when it kept a read error, it is asked to
+   * read once more and given up to FAMILY_SETTLE_MS again. An error that repeats, an unavailable project or session, a reader that never
+   * settles or an unread archive count as family.
    */
   async family(topic: Immutable<Topic>, session: Immutable<Session>): Promise<FamilyCheck> {
     const read = this.deps.waiting;
     if (!read) return { family: true, sessions: [] };
     const archived = readArchived(this.deps.service);
     let waiting = await this.untilSettled(read, FAMILY_SETTLE_MS);
-    if (settling(waiting) && this.deps.refreshWaiting) {
-      void this.deps.refreshWaiting().catch(() => {});
+    if (catchingUp(waiting) && this.deps.refreshWaiting) {
+      // One more read: it ends a wait that ran out, and it clears an error from a read that raced a write. A stale reader that
+      // still has no error after it is waited for again; a repeated error blocks.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([this.deps.refreshWaiting().catch(() => {}), new Promise<void>(resolve => { timer = setTimeout(resolve, FAMILY_SETTLE_MS); })]);
+      clearTimeout(timer);
       waiting = await this.untilSettled(read, FAMILY_SETTLE_MS);
     }
     return hasFamily(topic, [session], waiting, await archived);

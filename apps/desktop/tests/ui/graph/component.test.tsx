@@ -420,6 +420,30 @@ describe('session graph view', () => {
     expect(document.activeElement).toBe(node('3'));
   });
 
+  it('keeps the owner’s own selection between its saved write and its slow reveal, over the older reveal that was current', async () => {
+    centreGeometry();
+    const value = await setup(undefined, preferences({ selected_item_id: '2' }));
+    const older = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    const own = await value.routes.revealItem({ ...value.route, item_id: '1' });
+    let finish!: (result: RevealedItem | null) => void;
+    vi.spyOn(value.routes, 'revealItem').mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { rerender } = render(<value.Composition reveal={older} />);
+    expect(selected()).toBe('1.1.1');
+    fireEvent.click(node('1'));
+    // The write finishes first, then the reveal; in between the older reveal must not take the selection back.
+    await waitFor(() => expect(value.saved.at(-1)?.selected_item_id).toBe('1'));
+    await act(async () => {});
+    expect(selected()).toBe('1');
+    // ← acts on the node they selected (it folds), not on the older reveal's node (which would select its parent).
+    fireEvent.keyDown(node('1'), { key: 'ArrowLeft' });
+    expect(ids()).toEqual(['1', '2', '3', '8']);
+    expect(selected()).toBe('1');
+    await act(async () => { finish(own); });
+    expect(selected()).toBe('1');
+    rerender(<value.Composition reveal={own} />);
+    expect(selected()).toBe('1');
+  });
+
   it('opens an outside hidden selection on its first commit while an older selection write is pending', async () => {
     const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1'] }));
     const outside = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
