@@ -1060,7 +1060,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
 describe('session tree filters', () => {
   it('preserves graph folds and both status edits when the composed writers contend', async () => {
     const value = await mount(), { transport, navigation, store } = value;
-    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} onReveal={() => {}} /> });
+    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} outsideReveals={0} onReveal={() => {}} /> });
     // ← folds the selected node (the Graph has no fold button), so select item 1 first and let that write finish.
     const parent = await waitFor(() => document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!);
     fireEvent.click(parent);
@@ -1363,6 +1363,22 @@ describe('session tree filters', () => {
     await waitFor(() => expect(viewOf(transport).selected_item_id).toBeNull());
     rerender({ reveal: null, selectedId: null });
     await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull()); expect(ids()).toEqual(['2']);
+  });
+  it('ends the outside-filter notice for a reveal the Graph dismissed, keeps drawing the item, and raises it again for a new reveal', async () => {
+    const { transport, store, rerender } = await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['waiting_on_me']; viewOf(transport).expanded_item_ids = [];
+    } });
+    render(<Notices />);
+    const reveal: RevealedItem = { kind: 'item', route: { ...route, item_id: '1.1' }, store, temporaryExpandedItemIds: ['1'] };
+    rerender({ reveal, selectedId: '1.1' });
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    rerender({ reveal, selectedId: '1.1', bannerDismissed: true });
+    await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull());
+    // Only the notice goes: the item is still drawn, and the saved view is untouched.
+    expect(ids()).toEqual(['1', '1.1', '2']);
+    expect(viewOf(transport).selected_item_id).toBeNull();
+    rerender({ reveal: { ...reveal }, selectedId: '1.1', bannerDismissed: false });
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
   });
   it('holds the chips while a preference write is unconfirmed', async () => {
     const { transport } = await mount();

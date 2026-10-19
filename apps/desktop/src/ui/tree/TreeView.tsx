@@ -106,6 +106,8 @@ export interface TreeViewProps {
   /** The tree selected an item; restoration preserves the current detail state. */
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void;
+  /** The owner ended this reveal's "outside your filter" notice from the Graph (a fold or unfold); the Map still draws the item. */
+  readonly bannerDismissed?: boolean;
   /** "Hide it again" on the outside-filter notice: drop the reveal and close its detail. */
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
@@ -135,7 +137,7 @@ const SKELETON = [
 
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, covered = false, graph, notices,
-    summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
+    summaries, onSelected, onDismissReveal, bannerDismissed = false, onResume, onAct, onClearFilters, onShowArchive,
     onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const fontEpoch = useTreeFonts();
@@ -1329,12 +1331,12 @@ export function TreeView(props: TreeViewProps) {
   outsideCallbacks.current = { resume, clearChips };
   useEffect(() => () => noticeStore.dismiss(outsideNoticeId), [outsideNoticeId]);
   useEffect(() => {
-    if (outsideName === null) { noticeStore.dismiss(outsideNoticeId); return; }
+    if (outsideName === null || bannerDismissed) { noticeStore.dismiss(outsideNoticeId); return; }
     noticeStore.push({ id: outsideNoticeId, icon: 'ph ph-funnel', tone: 'neutral',
       text: `Showing “${outsideName}”, which is outside your filter${outsideFilter ? ` (${outsideFilter})` : ''}.`,
       actions: [{ label: 'Hide it again', dismissOnRun: true, run: () => { outsideCallbacks.current.resume(); } },
         { label: 'Clear filter', dismissOnRun: true, run: () => { outsideCallbacks.current.clearChips(); } }] });
-  }, [outsideNoticeId, outsideName, outsideFilter]);
+  }, [outsideNoticeId, outsideName, outsideFilter, bannerDismissed]);
 
   // "↓ Back to “name” ." (SPEC §5.8 8.5): floats over the Map while the selected row is out of view, at the top or above the
   // dock by the side it went; `.` does the same. It covers rows rather than moving them. Not in the Graph.

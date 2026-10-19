@@ -358,7 +358,37 @@ describe('composed map reveal scrolling', () => {
       expect(target()).toBeNull();
       expect(screen.queryByText(outsideNotice)).toBeNull();
       expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.filters).toEqual(saved.filters);
+      // Resume hides the outside item, closes its Details and clears the selection that was only the reveal's (P11.13).
+      await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.selected_item_id).toBeNull());
+      expect(document.querySelector('[data-detail-item-id="1.1"]')).toBeNull();
     }
+  });
+
+  it('keeps the Graph’s scroll and focus through a plain click, composed through the App (P11.13)', async () => {
+    // Every node sits in view: any scroll after the click is the Graph moving on its own.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.testid === 'graph-scroll') return new DOMRect(0, 0, 400, 300);
+      if (this.matches('[role="treeitem"]')) return new DOMRect(100, 100, 190, 66);
+      return new DOMRect();
+    });
+    const transport = new AppTransport();
+    transport.preferences.sessions[0]!.selected_item_id = null;
+    await setup(transport); await openSession();
+    await click(control('Graph'));
+    const box = screen.getByTestId('graph-scroll');
+    const node = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+    box.scrollTop = 47; box.scrollLeft = 83;
+    act(() => node.focus());
+    await click(node);
+    selected('4');
+    await waitFor(() => expect(transport.preferences.sessions[0]!.selected_item_id).toBe('4'));
+    expect({ top: box.scrollTop, left: box.scrollLeft }).toEqual({ top: 47, left: 83 });
+    expect(document.activeElement).toBe(document.querySelector('[role="treeitem"][data-item-id="4"]'));
+    // `.` goes back to the selected node and leaves Details on it (P11.12).
+    act(() => screen.getByTestId('graph-scroll').focus());
+    await keyDown(document.body, '.');
+    expect(document.activeElement).toBe(document.querySelector('[role="treeitem"][data-item-id="4"]'));
+    expect(document.querySelector('[data-detail-item-id="4"]')).not.toBeNull();
   });
 
   it.each([false, true])('opens at the saved anchor when present, otherwise the saved selection (anchor: %s)', async savedAnchor => {

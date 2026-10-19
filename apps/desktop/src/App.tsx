@@ -102,6 +102,11 @@ const filtering = (filters: Immutable<SessionPreferences['filters']>, local: rea
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
+  /** Counts the reveals from outside the Map (a link, the dock, a native route); the Graph reads it, see `GraphViewProps`. */
+  readonly outsideReveals: number;
+  /** The Graph's fold or unfold ends the "outside your filter" notice for this reveal without changing what the Map draws. */
+  readonly onDismissBanner: () => void;
+  readonly bannerDismissed: boolean;
   readonly historyReveal: RevealedItem | null;
   readonly covered?: boolean;
   readonly actingId?: string | null;
@@ -117,7 +122,7 @@ interface CenterProps {
   readonly onCloseFilter?: () => void;
   readonly onSearchStatus?: (status: MapSearchStatus | null) => void;
 }
-function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
+function SessionCenter({ application, view, graph, reveal, outsideReveals, onDismissBanner, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
@@ -130,7 +135,7 @@ function SessionCenter({ application, view, graph, reveal, ...props }: CenterPro
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store}
-      reveal={reveal} onReveal={props.onSelected} onClearFilters={props.onClearFilters} /> : null} />;
+      reveal={reveal} outsideReveals={outsideReveals} onReveal={props.onSelected} onClearFilters={props.onClearFilters} onDismissBanner={onDismissBanner} covered={props.covered} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -167,8 +172,14 @@ function Workspace({ application }: { application: Application }) {
   const [detailsFolded, setDetailsFolded] = useState(readFolded);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
+  // Counts the reveals that come from outside the Map (a link, the dock, a native route): the Graph drops the answer to its own
+  // click only when this changed. The Map's own selection (`selected`) and a dismissed reveal never change it.
+  const [outsideReveals, setOutsideReveals] = useState({ count: 0, seen: state.reveal });
+  if (outsideReveals.seen !== state.reveal) setOutsideReveals({ count: outsideReveals.count + (state.reveal ? 1 : 0), seen: state.reveal });
   // "Resume filtered view", a filter change or a fold drops the tree's temporary reveal.
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
+  // The reveal whose "outside your filter" notice the owner ended with a Graph fold or unfold (the Map keeps drawing it).
+  const [bannerDismissed, setBannerDismissed] = useState<RevealedItem | null>(null);
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const routeFailureCapture = useRef(sessionState?.snapshot);
@@ -324,6 +335,7 @@ function Workspace({ application }: { application: Application }) {
     if (!result) return null;
     recordViewed(result);
     setLocalReveal(result);
+    setOutsideReveals(previous => ({ ...previous, count: previous.count + 1 }));
     // "Go to" in the peek selects and scrolls to the row; only the opening paths open Details.
     if (openDetail) { detailTarget.showItem(); detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
     // Continuations use this exact admitted request, including queued reveals.
@@ -737,6 +749,7 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       renderSession={opened => <SessionCenter filterOpen={filterOpen} onCloseFilter={() => setFilterOpen(false)} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+        outsideReveals={outsideReveals.count} onDismissBanner={() => setBannerDismissed(currentReveal)} bannerDismissed={treeReveal !== null && treeReveal === bannerDismissed}
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && (!!selectedId || topicMode)}
