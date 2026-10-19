@@ -56,7 +56,7 @@ function Line({ view, actions, steps: control, command = '/ariadne-connect', lab
   const connect = view.kind === 'none', onCopyInstruction = actions.onCopyInstruction;
   return <section className="cl" aria-label={label} role="status">
     <div className="cl-row">
-      <i className={`${copy.icon}${view.kind === 'reconnect' ? ' p-spin' : ''} cl-icon`} style={{ color: copy.color }} aria-hidden="true" />
+      <i className={`${copy.icon}${view.kind === 'reconnect' && !view.pluginMismatch ? ' p-spin' : ''} cl-icon`} style={{ color: copy.color }} aria-hidden="true" />
       <span className="cl-text"><span className="cl-title">{copy.title}</span> <span className="cl-body">{copy.text}</span></span>
       <span className="cl-actions">
         {connect && <OutlineButton className="cl-btn" aria-expanded={steps} onClick={toggleSteps}>{steps ? 'Hide steps' : 'How to connect'}</OutlineButton>}

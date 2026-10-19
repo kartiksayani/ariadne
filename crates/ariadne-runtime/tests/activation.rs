@@ -82,13 +82,17 @@ impl Fixture {
             socket = shell_path(&barrier),
             test = shell_path(&std::env::current_exe().unwrap()),
         );
-        fs::write(&helper, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n{pause}printf '%s\\n' 'ariadne 0.1.0'\n")).unwrap();
+        fs::write(&helper, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n{pause}printf '%s\\n' 'ariadne {version}'\n", version = env!("CARGO_PKG_VERSION"))).unwrap();
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         for root in [&installed, &loaded] {
             for (name, text) in [
                 (
                     ".claude-plugin/plugin.json",
-                    "{\"name\":\"ariadne\",\"version\":\"0.1.0\"}",
+                    concat!(
+                        "{\"name\":\"ariadne\",\"version\":\"",
+                        env!("CARGO_PKG_VERSION"),
+                        "\"}"
+                    ),
                 ),
                 ("hooks/hooks.json", "{}"),
                 ("hooks/register.js", "// register"),
@@ -120,7 +124,7 @@ impl Fixture {
                 helper,
                 installed_plugin: installed,
                 project_root: project.canonicalize().unwrap(),
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
             },
         }
     }
@@ -153,7 +157,7 @@ impl Fixture {
             },
             descriptor: ModDescriptor {
                 helper_path: self.options.helper.to_str().unwrap().into(),
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
                 api_version: 1,
             },
             binding_scope: scope,

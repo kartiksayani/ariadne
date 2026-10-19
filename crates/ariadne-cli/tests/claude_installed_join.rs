@@ -117,7 +117,7 @@ impl Fixture {
             .unwrap()
             .create(&session)
             .unwrap();
-        let version = install.path().join("0.1.0");
+        let version = install.path().join(ariadne_cli::setup::resources::VERSION);
         fs::create_dir(&version).unwrap();
         private(&version);
         fs::create_dir(version.join("bin")).unwrap();
@@ -159,7 +159,7 @@ impl Fixture {
                 installed_plugin: plugin.clone(),
                 helper: helper.clone(),
                 project_root: root.path().canonicalize().unwrap(),
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
             }),
             None,
             NativeFacts {
@@ -680,7 +680,7 @@ fn missing_installed_helper_or_resource_cannot_advertise_a_qualified_connection(
         let sentence = if missing_helper {
             "That did not complete. Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin."
         } else {
-            "That did not complete. Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version."
+            "That did not complete. Ariadne and its Claude plugin don't match, so this was not recorded. Run /reload-plugins, then /ariadne-connect. If it still doesn't match, update Ariadne."
         };
         assert_eq!(failed["value"]["text"], sentence);
         // Owner commands answer directly and never change background health,

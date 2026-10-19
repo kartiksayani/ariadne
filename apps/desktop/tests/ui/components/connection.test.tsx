@@ -51,6 +51,28 @@ describe('connection card wording', () => {
   });
 });
 
+describe('a plugin that does not match the app', () => {
+  const words = 'This Claude session’s Ariadne plugin doesn’t match the app. Run /reload-plugins there, then /ariadne-connect.';
+  it.each(['none', 'off', 'reconnect'] as const)('%s: the line and the card say so', kind => {
+    const line = connectionLine(view(kind, { pluginMismatch: true }))!;
+    expect(`${line.title} ${line.text}`).toBe(words);
+    expect(connectionCopy(view(kind, { pluginMismatch: true })).lines[0]).toBe(words);
+  });
+  it.each(['live', 'loading', 'closed', 'unreadable', 'stale', 'unsaved'] as const)('%s: a stale mismatch never replaces what is true', kind => {
+    expect(connectionLine(view(kind, { pluginMismatch: true }))).toEqual(connectionLine(view(kind)));
+    expect(connectionCopy(view(kind, { pluginMismatch: true }))).toEqual(connectionCopy(view(kind)));
+  });
+  it('without a mismatch the words do not change', () => {
+    for (const kind of kinds) expect(connectionLine(view(kind, { pluginMismatch: false }))).toEqual(connectionLine(view(kind)));
+    expect(connectionCopy(view('off')).lines.join(' ')).not.toContain('/reload-plugins');
+  });
+  it('the line draws the words and keeps its buttons', () => {
+    render(<ConnectionLine view={view('reconnect', { pluginMismatch: true })} actions={everything()} />);
+    expect(screen.getByRole('status').textContent).toContain(words);
+    expect(screen.getByRole('button', { name: 'Try now' })).toBeTruthy();
+  });
+});
+
 describe('12.7 names a cut-off file only when the file is cut off', () => {
   const neutral = 'Nothing in the file was changed, and Ariadne tries again when it changes.';
   it('corrupt_session: the line and the card say the file ends partway through a line', () => {

@@ -53,8 +53,9 @@ cd ariadne-*/
 `install.sh` does these steps in order:
 
 1. It checks that `python3` is 3.11 or newer, and stops with a message if not.
-2. If this version is already installed (the app stays 0.1.0 across alphas), even
-   partly, the installer says so and replaces it; your project history is kept. If
+2. If this version is already installed (each alpha has its own version, such as
+   0.1.0-alpha.22), even partly, the installer says so and replaces only that
+   version; other installed versions and your project history are kept. If
    the old install holds files you edited or that are not Ariadne's, it leaves them
    and tells you which folder to move aside.
 3. It prints "This download is unsigned; removing macOS's download quarantine

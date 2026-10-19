@@ -85,7 +85,7 @@ impl Profile {
             .unwrap()
             .publish(&registry, &id(900))
             .unwrap();
-        let version = home.path().join("0.1.0");
+        let version = home.path().join(ariadne_cli::setup::resources::VERSION);
         fs::create_dir(&version).unwrap();
         fs::set_permissions(&version, fs::Permissions::from_mode(0o700)).unwrap();
         owned::apply(&version, "both", false).unwrap();

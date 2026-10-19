@@ -33,8 +33,21 @@ export function connectionBadge(view: ConnectionView, narrow: boolean): Connecti
 
 export interface CardCopy { readonly title: string; readonly lines: readonly string[] }
 
+/**
+ * The words for a conversation whose Ariadne plugin is not the app's version. They live here, in the app, because the old plugin
+ * that most needs them can't learn new words; they say what to do whichever side is older.
+ */
+const MISMATCH = { title: 'This Claude session’s Ariadne plugin doesn’t match the app.', text: 'Run /reload-plugins there, then /ariadne-connect.' } as const;
+/** Only where the agent isn't live: a connected session has, by being connected, a plugin that matches. */
+const mismatched = (view: ConnectionView) => !!view.pluginMismatch && (view.kind === 'none' || view.kind === 'off' || view.kind === 'reconnect');
+
 /** The card that opens from the dot. */
 export function connectionCopy(view: ConnectionView): CardCopy {
+  const copy = cardCopy(view);
+  return mismatched(view) ? { ...copy, lines: [`${MISMATCH.title} ${MISMATCH.text}`, ...copy.lines] } : copy;
+}
+
+function cardCopy(view: ConnectionView): CardCopy {
   const where = whereOf(view), agent = agentOf(view);
   switch (view.kind) {
     case 'live': {
@@ -67,6 +80,7 @@ export interface LineCopy { readonly icon: string; readonly color: string; reado
 
 /** The line above the Map for a state that changes what I can do; Live and Loading draw none. */
 export function connectionLine(view: ConnectionView): LineCopy | null {
+  if (mismatched(view)) return { icon: 'ph ph-plugs', color: 'var(--a-warn)', ...MISMATCH };
   const agent = agentOf(view);
   switch (view.kind) {
     case 'none': return { icon: 'ph ph-plugs', color: 'var(--st-open)', title: 'No agent is connected to this session.', text: 'You can read the Map and write answers; they wait here until one connects.' };

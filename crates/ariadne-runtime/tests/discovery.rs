@@ -63,13 +63,17 @@ impl ClaudeFiles {
         let project = root.path().join("project");
         fs::create_dir(&project).unwrap();
         let helper = root.path().join("ariadne");
-        fs::write(&helper, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne 0.1.0'\n").unwrap();
+        fs::write(&helper, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne {}'\n", env!("CARGO_PKG_VERSION"))).unwrap();
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         for root in [&installed, &loaded] {
             for (name, bytes) in [
                 (
                     ".claude-plugin/plugin.json",
-                    "{\"name\":\"ariadne\",\"version\":\"0.1.0\"}",
+                    concat!(
+                        "{\"name\":\"ariadne\",\"version\":\"",
+                        env!("CARGO_PKG_VERSION"),
+                        "\"}"
+                    ),
                 ),
                 ("hooks/hooks.json", "{}"),
                 ("hooks/register.js", "// register"),
@@ -100,7 +104,7 @@ impl ClaudeFiles {
                 installed_plugin: installed,
                 helper,
                 project_root: project,
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
             },
             loaded,
         }
@@ -140,7 +144,7 @@ fn announcement(root: &Path) -> SessionAnnouncement {
         },
         descriptor: ModDescriptor {
             helper_path: "/Applications/Ariadne/helper".into(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
             api_version: 1,
         },
         binding_scope: None,

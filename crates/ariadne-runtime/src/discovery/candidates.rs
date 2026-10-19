@@ -607,7 +607,7 @@ mod tests {
             },
             descriptor: ModDescriptor {
                 helper_path: "/Applications/Ariadne/helper".into(),
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
                 api_version: 1,
             },
             binding_scope: None,
@@ -998,7 +998,7 @@ mod tests {
                     plugin_name: "ariadne".into(),
                     plugin_root: root.path().into(),
                     helper_path: "/installed/ariadne".into(),
-                    app_version: "0.1.0".into(),
+                    app_version: env!("CARGO_PKG_VERSION").into(),
                     api_version: 1,
                     engine_version: "2.1.287".into(),
                     external_session_id: selected.external_session_id.clone(),
@@ -1038,7 +1038,7 @@ mod tests {
             installed_plugin: "/absent/plugin".into(),
             helper: "/absent/ariadne".into(),
             project_root: "/absent/project".into(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
         };
         assert_eq!(
             rt.block_on(d.qualify_claude(
