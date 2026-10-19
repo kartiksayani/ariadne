@@ -503,8 +503,8 @@ export class NavigationStore {
     return structuredClone(this.state.preferences) as PreferencesSnapshot;
   }
   private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}, replay?: ReplayEntries,
-    seenWaited = false, current?: () => boolean, failed?: (failure: Failure) => void): Promise<boolean> {
-    const mutation = this.patchMutation(preferences, entries, confirmed, true, replay, current, failed);
+    seenWaited = false, current?: () => boolean, failed?: (failure: Failure) => void, committing?: () => void): Promise<boolean> {
+    const mutation = this.patchMutation(preferences, entries, confirmed, true, replay, current, failed, committing);
     const flight = this.seenFlight;
     if (flight) mutation.prepare = async () => {
       if (!seenWaited) await this.waitForSeen(flight);
@@ -512,7 +512,7 @@ export class NavigationStore {
       const fresh = await this.capturePreferences();
       const rebased = replay ? replay(fresh) : rebaseEntries(entries, preferences, fresh);
       if (!rebased) throw new ServiceFailure('invalid_response');
-      return this.patchMutation(fresh, rebased, confirmed, true, replay, current, failed);
+      return this.patchMutation(fresh, rebased, confirmed, true, replay, current, failed, committing);
     };
     // Reserve the owner writer synchronously even during the bounded wait.
     return this.execute(mutation);
@@ -532,7 +532,8 @@ export class NavigationStore {
         hidden_item_ids: entry.preferences.hidden_item_ids.filter(id => !!state.snapshot!.session.items[id]) } };
     });
   }
-  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries, current?: () => boolean, failed?: (failure: Failure) => void): PendingMutation {
+  /** `committing` runs once the receipt confirms the write, before its saved preferences publish (see `saveSessionView`). */
+  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries, current?: () => boolean, failed?: (failure: Failure) => void, committing?: () => void): PendingMutation {
     // Keep the owner's original fields for rebasing; cleanup must never replay a
     // stale whole set over a concurrent hide. Only the outgoing write is pruned.
     const written = this.pruneHidden(entries);
@@ -554,7 +555,7 @@ export class NavigationStore {
       if (!captured || captured.revision <= preferences.revision) return null;
       const fresh = structuredClone(captured) as PreferencesSnapshot;
       const rebased = replay ? replay(fresh) : rebaseEntries(entries, preferences, fresh);
-      return rebased && this.patchMutation(fresh, rebased, confirmed, seenOnly && retryable, replay, current, failed);
+      return rebased && this.patchMutation(fresh, rebased, confirmed, seenOnly && retryable, replay, current, failed, committing);
     };
     const retry = retryable ? () => reapply(null, false) : undefined;
     return { request, retry, retrySeen: fresh => reapply(fresh, true), current, failed, confirmed: receipt => {
@@ -562,6 +563,7 @@ export class NavigationStore {
         throw new ServiceFailure('invalid_response');
       }
       this.preferencesFloor = Math.max(this.preferencesFloor, receipt.preferences_revision);
+      committing?.();
       // The receipt confirms these exact typed view writes. Reflect their saved
       // effect even if the follow-up read fails; an older replay cannot replace
       // a newer authoritative preferences snapshot.
@@ -678,7 +680,12 @@ export class NavigationStore {
       throw failure;
     }
   }
-  async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
+  /**
+   * Saves a session's view. `committing` runs when the receipt confirms this write (a retry or a later Check again
+   * included), just before the saved preferences publish: the Map's queued view edits leave its effective view in the same
+   * update that brings the saved view carrying them (`viewEdits.ts`).
+   */
+  async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number, committing?: () => void): Promise<boolean> {
     try {
       const preferences = await this.editingPreferences(expectedPreferencesRevision);
       if (!preferences || this.stopped || this.pending) return false;
@@ -688,7 +695,7 @@ export class NavigationStore {
       // prevents older selection/filter/scroll values overwriting newer views.
       return await this.patch(preferences, [{ kind: 'set_session_view', preferences: {
         ...structuredClone(view), tab_open: current.tab_open, tab_order: current.tab_order,
-      } }]);
+      } }], undefined, undefined, false, undefined, undefined, committing);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   /** Waiting previews retain their trail without opening a tab or changing navigation. */
