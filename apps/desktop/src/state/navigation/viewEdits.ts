@@ -41,6 +41,9 @@ export class ViewEdits {
   private readonly listeners = new Set<() => void>();
   private unsubscribe: (() => void) | null = null;
   private flight = false;
+  private scheduled = false;
+  /** One clock for every lane: a version is never seen twice, even across a lane that went and came back. */
+  private clock = 0;
   private wasBusy = false;
   private revision: number | null = null;
 
@@ -70,7 +73,9 @@ export class ViewEdits {
     lane.parked = false;
     this.changed(lane);
     this.watch();
-    this.pump();
+    // The flush starts once this task's edits are all in: one write for them, and a write the same click started first
+    // (the Recent trail's) goes first, as before.
+    if (!this.scheduled) { this.scheduled = true; queueMicrotask(() => { this.scheduled = false; this.pump(); }); }
     return done;
   }
 
@@ -90,7 +95,7 @@ export class ViewEdits {
   }
 
   private changed(lane: Lane, notify = true) {
-    lane.version++;
+    lane.version = ++this.clock;
     if (notify) this.listeners.forEach(receive => receive());
   }
   private watch() {
