@@ -211,6 +211,35 @@ for (const state of finalStates) for (const variant of variantNames) {
   });
 }
 
+// The sessions list draws four 28px action buttons per row where the board draws three (final-frames.ts, 14.2), so no frame compares that column.
+// This holds it instead: with a two-digit wait count at the largest text size, the pill ends before the first button, in every row, at both widths.
+for (const variant of ['light', 'narrow'] as const) {
+  test(`sessions list ${variant}: a two-digit wait count at the largest text size stays clear of the row's four buttons`, async ({ browser, origin }) => {
+    const state = finalStates.find(value => value.id === '14.2')!, context = await appContext(browser, origin, variant, []);
+    try {
+      const page = await context.newPage();
+      await renderApp(page, origin, state, variant);
+      await page.evaluate(() => {
+        document.documentElement.style.setProperty('--text-scale', '1.2');
+        for (const pill of document.querySelectorAll('.p-wait')) pill.lastChild!.textContent = '88';
+      });
+      const rows = await page.locator('.sl-row').evaluateAll(items => items.map(item => {
+        const pill = item.querySelector('.p-wait')?.getBoundingClientRect(), column = item.querySelector('.sl-wait')!.getBoundingClientRect();
+        const buttons = [...item.querySelectorAll('.sl-act')].map(button => button.getBoundingClientRect()), box = item.getBoundingClientRect();
+        return { name: item.querySelector('.sl-name')?.textContent ?? '', pillRight: pill?.right ?? null, column: column.right, first: buttons[0]!.left, count: buttons.length, last: buttons.at(-1)!.right, row: box.right };
+      }));
+      expect(rows.length, 'the list draws rows').toBeGreaterThan(0);
+      expect(rows.some(row => row.pillRight !== null), 'a row has a wait pill').toBe(true);
+      for (const row of rows) {
+        expect(row.count, `${row.name} has four buttons`).toBe(4);
+        expect(row.first, `${row.name}: the buttons start after the wait column`).toBeGreaterThanOrEqual(row.column);
+        if (row.pillRight !== null) expect(row.pillRight, `${row.name}: the pill ends before the first button`).toBeLessThanOrEqual(row.first);
+        expect(row.last, `${row.name}: the buttons stay inside the row`).toBeLessThanOrEqual(row.row);
+      }
+    } finally { await context.close(); }
+  });
+}
+
 // The font route serves the six files fonts.css names, byte-checked against their pins, and nothing else: the board is untrusted,
 // so a request that names anything outside them (`..` segments, encoded or not, a folder, another file) is refused.
 const fontNames = ['..%2f..%2f..%2fpackage.json', '..%2fpackage.json', '%2e%2e%2f%2e%2e%2f%2e%2e%2fpackage.json', '..%2ficons%2fPhosphor.woff2',

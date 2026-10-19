@@ -1,4 +1,4 @@
-// Copy session ID has one home, the connection card of the session on screen (SPEC 14.2: the All sessions row no longer copies it).
+// The connection card of the session on screen copies its ID too (the list rows copy it as well: row-copy-id.test.tsx). Neither draws the ID as text.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DesktopApp } from '../../../src/App';
@@ -11,13 +11,12 @@ vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn() }));
 afterEach(() => { cleanup(); notices.clear(); vi.resetAllMocks(); });
 
 describe('session ID actions', () => {
-  it('lists a session without its ID or a Copy ID action, then copies it from the connection card once opened', async () => {
+  it('lists a session without its ID as text and copies nothing until asked, then copies it from the connection card once opened', async () => {
     const transport = new AppTransport();
     render(<DesktopApp service={createDesktopService(transport)} />);
     const list = await screen.findByRole('region', { name: 'All sessions' });
     vi.mocked(copyText).mockResolvedValue(undefined);
     await within(list).findByRole('button', { name: 'Rename Notes review' });
-    expect(within(list).queryByRole('button', { name: /^Copy the ID of/ })).toBeNull();
     // (Rows carry the ID only as a data-session-id hook for tests and automation, never as text.)
     expect(list.textContent).not.toContain(route.session_id);
     expect(copyText).not.toHaveBeenCalled();
