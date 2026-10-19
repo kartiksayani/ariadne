@@ -37,6 +37,11 @@ function appModel() {
     // app.late() commits it afterwards. lookupFails: replay-only lookups fail.
     // onLookup: runs after each lookup answers.
     gate:null,commitLater:false,late:null,lookupFails:false,onLookup:null,
+    // projectGate/lookupGate/statusGate/reportGate: a deferred the next such call
+    // waits on (marked reached when it does). lookupReply: replaces what lookups
+    // answer. reportFails: reports answer host_unreachable. removed: the Ariadne
+    // session was deleted (connect refuses it; a lookup fails with io_error).
+    projectGate:null,lookupGate:null,statusGate:null,reportGate:null,lookupReply:null,reportFails:false,removed:false,
     // What $.session.id() returns, and the conversation Claude is really running.
     claude:{id:OLD,real:OLD}};
   app.binding = () => bindings.get(app.active);
@@ -46,7 +51,15 @@ function appModel() {
   }
   function connect(request) {
     app.connects.push(request.command.params);
+    if (app.removed) return failure('not_found',{reason:'session_removed'});
     return commit(request);
+  }
+  async function gated(name) {
+    const gate = app[name];
+    if (!gate) return;
+    app[name] = null;
+    gate.reached = true;
+    await gate.promise;
   }
   function commit(request) {
     const op = request.command.op_id, params = request.command.params;
@@ -104,12 +117,16 @@ function appModel() {
     const [, noun, verb] = argv;
     const flag = name => argv[argv.indexOf(name) + 1];
     if (noun === '--version') return {exitCode:0,stdout:'ariadne 0.1.0\n',stderr:''};
+    if (noun === 'project') await gated('projectGate');
     if (noun === 'project') return success({operation_id:JSON.parse(options.stdin).command.op_id,project_id:project,registry_revision:1});
     if (noun === 'binding' && verb === 'connect') {
       const request = JSON.parse(options.stdin);
       if (argv.includes('--replay-only')) {
         app.lookups += 1;
+        await gated('lookupGate');
         if (app.lookupFails) return failure('host_unreachable');
+        if (app.removed) return failure('io_error');
+        if (app.lookupReply) return app.lookupReply();
         const answer = success(app.receipts.get(request.command.op_id) ?? null);
         app.onLookup?.(answer);
         return answer;
@@ -134,6 +151,7 @@ function appModel() {
     }
     if (verb === 'announce') return announce(JSON.parse(options.stdin));
     if (verb === 'connection-status') {
+      await gated('statusGate');
       const id = flag('--binding'), generation = flag('--generation');
       const refused = routed(id,generation);
       if (refused) return refused;
@@ -142,7 +160,11 @@ function appModel() {
         owner_paused:false,pause_reason:null,connection_state:binding.state,presence:null});
     }
     if (verb === 'claim') { app.claims.push(flag('--generation')); return routed(flag('--binding'),flag('--generation')) ?? success(null); }
-    if (verb === 'report') return report(JSON.parse(options.stdin));
+    if (verb === 'report') {
+      await gated('reportGate');
+      if (app.reportFails) return failure('host_unreachable');
+      return report(JSON.parse(options.stdin));
+    }
     throw new Error(`Unexpected helper argv ${argv.join(' ')}`);
   };
   return app;
@@ -447,6 +469,194 @@ describe('a connect request of the ended conversation is kept until it can no lo
     expect(endReports(app,dead)).toHaveLength(1);
     expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
     expect(connectsFor(app,OLD)).toHaveLength(2);
+  });
+
+  it('host_unreachable lookups are retried past 60 s: once the app answers, the binding is ended and the new conversation connects', async () => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.loseNextConnectReply = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    const dead = {...app.binding()};
+    app.lookupFails = true;
+    setTime(6000);
+    app.claude.id = NEW;
+    await plugin.tick();
+    for (const at of [65000,100000,200000]) { setTime(at); await plugin.heartbeat(); }
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    app.lookupFails = false;
+    setTime(230000);
+    await plugin.heartbeat();
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it('a removed session fails the retired lookup with io_error: dropped 60 s after its send, then the new conversation learns the session is gone', async () => {
+    const setTime = clock(), app = appModel(), store = new Map(), plugin = instance(app,store);
+    await connectedThenCleared(app,plugin);
+    app.commitLater = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    app.removed = true;
+    setTime(6000);
+    app.claude.id = NEW;
+    await settled(plugin,2);
+    setTime(35000);
+    await plugin.heartbeat();
+    expect(app.lookups).toBeGreaterThan(0);
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    setTime(65000);
+    await plugin.heartbeat();
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+    expect(store.has(`binding:${NEW}`)).toBe(false);
+    const lookups = app.lookups;
+    await settled(plugin,2);
+    expect(app.lookups).toBe(lookups);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+  });
+
+  it.each([
+    ['timeout',() => failure('timeout')],
+    ['a rejected helper call',() => { throw new Error('spawn failed'); }],
+  ])('a lookup failing with %s is kept inside 60 s and dropped once a lookup 60 s after the send still fails', async (_, reply) => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.commitLater = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    app.lookupReply = reply;
+    setTime(6000);
+    app.claude.id = NEW;
+    await plugin.tick();
+    setTime(35000);
+    await plugin.heartbeat();
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    setTime(65000);
+    await plugin.heartbeat();
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it.each([
+    ['a receipt the plugin always rejects',() => success({operation_id:uuid()})],
+    ['a permanent refusal',() => failure('invalid_argument')],
+  ])('a retired lookup answering %s is dropped at once and the new conversation connects', async (_, reply) => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    app.commitLater = true;
+    setTime(5000);
+    await plugin.heartbeat();
+    app.lookupReply = reply;
+    setTime(6000);
+    app.claude.id = NEW;
+    await plugin.tick();
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    const lookups = app.lookups;
+    await settled(plugin,2);
+    expect(app.lookups).toBe(lookups);
+  });
+});
+
+const CONNECT_AGAIN = 'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.';
+const remembered = app => new Map([[`binding:${OLD}`,{project_id:app.project,session_id:app.session,saved_at:new Date(0).toISOString()}]]);
+
+describe('a connect that spans a conversation end never sends for the ended conversation', () => {
+  it('/clear and the id switch while the reconnect waits for project registration: nothing is sent for the ended id, the new one connects', async () => {
+    const app = appModel(), gate = deferred(), plugin = instance(app,remembered(app));
+    app.projectGate = gate;
+    await plugin.start();
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    app.claude.real = NEW;
+    await plugin.end('clear');
+    app.claude.id = NEW;
+    await plugin.tick();
+    gate.resolve();
+    await new Promise(resolve => setTimeout(resolve,20));
+    await settled(plugin,2);
+    expect(connectsFor(app,OLD)).toHaveLength(0);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it('an explicit /ariadne-connect spanning /clear and the id switch answers "not finished", sends nothing for the ended id, and the next connect works', async () => {
+    const app = appModel(), gate = deferred(), plugin = instance(app,new Map());
+    await plugin.start();
+    app.projectGate = gate;
+    const answering = plugin.command('ariadne-connect',app.session);
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    app.claude.real = NEW;
+    await plugin.end('clear');
+    app.claude.id = NEW;
+    await plugin.tick();
+    gate.resolve();
+    expect((await answering).text).toBe(CONNECT_AGAIN);
+    expect(connectsFor(app,OLD)).toHaveLength(0);
+    expect((await plugin.command('ariadne-connect',app.session)).text).toContain('connected to Ariadne');
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+  });
+
+  it.each([
+    // The kept request found nothing yet; the app commits it later.
+    ['its lookup',app => { app.commitLater = true; },'lookupGate',app => app.late()],
+    // The kept request saved; its route is not published.
+    ['its status check',app => { app.loseNextConnectReply = true; },'statusGate',() => {}],
+  ])('retire during verification (%s) of a kept request: nothing new is sent, the kept one is ended once it is found, the new conversation connects', async (_, keep, gateName, commit) => {
+    const setTime = clock(), app = appModel(), plugin = instance(app,new Map());
+    await connectedThenCleared(app,plugin);
+    keep(app);
+    setTime(5000);
+    await plugin.heartbeat();
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+    const gate = deferred();
+    app[gateName] = gate;
+    setTime(10000);
+    const beating = plugin.beat();
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    app.claude.id = NEW;
+    await plugin.tick();
+    gate.resolve();
+    await beating;
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+    setTime(20000);
+    commit(app);
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD,state:'unknown'});
+    setTime(35000);
+    await plugin.heartbeat();
+    await settled(plugin,2);
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(connectsFor(app,OLD)).toHaveLength(2);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+  });
+
+  it('a second /clear while the reconnect drains the first end report: the reconnect sends nothing for the id that just ended', async () => {
+    const THIRD = 'conversation-after-second-clear';
+    const app = appModel(), plugin = instance(app,new Map());
+    await plugin.start();
+    await plugin.command('ariadne-connect',app.session);
+    // Claude switches the id first; the end report fails once, so it stays retired.
+    app.claude.real = NEW;
+    app.claude.id = NEW;
+    app.reportFails = true;
+    await plugin.end('clear');
+    await plugin.tick();
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    app.reportFails = false;
+    const gate = deferred();
+    app.reportGate = gate;
+    const beating = plugin.beat();
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    app.claude.real = THIRD;
+    await plugin.end('clear');
+    gate.resolve();
+    await beating;
+    await plugin.tick();
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    app.claude.id = THIRD;
+    await settled(plugin,2);
+    expect(connectsFor(app,NEW)).toHaveLength(0);
+    expect(connectsFor(app,THIRD)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:THIRD,state:'connected'});
   });
 });
 

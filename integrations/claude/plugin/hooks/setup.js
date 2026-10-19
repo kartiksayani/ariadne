@@ -1,4 +1,4 @@
-import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, backgroundDiagnostic, connectDiagnostic, failureCode, folderFailure, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, plainFailure, uuid } from './contracts.js';
+import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, backgroundDiagnostic, backgroundOutcome, connectDiagnostic, failureCode, folderFailure, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, plainFailure, uuid } from './contracts.js';
 
 export async function qualify($, descriptor) {
   if (!descriptorValid(descriptor,$.plugin)) {
@@ -84,7 +84,14 @@ export async function forget($, claudeSessionId) {
 // accepts the call (runtime control/mod.rs:245), which the plugin cannot see:
 // a stalled app can accept a call the helper already gave up on.
 export const LATE_COMMIT_MS = 60000;
+// A lookup refusal that proves the request saved nothing.
+function unsaved(error) {
+  return error?.code === 'not_found' || error?.details?.reason === 'session_removed';
+}
 export function setup(helperPath, savedBinding = async () => {}, publish = {waitMs:15000,pollMs:250}) {
+  // Bumped when a conversation ends (forget(…, true)): a connect attempt that
+  // started before never sends anything for the ended conversation.
+  let epoch = 0;
   let projectRequest = null;
   let projectId = null;
   let connectRequest = null;
@@ -166,9 +173,18 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       throw new ModError('Choose an explicit canonical Ariadne session UUID, or omit it to connect normally.');
     }
     if (disconnectRequest) throw new ModError('An original disconnect operation is pending.','Run /ariadne-disconnect again to finish disconnecting, then run /ariadne-connect.');
+    // Checked after every await: once the conversation this attempt read has
+    // ended, it sends nothing more. A request retained before then was handed
+    // back by forget and is the caller's to look up.
+    const started = epoch;
+    const current = () => {
+      if (epoch !== started) throw new ModError('The conversation ended while it was connecting; nothing more was sent for it.','Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.');
+    };
     const targetSessionId = requestedSessionId ?? binding?.session.session_id ?? null;
     const externalSession = await $.session.id();
+    current();
     const cwd = await $.session.cwd();
+    current();
     if (!bounded(externalSession) || !bounded(cwd) || !cwd.startsWith('/')) {
       throw new ModError('Claude did not provide a valid original session ID and absolute project directory.');
     }
@@ -178,6 +194,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     }
     if (projectId === null) {
       const receipt = await owner($,'project','register',projectRequest,false,background);
+      current();
       if (!fields(receipt,['operation_id','project_id','registry_revision'])
         || receipt.operation_id !== projectRequest.command.op_id || !uuid(receipt.project_id)
         || !positive(receipt.registry_revision)) {
@@ -192,17 +209,21 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       let saved;
       try { saved = await owner($,'binding','connect',connectRequest,true,background); }
       catch (error) {
+        current();
         if (!changed || !(error instanceof ModError) || !['not_found','io_error'].includes(error.code)) throw error;
         // A removed session can fail lookup with io_error. Connectivity failures
         // retain the original request until the app can answer its lookup.
         connectRequest = null;
       }
+      current();
       if (connectRequest && saved !== null) {
         const selected = selection(saved,connectRequest);
         try {
-          const current = await status($,selected);
-          if (changed || current.connection_state === 'disconnected' || current.dispatch_state === 'disconnected') connectRequest = null;
+          const verified = await status($,selected);
+          current();
+          if (changed || verified.connection_state === 'disconnected' || verified.dispatch_state === 'disconnected') connectRequest = null;
         } catch (error) {
+          current();
           // not_found/lease_invalid also means activation has not published its
           // route yet. Preserve unchanged publication retries in that case.
           if (connectionGone(error) && (changed || error.code !== 'not_found' || error.details?.reason === 'session_removed')) connectRequest = null;
@@ -213,6 +234,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       // A missing receipt on an unchanged request may still be in flight.
       // Keep its exact body and ID; Core fences competing changed requests.
     }
+    current();
     connectRequest ??= {session:null,command:command('binding_connect',{
       project_id:projectId,adapter_id:'claude_code_mod',external_session_id:externalSession,
       endpoint:{kind:'local_bridge',name:'claude-mod'},configuration:{namespace:'claude_code_mod',values:{}},
@@ -290,6 +312,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
   // back, never dropped: until it can no longer commit, it is the caller's to end.
   function forget($, retiring = false) {
     endBackground($);
+    if (retiring) epoch += 1;
     const retained = connectRequest;
     binding = null;
     connectRequest = null;
@@ -300,15 +323,36 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     return {request:retained,send:send ?? null};
   }
   // What a handed-back request saved, without sending it again: its binding;
-  // null once it can no longer commit; undefined while it still may (its send
-  // is running, or ended less than LATE_COMMIT_MS ago). Lookup failures throw.
+  // null once it can no longer commit or nothing more can be learnt; undefined
+  // while it still may commit (its send is running, or ended less than
+  // LATE_COMMIT_MS ago). Other lookup failures throw, so they are retried.
+  // - not_found / session_removed: nothing was saved.
+  // - a permanent refusal, or a receipt selection() rejects: asking again
+  //   never answers otherwise.
+  // - host_unreachable: retried without a bound; while the app is down nothing
+  //   reconnects anyway, and the request ends once the app answers.
+  // - any other failure (io_error from a removed session, timeout, a rejected
+  //   helper call): dropped once a lookup LATE_COMMIT_MS after the send still
+  //   fails. A binding saved by then is left to the app's Disconnect.
   async function lookup($, handed) {
     const {request,send} = handed;
     if (send?.selected) return send.selected;
     if (send && send.endedAt === null) return undefined;
-    const receipt = await owner($,'binding','connect',request,true,true);
-    if (receipt !== null) return selection(receipt,request);
-    return !send || Date.now() - send.endedAt >= LATE_COMMIT_MS ? null : undefined;
+    const late = () => !send || Date.now() - send.endedAt >= LATE_COMMIT_MS;
+    let receipt;
+    try { receipt = await owner($,'binding','connect',request,true,true); }
+    catch (error) {
+      if (unsaved(error) || backgroundOutcome(error).kind !== 'transient') return null;
+      if (failureCode(error) !== 'host_unreachable' && late()) return null;
+      throw error;
+    }
+    if (receipt === null) return late() ? null : undefined;
+    try { return selection(receipt,request); }
+    catch { return null; }
   }
-  return {connect,status,disconnect,forget,lookup,endBackground,current:() => binding};
+  // A binding the caller ended for a conversation that ended while it connected.
+  function release(selected) {
+    if (binding?.binding_id === selected.binding_id && binding.generation === selected.generation) binding = null;
+  }
+  return {connect,status,disconnect,forget,lookup,release,endBackground,current:() => binding};
 }

@@ -280,13 +280,10 @@ async function endSaved(state, h, binding) {
 }
 // A drain result: nothing failed, but a retired connect request may still commit.
 const WAITING = Object.freeze({waiting:true});
-// A lookup that proves the request saved nothing.
-function unsaved(error) {
-  return error?.code === 'not_found' || error?.details?.reason === 'session_removed';
-}
 // A connect request of a conversation that ended before its outcome was known.
 // It is looked up, never sent again: a saved binding gets its session-end
-// report; one that can no longer commit is dropped; otherwise drainLoops asks again.
+// report; one that can no longer commit, or whose lookup can tell nothing more,
+// is dropped (the bounds are setup's lookup); otherwise drainLoops asks again.
 function retiredRequest(state, handed) {
   let loop = null, done = false;
   return {
@@ -295,11 +292,7 @@ function retiredRequest(state, handed) {
       if (!loop) {
         let saved;
         try { saved = await state.owner.lookup(h,handed); }
-        catch (error) {
-          if (!unsaved(error)) return error;
-          done = true;
-          return null;
-        }
+        catch (error) { return error; }
         if (saved === undefined) return WAITING;
         if (saved === null) { done = true; return null; }
         loop = await endSaved(state,h,saved);
@@ -405,13 +398,15 @@ async function deliverNote(state, $) {
 // owner command. Failures are retried quietly by the heartbeat.
 async function autoConnect(state, $) {
   if (!state.target || state.loop || state.ownerTransition || state.sessionEnded || !state.qualified) return;
-  const h = host($), conversation = state.health;
+  // Captured before anything is awaited: a conversation end while the retired
+  // reports drain fences this reconnect too.
+  const h = host($), conversation = state.health, counter = state.conversation;
   state.reconnectSoon = false;
   state.ownerTransition = true;
   // One automatic-reconnect call with one outcome.
   const settle = healthFor(state).call(h,'auto');
   let outcome = OK;
-  try { outcome = await reconnect(state,$,h,conversation); }
+  try { outcome = await reconnect(state,$,h,conversation,counter); }
   catch (error) { outcome = failure(state,error); throw error; }
   finally {
     settle(outcome);
@@ -419,13 +414,15 @@ async function autoConnect(state, $) {
     reopen(state);
   }
 }
-async function reconnect(state, $, h, conversation) {
+async function reconnect(state, $, h, conversation, counter) {
   try {
     // The app accepts the new conversation once the old one's end is saved.
     const failed = await drainLoops(state,h);
     if (failed === WAITING) return OK;
     if (failed) return backgroundOutcome(failed);
-    const result = await bind(state,$,state.target.session_id,{background:true});
+    // The conversation ended while its reports drained: the next one reconnects itself.
+    if (state.conversation !== counter || !state.target) return OK;
+    const result = await bind(state,$,state.target.session_id,{background:true,conversation:counter});
     if (state.health !== conversation || !state.loop || result.text) return OK;
     state.note = {binding:result.result.binding,tries:0,sending:false};
     await deliverNote(state,$);
@@ -479,12 +476,23 @@ async function bind(state, $, requestedSessionId, options) {
   }
   if (state.sessionEnded) return {text:TEXT.ended};
   const h = host($,options?.background === true);
-  const health = state.health, id = state.claudeSessionId, conversation = state.conversation;
-  const result = await state.owner.connect(h,requestedSessionId,options);
+  // An automatic reconnect passes the conversation it started in.
+  const health = state.health, id = state.claudeSessionId, conversation = options?.conversation ?? state.conversation;
+  const spanned = () => state.health !== health || state.claudeSessionId !== id || state.conversation !== conversation;
+  if (spanned()) return {text:TEXT.connectAgain};
+  let result;
+  try { result = await state.owner.connect(h,requestedSessionId,options); }
+  catch (error) {
+    if (!spanned()) throw error;
+    // Only this connect saves a binding once its conversation ended (retire
+    // cleared the rest), so a pending one is its own.
+    if (state.pending) await fence(state,h,state.pending.binding);
+    return {text:TEXT.connectAgain};
+  }
   // The conversation this connect was for ended while it ran: end the binding
   // it saved, and never arm a loop for it or remember it for the next one.
-  if (state.health !== health || state.claudeSessionId !== id || state.conversation !== conversation) {
-    await endSaved(state,h,result.binding);
+  if (spanned()) {
+    await fence(state,h,result.binding);
     return {text:TEXT.connectAgain};
   }
   const reason = busy(state);
@@ -501,6 +509,23 @@ async function bind(state, $, requestedSessionId, options) {
     await remember(h,state.claudeSessionId,result.binding.session);
   }
   return {result};
+}
+function sameScope(a, b) {
+  return a?.binding_id === b.binding_id && a?.generation === b.generation;
+}
+// Ends a binding saved for a conversation that ended while its connect ran:
+// nothing here follows it any more, and its session-end report is queued once.
+async function fence(state, h, binding) {
+  const pending = state.pending && sameScope(state.pending.binding,binding) ? state.pending : null;
+  if (pending) state.pending = null;
+  if (sameScope(state.announcementScope,binding)) state.announcementScope = null;
+  state.owner.release(binding);
+  if (!pending) { await endSaved(state,h,binding); return; }
+  const key = scopeKey(binding);
+  if (state.endedScopes.has(key)) return;
+  state.endedScopes.add(key);
+  state.retired.push(pending.loop);
+  await pending.loop.stop(h,true);
 }
 async function connectTransition(state, $, requestedSessionId) {
   // Without a selector, reconnect the session this conversation followed.
