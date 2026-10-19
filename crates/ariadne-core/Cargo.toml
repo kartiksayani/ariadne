@@ -20,5 +20,6 @@ sha2.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+ariadne-store = { path = "../ariadne-store", features = ["test-support"] }
 jsonschema.workspace = true
 tempfile.workspace = true

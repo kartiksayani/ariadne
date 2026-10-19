@@ -1078,6 +1078,19 @@ mod recovery_retry_tests {
     }
 
     #[test]
+    fn transient_companion_read_makes_a_dismissal_patch_store_busy_and_keeps_every_copy() {
+        let pending = PendingMarker::new();
+        ariadne_store::ui::test_support::fail_next_companion_read_with_eio();
+        let error = PreferencesService::new(&pending.registry)
+            .patch(&owner(), &pending.command)
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::StoreBusy);
+        assert!(error.retryable);
+        pending.assert_preserved();
+        pending.assert_retry_completes();
+    }
+
+    #[test]
     fn busy_markers_are_worded_try_again_and_lasting_refusals_are_not() {
         let busy = failure(Failure::Store(StoreError::Busy));
         assert_eq!(busy.code, CoreErrorCode::StoreBusy);

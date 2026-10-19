@@ -33,10 +33,42 @@ pub(crate) fn with_file<T, E: From<StoreError>>(
 ) -> Result<T, E> {
     with_file_reading(
         directory,
-        |directory| directory.read_noting_transient("ui-recovery.json"),
+        read_companion,
         Directory::sync_noting_transient,
         work,
     )
+}
+
+fn read_companion(directory: &Directory) -> Result<Vec<u8>, IoFailure> {
+    #[cfg(feature = "test-support")]
+    if test_support::take_companion_read_fault() {
+        return Err(IoFailure::os(
+            "read",
+            &directory.path.join("ui-recovery.json"),
+            io::Error::from_raw_os_error(libc::EIO),
+        ));
+    }
+    directory.read_noting_transient("ui-recovery.json")
+}
+
+/// Fault injection for other crates' tests. Built only with `test-support`,
+/// which only dev-dependencies enable.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COMPANION_READ_FAULT: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// The next read of `ui-recovery.json` on this thread fails with EIO.
+    pub fn fail_next_companion_read_with_eio() {
+        COMPANION_READ_FAULT.with(|fault| fault.set(true));
+    }
+
+    pub(super) fn take_companion_read_fault() -> bool {
+        COMPANION_READ_FAULT.with(|fault| fault.replace(false))
+    }
 }
 
 fn with_file_reading<T, E: From<StoreError>>(
@@ -289,11 +321,21 @@ mod tests {
 
     #[test]
     fn transient_companion_read_keeps_the_file_and_makes_marker_writes_busy() {
-        for code in [libc::EIO, libc::EINTR, libc::EAGAIN, libc::ETIMEDOUT] {
+        fn fstat_eio(_: libc::c_int, _: *mut libc::stat) -> libc::c_int {
+            // SAFETY: errno is this thread's writable OS error slot.
+            unsafe { *crate::session::fs::errno() = libc::EIO };
+            -1
+        }
+        // `None`: the open succeeds and the stat of the opened companion fails.
+        let faults = crate::session::fs::TRANSIENT.map(Some).into_iter();
+        for fault in faults.chain([None]) {
             let (root, directory) = store();
             with_file_reading(
                 &directory,
-                failing_read(code),
+                |directory| match fault {
+                    Some(code) => failing_read(code)(directory),
+                    None => directory.read_noting_transient_with("ui-recovery.json", fstat_eio),
+                },
                 Directory::sync_noting_transient,
                 |mut file| {
                     assert_eq!(file.bytes(), Some(b"main record".as_slice()));

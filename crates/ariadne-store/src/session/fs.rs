@@ -41,18 +41,35 @@ fn checked_file(
     directory: bool,
     private: bool,
 ) -> Result<File, StoreError> {
+    checked_file_with(fd, path, directory, private, real_fstat).map_err(|failure| failure.error)
+}
+
+/// `fstat` on a live descriptor; tests inject its failures.
+pub(crate) type Fstat = fn(libc::c_int, *mut libc::stat) -> libc::c_int;
+
+fn real_fstat(fd: libc::c_int, stat: *mut libc::stat) -> libc::c_int {
+    // SAFETY: callers pass a live descriptor and writable stat storage.
+    unsafe { libc::fstat(fd, stat) }
+}
+
+/// `checked_file`, keeping the errno classification of a failed open or stat.
+fn checked_file_with(
+    fd: libc::c_int,
+    path: &Path,
+    directory: bool,
+    private: bool,
+    fstat: Fstat,
+) -> Result<File, IoFailure> {
     if fd == -1 {
-        return Err(StoreError::io("open", path, io::Error::last_os_error()));
+        return Err(IoFailure::os("open", path, io::Error::last_os_error()));
     }
     // SAFETY: successful open/openat returns a new owned descriptor.
     let file = unsafe { File::from_raw_fd(fd) };
     let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-    // SAFETY: the descriptor is live and stat points to writable storage.
-    os_result(
-        unsafe { libc::fstat(file.as_raw_fd(), stat.as_mut_ptr()) },
-        "stat",
-        path,
-    )?;
+    // The descriptor is live and stat points to writable storage.
+    if fstat(file.as_raw_fd(), stat.as_mut_ptr()) == -1 {
+        return Err(IoFailure::os("stat", path, io::Error::last_os_error()));
+    }
     // SAFETY: fstat initialized stat after returning success.
     let stat = unsafe { stat.assume_init() };
     let expected_type = if directory {
@@ -68,7 +85,7 @@ fn checked_file(
                 || stat.st_mode & 0o777 != if directory { 0o700 } else { 0o600 }))
         || (!directory && stat.st_nlink != 1)
     {
-        return Err(StoreError::UnsafePath { path: path.into() });
+        return Err(StoreError::UnsafePath { path: path.into() }.into());
     }
     Ok(file)
 }
@@ -84,8 +101,8 @@ fn open_created(create: bool, mut open: impl FnMut() -> libc::c_int) -> libc::c_
     }
 }
 
-/// A failed filesystem step, and whether the OS called it transient: EIO,
-/// EINTR, EAGAIN or ETIMEDOUT say nothing about the entry or its bytes.
+/// A failed filesystem step, and whether the OS called it transient (see
+/// `transient`): such a failure says nothing about the entry or its bytes.
 #[derive(Debug)]
 pub(crate) struct IoFailure {
     pub(crate) error: StoreError,
@@ -110,12 +127,50 @@ impl From<StoreError> for IoFailure {
     }
 }
 
+/// Errors that can clear by themselves: device IO, interruption, timeouts,
+/// descriptor or memory exhaustion, and network-filesystem hiccups.
 pub(crate) fn transient(error: &io::Error) -> bool {
     matches!(
         error.raw_os_error(),
-        Some(libc::EIO | libc::EINTR | libc::EAGAIN | libc::ETIMEDOUT)
+        Some(
+            libc::EIO
+                | libc::EINTR
+                | libc::EAGAIN
+                | libc::ETIMEDOUT
+                | libc::EMFILE
+                | libc::ENFILE
+                | libc::ENOMEM
+                | libc::ENOBUFS
+                | libc::ESTALE
+                | libc::ENOTCONN
+                | libc::ENETDOWN
+                | libc::ENETRESET
+                | libc::ECONNRESET
+                | libc::EHOSTDOWN
+                | libc::ENOLCK
+        )
     )
 }
+
+/// Every errno `transient` accepts, for fault-injection tests.
+#[cfg(test)]
+pub(crate) const TRANSIENT: [libc::c_int; 15] = [
+    libc::EIO,
+    libc::EINTR,
+    libc::EAGAIN,
+    libc::ETIMEDOUT,
+    libc::EMFILE,
+    libc::ENFILE,
+    libc::ENOMEM,
+    libc::ENOBUFS,
+    libc::ESTALE,
+    libc::ENOTCONN,
+    libc::ENETDOWN,
+    libc::ENETRESET,
+    libc::ECONNRESET,
+    libc::EHOSTDOWN,
+    libc::ENOLCK,
+];
 
 fn same_entry(left: &libc::stat, right: &libc::stat) -> bool {
     left.st_dev == right.st_dev && left.st_ino == right.st_ino
@@ -188,6 +243,15 @@ impl Directory {
     }
 
     fn open_noting_transient(&self, name: &str, create: bool) -> Result<File, IoFailure> {
+        self.open_noting_transient_with(name, create, real_fstat)
+    }
+
+    fn open_noting_transient_with(
+        &self,
+        name: &str,
+        create: bool,
+        fstat: Fstat,
+    ) -> Result<File, IoFailure> {
         let path = self.path.join(name);
         component(name, &path)?;
         let name = c_name(name.as_bytes(), &path)?;
@@ -203,10 +267,7 @@ impl Directory {
             // SAFETY: parent descriptor is live; name is a generated single component.
             unsafe { libc::openat(self.file.as_raw_fd(), name.as_ptr(), flags, 0o600) }
         });
-        if fd == -1 {
-            return Err(IoFailure::os("open", &path, io::Error::last_os_error()));
-        }
-        Ok(checked_file(fd, &path, false, true)?)
+        checked_file_with(fd, &path, false, true, fstat)
     }
 
     pub(crate) fn read(&self, name: &str) -> Result<Vec<u8>, StoreError> {
@@ -216,7 +277,16 @@ impl Directory {
 
     /// `read`, also saying whether a failed open or read was transient.
     pub(crate) fn read_noting_transient(&self, name: &str) -> Result<Vec<u8>, IoFailure> {
-        let mut file = self.open_noting_transient(name, false)?;
+        self.read_noting_transient_with(name, real_fstat)
+    }
+
+    /// `read_noting_transient` with an injected `fstat` for its open check.
+    pub(crate) fn read_noting_transient_with(
+        &self,
+        name: &str,
+        fstat: Fstat,
+    ) -> Result<Vec<u8>, IoFailure> {
+        let mut file = self.open_noting_transient_with(name, false, fstat)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
             .map_err(|error| IoFailure::os("read", &self.path.join(name), error))?;
@@ -781,11 +851,11 @@ impl Drop for Temporary<'_> {
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn errno() -> *mut libc::c_int {
+pub(crate) unsafe fn errno() -> *mut libc::c_int {
     unsafe { libc::__error() }
 }
 #[cfg(not(target_os = "macos"))]
-unsafe fn errno() -> *mut libc::c_int {
+pub(crate) unsafe fn errno() -> *mut libc::c_int {
     unsafe { libc::__errno_location() }
 }
 
@@ -1091,20 +1161,49 @@ mod tests {
     }
 
     #[test]
-    fn only_eio_eintr_eagain_and_etimedout_are_transient() {
-        for code in [libc::EIO, libc::EINTR, libc::EAGAIN, libc::ETIMEDOUT] {
-            assert!(transient(&io::Error::from_raw_os_error(code)));
+    fn only_io_resource_and_network_filesystem_errors_are_transient() {
+        for code in TRANSIENT {
+            assert!(transient(&io::Error::from_raw_os_error(code)), "{code}");
         }
         for code in [
             libc::EACCES,
+            libc::EPERM,
             libc::ENOENT,
             libc::ELOOP,
             libc::EISDIR,
+            libc::ENOTDIR,
             libc::ENOSPC,
+            libc::EROFS,
+            libc::EINVAL,
         ] {
-            assert!(!transient(&io::Error::from_raw_os_error(code)));
+            assert!(!transient(&io::Error::from_raw_os_error(code)), "{code}");
         }
         assert!(!transient(&io::Error::other("no errno")));
+    }
+
+    fn failing_fstat(_: libc::c_int, _: *mut libc::stat) -> libc::c_int {
+        fail(libc::EIO)
+    }
+
+    #[test]
+    fn failed_fstat_after_open_keeps_its_errno_classification() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("ui-recovery.json");
+        std::fs::write(&path, b"companion").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let directory = Directory::root(root.path()).unwrap();
+        assert!(matches!(
+            directory.read_noting_transient_with("ui-recovery.json", failing_fstat),
+            Err(IoFailure {
+                error: StoreError::Io { action: "stat", .. },
+                transient: true,
+            })
+        ));
+        assert_eq!(
+            directory.read_noting_transient("ui-recovery.json").unwrap(),
+            b"companion"
+        );
     }
 
     #[test]
