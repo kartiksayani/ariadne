@@ -8,7 +8,7 @@ afterEach(cleanup);
 /** A waiting row for a question, in the one fields the announcements read. */
 const row = (id: string, revision = 1, session = 's') => ({ route: { project_id: 'p', session_id: session }, item: { id, question_revision: revision } });
 /** A listed session, in the one fields the announcements read. `created` is when the session was created. */
-const listed = (session = 's', created = 0) => ({ summary: { created_at: String(created) }, session: { project_id: 'p', id: session, inputs: {} } });
+const listed = (session = 's', created = 0) => ({ summary: { created_at: new Date(created).toISOString() }, session: { project_id: 'p', id: session, inputs: {} } });
 const state = (patch: Partial<Record<keyof WaitingState, unknown>> = {}): WaitingState => ({
   status: 'ready', counts: { completeness: 'complete', unavailable_session_ids: [] }, waiting: [], sent: [], sessions: [listed()], unavailableProjects: [], error: null, ...patch,
 }) as unknown as WaitingState;

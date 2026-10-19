@@ -19,7 +19,7 @@ export function QueueAnnouncements({ state }: { state: WaitingState }) {
     if (noData) return;
     const previous = history.current;
     const created = new Map<string, number>();
-    for (const captured of state.sessions) created.set(JSON.stringify([captured.session.project_id, captured.session.id]), Number(captured.summary.created_at));
+    for (const captured of state.sessions) created.set(JSON.stringify([captured.session.project_id, captured.session.id]), Date.parse(captured.summary.created_at));
     const announces = (sessionKey: string) => previous.seeded.has(sessionKey)
       || (previous.published && (created.get(sessionKey) ?? -Infinity) > previous.mountedAt);
     let waiting = 0, completed = 0;
