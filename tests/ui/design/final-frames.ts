@@ -415,7 +415,17 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // The board's first run offers "Copy instruction" for Codex, but there is nothing to copy before a project is registered, so the
   // app says to register first and offers "Register a project". The taller card re-centres the page, so only the top bar compares
   // (dark measured 0.13%: the right-hand glyphs' anti-aliasing).
-  '15.1': [...topBar([0.002, 0.002])]
+  '15.1': [...topBar([0.002, 0.002])],
+  // The owner asked for Copy session ID on every row (2026-10-19), so each row draws four action buttons where the board draws three.
+  // The actions column is 116px wide where the board's is 92px (four 28px buttons fit; the board's three fit in 92), so the rows' flexible columns
+  // (the agent, the status) sit 11-13px left of the board's and the wait pill and buttons are not where the board's are. What is held to the board:
+  // everything above the first row (the top bar and the page head, tabs included), the group headings and the names to their left (x < 500 wide,
+  // < 340 narrow), the page right of the boxes, and the empty page below the last box. The columns that moved are held by final.spec.mts instead
+  // (a two-digit wait count at the largest text size stays clear of the four buttons).
+  '14.2': [...band('sessions page above the rows', [0, 123], [0, 123], [0.0002, 0.0001]),
+    ...box('sessions page, group headings and names', [0, 123, 500, 677], [0, 123, 340, 527], [0.0001, 0.0001]),
+    ...box('sessions page, right of the boxes', [1144, 123, 136, 677], [870, 123, 30, 527], [0.0001, 0.0001]),
+    ...band('sessions page below the last box', [458, 342], [458, 192], [0.0001, 0.0001])]
 };
 
 /**
