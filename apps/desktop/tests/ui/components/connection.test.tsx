@@ -53,12 +53,12 @@ describe('connection card wording', () => {
 
 describe('a plugin that does not match the app', () => {
   const words = 'This Claude session’s Ariadne plugin doesn’t match the app. Run /reload-plugins there, then /ariadne-connect.';
-  it.each(['none', 'off', 'reconnect'] as const)('%s: the line and the card say so', kind => {
+  it.each(['off', 'reconnect'] as const)('%s: the line and the card say so', kind => {
     const line = connectionLine(view(kind, { pluginMismatch: true }))!;
     expect(`${line.title} ${line.text}`).toBe(words);
     expect(connectionCopy(view(kind, { pluginMismatch: true })).lines[0]).toBe(words);
   });
-  it.each(['live', 'loading', 'closed', 'unreadable', 'stale', 'unsaved'] as const)('%s: a stale mismatch never replaces what is true', kind => {
+  it.each(['none', 'live', 'loading', 'closed', 'unreadable', 'stale', 'unsaved'] as const)('%s: a stale mismatch never replaces what is true', kind => {
     expect(connectionLine(view(kind, { pluginMismatch: true }))).toEqual(connectionLine(view(kind)));
     expect(connectionCopy(view(kind, { pluginMismatch: true }))).toEqual(connectionCopy(view(kind)));
   });

@@ -22,9 +22,10 @@ DOC_FILES = {"AGENTS.md", "CONTRIBUTING.md", "ORCHESTRATOR.md", "README.md", "DE
 FULL_FILES = {"quality-gates.json", "scripts/check-commit.py", "tests/test_commit_checks.py",
               "tests/test_quality_workflow.py", "scripts/run-native-e2e.mjs",
               "scripts/check-release-boundary.mjs", "tests/test_process_contract.py"}
-# Rust that decides what the saved data looks like (the store, and the domain models it saves): a change there can
-# stop the previous release reading the data, so it takes the release checks, including the previous-release read check.
-STORE_FORMAT_SOURCES = ("crates/ariadne-store/src/", "crates/ariadne-domain/src/models/")
+# Rust that decides what the saved data looks like (the store, and all of the domain it saves: the models, and the
+# validation/ and history/ the store runs when it decodes a file): a change there can stop the previous release reading
+# the data, so it takes the release checks, including the previous-release read check.
+STORE_FORMAT_SOURCES = ("crates/ariadne-store/src/", "crates/ariadne-domain/src/")
 RELEASE_FILES = FULL_FILES | {"Cargo.toml", "Cargo.lock", "package.json", "package-lock.json",
                             "rust-toolchain.toml", ".node-version", "Makefile", "eslint.config.mjs",
                             "apps/desktop/src/main.tsx"}

@@ -47,12 +47,13 @@ impl<'a> QueryService<'a> {
                 let project = self.registry.resolve_project(route.project_id())?;
                 let dir = self.registry.project_dir(&project.project_id);
                 let session = match request {
-                    // An agent's `read` polls often and asks about the world, not about a write it is about to
-                    // decide: the lock-free snapshot is enough (ADR-0101). It is the newest commit at the instant of
-                    // the open, so a sequential read after the agent's own write sees that write; only a write
-                    // that lands during the read can be missed, and the next read has it. Any peek failure falls
-                    // through to the locked read, which reports it exactly as before. The other queries stay
-                    // locked: an owner command can be decided on what they return.
+                    // Every `SessionRead` takes the lock-free snapshot (ADR-0101), the owner's contexts too, not only an
+                    // agent's polling `read`: a session read is never the last word before a write, because a mutation
+                    // re-checks the revisions it was given under the lock and refuses a stale one. The snapshot is the
+                    // newest commit at the instant of the open, so a sequential read after one's own write sees that
+                    // write; only a write that lands during the read can be missed, and the next read has it. Any peek
+                    // failure falls through to the locked read, which reports it exactly as before. The other queries
+                    // stay locked: an owner command can be decided on what they return.
                     QueryRequest::SessionRead(_) => {
                         Store::open_registered(&dir, route.project_id().clone())
                             .and_then(|store| store.peek(route.session_id()))

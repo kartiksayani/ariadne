@@ -324,15 +324,17 @@ def place_app(home, final, state):
             discard(apps_fd, old)
 
 
-def remove_app_copy(home, known):
-    """Uninstall the app copy when its bytes are proven ours; otherwise leave it and say so."""
+def remove_app_copy(home, known, whole=True):
+    """Uninstall the app copy when its bytes are proven ours; otherwise leave it and say so. `whole` is False when
+    only one version of several is removed: the copy then belongs to the version that is current, not necessarily to
+    this one, so a copy that does not match is left without a word."""
     path = home / APP_PATH
     if not exists(path) or path.is_symlink():
         return
     if app_state(home, known) == "copy":
         with anchored_directory(home / "Applications") as apps_fd:
             shutil.rmtree("Ariadne.app", dir_fd=apps_fd)
-    elif any(item.get("owned_app") for item in known):
+    elif whole and any(item.get("owned_app") for item in known):
         print(f"{path} was edited after install, so it was left in place. Delete it yourself if you no longer want it.",
               flush=True)
 
@@ -709,9 +711,9 @@ def install(home, artifacts, facts, resource_loader=resources):
             require(not binary.is_symlink() and binary.is_file() and os.access(binary, os.X_OK), f"Missing executable: {binary}")
             require(run([binary, "--version"], capture=True).strip() == f"{name} {version}", "App/helper versions differ.")
         bundle = resource_loader(artifacts / "ariadne", final / "bin/ariadne")
-        # 2. What is installed now. A pointer whose version folder is gone counts as no install.
-        selected = current(root, home, partial=True)
-        before = selected if selected and selected[1] else None
+        # 2. What is installed now. A pointer whose version folder is gone counts as no install. Installing a
+        # different version removes nothing of the old one, so edits or missing files in its folder do not block.
+        current(root, home, partial=True)
         require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
         known = receipts(root, home, versions_fd)
         state, owned_links, notes = external_plan(home, root, known, plist.get("CFBundleIdentifier"))
@@ -726,11 +728,8 @@ def install(home, artifacts, facts, resource_loader=resources):
             for path in remove_installed(home, root, home_fd, root_fd, versions_fd, only=version):
                 print(f"Retained edited, foreign or unverifiable path: {path}")
             require(not exists(final), stop_sentence([final]))
-            before = None
             remaining = receipts(root, home, versions_fd)
             state, owned_links, notes = external_plan(home, root, remaining, None)
-        elif before:
-            require(inventory(before[0]) == before[1]["owned_files"], "Installed package contains edits or foreign files; preserve it and inspect manually.")
         for note in notes:
             print(note, flush=True)
         stage = root / "versions" / f".stage-{uuid.uuid4()}"
@@ -910,7 +909,7 @@ def remove_installed(home, root, home_fd, root_fd, versions_fd, only=None):
 
 def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained, keep_links=False):
     try:
-        remove_app_copy(home, [receipt for _, receipt, _ in packages])
+        remove_app_copy(home, [receipt for _, receipt, _ in packages], whole=not keep_links)
     except (InstallError, OSError):
         retained.append(str(home / APP_PATH))
     for package, receipt, package_fd in packages:

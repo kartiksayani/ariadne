@@ -1,11 +1,12 @@
 """The previous-release read check: its choices and its refusals, with stand-in helpers (no download, no build)."""
 import importlib.util
 import io
-import json
 import sys
 import tarfile
 import tempfile
+import subprocess
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -89,17 +90,19 @@ def run_main(new, old):
 
 
 class PreviousTag(unittest.TestCase):
-    def test_the_newest_published_release_other_than_this_build(self):
+    def test_the_newest_published_release_including_this_builds_own(self):
         listing = [
             {"tagName": "v0.1.0-alpha.22", "isDraft": False, "publishedAt": "2026-10-20T00:00:00Z"},
             {"tagName": "v0.1.0-alpha.21", "isDraft": False, "publishedAt": "2026-10-18T00:00:00Z"},
             {"tagName": "v0.1.0-alpha.20", "isDraft": False, "publishedAt": "2026-10-17T00:00:00Z"},
             {"tagName": "v0.1.0-alpha.23", "isDraft": True, "publishedAt": "2026-10-21T00:00:00Z"},
         ]
-        self.assertEqual(check.previous_tag(listing, "0.1.0-alpha.22"), "v0.1.0-alpha.21")
-        self.assertEqual(check.previous_tag(listing[2:3], "0.1.0-alpha.22"), "v0.1.0-alpha.20")
-        self.assertIsNone(check.previous_tag(listing[:1], "0.1.0-alpha.22"))
-        self.assertIsNone(check.previous_tag([], "0.1.0-alpha.22"))
+        # Between a release and the next bump the build's own tag is the newest published: compare against it.
+        self.assertEqual(check.previous_tag(listing), "v0.1.0-alpha.22")
+        self.assertEqual(check.previous_tag(listing[1:]), "v0.1.0-alpha.21")
+        self.assertEqual(check.previous_tag(listing[2:3]), "v0.1.0-alpha.20")
+        self.assertIsNone(check.previous_tag(listing[3:]))
+        self.assertIsNone(check.previous_tag([]))
 
 
 class SafeExtract(unittest.TestCase):
@@ -174,10 +177,27 @@ class ReadBack(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in Path(folder).iterdir()), before)
 
 
-class Versions(unittest.TestCase):
-    def test_the_current_version_is_the_apps(self):
-        config = json.loads((ROOT / "apps/desktop/src-tauri/tauri.conf.json").read_text())
-        self.assertEqual(check.current_version(), config["version"])
+class DownloadPrevious(unittest.TestCase):
+    def listed(self, code, stdout="", stderr=""):
+        done = subprocess.CompletedProcess(["gh"], code, stdout, stderr)
+        return patch.object(check, "run", return_value=done)
+
+    def test_a_gh_failure_is_a_failed_check_not_no_earlier_release(self):
+        for code, stdout, stderr in ((1, "", "HTTP 401: Bad credentials"), (4, "", "no network"), (1, "[]", "rate limit")):
+            with self.subTest(code=code, stderr=stderr), tempfile.TemporaryDirectory() as folder, self.listed(code, stdout, stderr):
+                with self.assertRaises(check.CheckFailed) as failed:
+                    check.download_previous(folder)
+                self.assertIn("Could not list the published releases", str(failed.exception))
+
+    def test_gh_output_that_is_not_json_is_a_failed_check(self):
+        with tempfile.TemporaryDirectory() as folder, self.listed(0, "not json"):
+            with self.assertRaises(check.CheckFailed):
+                check.download_previous(folder)
+
+    def test_no_earlier_release_only_when_gh_succeeded_with_an_empty_list(self):
+        for stdout in ("[]", "", '[{"tagName": "v0.1.0-alpha.23", "isDraft": true, "publishedAt": null}]'):
+            with self.subTest(stdout=stdout), tempfile.TemporaryDirectory() as folder, self.listed(0, stdout):
+                self.assertEqual(check.download_previous(folder), (None, None))
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ export interface CardCopy { readonly title: string; readonly lines: readonly str
  */
 const MISMATCH = { title: 'This Claude session’s Ariadne plugin doesn’t match the app.', text: 'Run /reload-plugins there, then /ariadne-connect.' } as const;
 /** Only where the agent isn't live: a connected session has, by being connected, a plugin that matches. */
-const mismatched = (view: ConnectionView) => !!view.pluginMismatch && (view.kind === 'none' || view.kind === 'off' || view.kind === 'reconnect');
+const mismatched = (view: ConnectionView) => !!view.pluginMismatch && (view.kind === 'off' || view.kind === 'reconnect');
 
 /** The card that opens from the dot. */
 export function connectionCopy(view: ConnectionView): CardCopy {

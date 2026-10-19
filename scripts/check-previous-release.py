@@ -23,7 +23,6 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT = 90
 # Fixed operation ids: the data folder is new on every run.
 ANSWER_OP = "00000000-0000-4000-8000-0000000c0001"
@@ -42,11 +41,6 @@ class CheckFailed(Exception):
     """A plain sentence about what the previous release did not read."""
 
 
-def current_version():
-    config = json.loads((ROOT / "apps/desktop/src-tauri/tauri.conf.json").read_text())
-    return config["version"]
-
-
 def run(command, *, input=None, env=None, cwd=None, timeout=TIMEOUT):
     return subprocess.run([str(part) for part in command], input=input, env=env, cwd=cwd, text=True,
                           capture_output=True, timeout=timeout)
@@ -54,10 +48,10 @@ def run(command, *, input=None, env=None, cwd=None, timeout=TIMEOUT):
 
 # --- The previous release -----------------------------------------------------------------------------------------
 
-def previous_tag(listing, version):
-    """The newest published release that is not this build's own: `listing` is `gh release list --json` output."""
-    own = f"v{version}"
-    published = [release for release in listing if not release.get("isDraft") and release["tagName"] != own]
+def previous_tag(listing):
+    """The newest published release: `listing` is `gh release list --json` output. Between a release and the next
+    version bump that is the build's own tag, which is the right one to compare against."""
+    published = [release for release in listing if not release.get("isDraft")]
     published.sort(key=lambda release: release.get("publishedAt") or "", reverse=True)
     return published[0]["tagName"] if published else None
 
@@ -78,10 +72,17 @@ def safe_extract(tarball, into):
             archive.extractall(base)
 
 
-def download_previous(version, into):
-    """Download the previous release's package for this Mac and return its `ariadne` helper."""
-    listing = json.loads(run(["gh", "release", "list", "--limit", "30", "--json", "tagName,isDraft,publishedAt"]).stdout or "[]")
-    tag = previous_tag(listing, version)
+def download_previous(into):
+    """Download the previous release's package for this Mac and return its `ariadne` helper. `(None, None)` only
+    when `gh` answered and no release is published; a `gh` failure (token, permission, network) is a failed check."""
+    listed = run(["gh", "release", "list", "--limit", "30", "--json", "tagName,isDraft,publishedAt"])
+    if listed.returncode != 0:
+        raise CheckFailed(f"Could not list the published releases: {listed.stderr.strip()[:300] or f'gh exited {listed.returncode}'}")
+    try:
+        listing = json.loads(listed.stdout or "[]")
+    except ValueError:
+        raise CheckFailed(f"Could not read the list of published releases: {listed.stdout.strip()[:300]}")
+    tag = previous_tag(listing)
     if tag is None:
         return None, None
     arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
@@ -233,14 +234,13 @@ def main(argv=None):
     parser.add_argument("--new", required=True, type=Path, help="this build's `ariadne` helper")
     parser.add_argument("--old", type=Path, help="the previous release's `ariadne` helper; default: download the latest release")
     args = parser.parse_args(argv)
-    version = current_version()
     with tempfile.TemporaryDirectory(prefix="ariadne-previous-release-") as folder:
         work = Path(folder)
         (work / "home").mkdir()
         (work / "project").mkdir()
         old_path, tag = args.old, None
         if old_path is None:
-            old_path, tag = download_previous(version, work)
+            old_path, tag = download_previous(work)
             if old_path is None:
                 print("There is no earlier release to check; nothing to compare.")
                 return 0
