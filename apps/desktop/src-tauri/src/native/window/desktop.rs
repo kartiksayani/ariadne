@@ -221,6 +221,30 @@ pub enum Fit {
     /// or whose title bar is unreachable; never move a reachable window.
     IfNeeded,
 }
+/// The frame a fit works from.
+#[derive(Debug, PartialEq)]
+enum FitFrame<'a> {
+    /// The saved frame, placed inside a work area.
+    Saved(&'a WindowGeometry),
+    /// The window's own frame, fitted (`only_if_needed`: only when it no longer
+    /// fits or its title bar is unreachable).
+    Current { only_if_needed: bool },
+}
+/// Which frame `fit` works from, or None when the frame is left alone. Launch
+/// without a saved frame (before the read returns, or when it fails) fits the
+/// current frame, so the window never shows unfitted.
+fn fit_frame(fit: Fit, saved: Option<&WindowGeometry>) -> Option<FitFrame<'_>> {
+    match (fit, saved) {
+        (Fit::Keep, _) => None,
+        (Fit::Launch, Some(saved)) => Some(FitFrame::Saved(saved)),
+        (Fit::Launch, None) => Some(FitFrame::Current {
+            only_if_needed: false,
+        }),
+        (Fit::IfNeeded, _) => Some(FitFrame::Current {
+            only_if_needed: true,
+        }),
+    }
+}
 /// Applies `fit` to the main window. A window that is minimized or full screen
 /// keeps its frame: its size is not a resting one.
 fn fit_main<R: tauri::Runtime>(
@@ -228,18 +252,18 @@ fn fit_main<R: tauri::Runtime>(
     fit: Fit,
     saved: Option<&WindowGeometry>,
 ) -> Result<(), CoreError> {
-    if fit == Fit::Keep
-        || window.is_minimized().unwrap_or(true)
-        || window.is_fullscreen().unwrap_or(true)
-    {
+    let Some(frame) = fit_frame(fit, saved) else {
+        return Ok(());
+    };
+    if window.is_minimized().unwrap_or(true) || window.is_fullscreen().unwrap_or(true) {
         return Ok(());
     }
-    match (fit, saved) {
-        (Fit::Launch, Some(saved)) => fit_window(window, saved, false),
-        _ => fit_window(
+    match frame {
+        FitFrame::Saved(saved) => fit_window(window, saved, false),
+        FitFrame::Current { only_if_needed } => fit_window(
             window,
             &geometry(&window.as_ref().window())?,
-            fit == Fit::IfNeeded,
+            only_if_needed,
         ),
     }
 }
@@ -299,8 +323,14 @@ impl NativeWindow {
 
     /// First show at startup. The window is created hidden (tauri.conf.json),
     /// so it appears once, at its saved size, instead of growing from the
-    /// default. A failed or slow preference read still shows it.
+    /// default. A failed or slow preference read still shows it, and the window
+    /// is fitted to its screen first, so a slow read never shows it unfitted.
     pub(crate) fn launch<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>) {
+        if let Some(window) = app.get_webview_window("main") {
+            if fit_main(&window, Fit::Launch, None).is_err() {
+                eprintln!("Ariadne could not fit the native window to its screen.");
+            }
+        }
         let show = first_show::<R>();
         show_after(app.clone(), show.clone(), LAUNCH_FALLBACK);
         self.reconcile_then(app, Fit::Launch, Some(Box::new(show)));
@@ -438,3 +468,7 @@ impl NativeWindow {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/desktop.rs"]
+mod tests;

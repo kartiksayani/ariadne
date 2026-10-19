@@ -133,16 +133,20 @@ pub fn plan_fit(
         )
     })?;
     let content_minimum = live_content_minimum(configured, area, chrome);
-    if only_if_needed && !needs_fit(frame, areas, chrome.height) {
+    let minimum = MinimumSize {
+        width: content_minimum.width + chrome.width,
+        height: content_minimum.height + chrome.height,
+    };
+    // A frame below the live minimum is grown from its origin by macOS once the
+    // minimum is set, which can push it off the screen: fit it instead.
+    let below_minimum = frame.width + FIT_TOLERANCE < minimum.width
+        || frame.height + FIT_TOLERANCE < minimum.height;
+    if only_if_needed && !below_minimum && !needs_fit(frame, areas, chrome.height) {
         return Ok(FitPlan {
             content_minimum,
             frame: None,
         });
     }
-    let minimum = MinimumSize {
-        width: content_minimum.width + chrome.width,
-        height: content_minimum.height + chrome.height,
-    };
     Ok(FitPlan {
         content_minimum,
         frame: Some(clamp_geometry(frame, areas, minimum)?),

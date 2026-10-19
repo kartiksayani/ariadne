@@ -323,3 +323,26 @@ fn unavailable_or_invalid_monitor_evidence_does_not_fabricate_geometry() {
         );
     }
 }
+
+#[test]
+fn wake_fits_a_frame_below_the_live_minimum_so_it_cannot_grow_off_screen() {
+    let areas = [area("primary", 0.0, 25.0, 1440.0, 875.0)];
+    // Reachable and on screen, but narrower than the 1100 minimum and near the
+    // right edge: macOS would grow it from its origin past the edge.
+    let narrow = window(1300.0, 100.0, 900.0, 800.0, Some("primary"));
+    assert!(!needs_fit(&narrow, &areas, CHROME.height));
+    let plan = plan_fit(&narrow, &areas, CHROME, CONFIGURED, true).unwrap();
+    assert_eq!(plan.content_minimum, CONFIGURED);
+    assert_eq!(
+        plan.frame,
+        Some(window(340.0, 100.0, 1100.0, 800.0, Some("primary")))
+    );
+    // A frame at or above the minimum is still left alone.
+    let fine = window(300.0, 100.0, 1100.0, 788.0, Some("primary"));
+    assert_eq!(
+        plan_fit(&fine, &areas, CHROME, CONFIGURED, true)
+            .unwrap()
+            .frame,
+        None
+    );
+}
