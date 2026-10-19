@@ -67,6 +67,16 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertIn("      - name: Preserve native and coverage evidence\n"
                       "        if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')\n",
                       workflow)
+        # The previous-release read check: release scope only, once per push (the native stage), after the pushed head passed.
+        self.assertIn("      - name: Check the previous release still reads this build's data\n"
+                      "        # Release scope only (it includes store-format Rust changes), and once per push: the native stage.\n"
+                      "        if: matrix.stage == 'native' && contains(steps.scope.outputs.scope, 'application') "
+                      "&& contains(steps.scope.outputs.scope, 'release=true')\n", workflow)
+        self.assertIn('python3 scripts/check-previous-release.py --new "$CARGO_TARGET_DIR/debug/ariadne"', workflow)
+        self.assertLess(workflow.index("- name: Check the pushed branch head"),
+                        workflow.index("- name: Check the previous release still reads this build's data"))
+        self.assertLess(workflow.index("- name: Check the previous release still reads this build's data"),
+                        workflow.index("- name: Preserve native and coverage evidence"))
         order = [workflow.index(f"      - name: {name}\n") for name in (
             "Resolve the check scope", "Install the Rust toolchain", "Restore cargo-llvm-cov",
             "Install cargo-llvm-cov", "Cache the Rust build", "Check the pushed branch head")]

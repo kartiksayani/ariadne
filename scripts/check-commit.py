@@ -22,6 +22,9 @@ DOC_FILES = {"AGENTS.md", "CONTRIBUTING.md", "ORCHESTRATOR.md", "README.md", "DE
 FULL_FILES = {"quality-gates.json", "scripts/check-commit.py", "tests/test_commit_checks.py",
               "tests/test_quality_workflow.py", "scripts/run-native-e2e.mjs",
               "scripts/check-release-boundary.mjs", "tests/test_process_contract.py"}
+# Rust that decides what the saved data looks like (the store, and the domain models it saves): a change there can
+# stop the previous release reading the data, so it takes the release checks, including the previous-release read check.
+STORE_FORMAT_SOURCES = ("crates/ariadne-store/src/", "crates/ariadne-domain/src/models/")
 RELEASE_FILES = FULL_FILES | {"Cargo.toml", "Cargo.lock", "package.json", "package-lock.json",
                             "rust-toolchain.toml", ".node-version", "Makefile", "eslint.config.mjs",
                             "apps/desktop/src/main.tsx"}
@@ -61,6 +64,7 @@ def scope_for(paths):
     scope, release = "docs", False
     for name in paths:
         if (name in RELEASE_FILES or name.startswith((".github/", ".githooks/", "apps/desktop/src-tauri/", "scripts/install/", "tests/functional/install/"))
+                or (name.startswith(STORE_FORMAT_SOURCES) and name.endswith(".rs"))
                 or (name.startswith(("crates/ariadne-agent-protocol/", "crates/ariadne-core/")) and name.endswith(".rs")
                     and not name.startswith(("crates/ariadne-agent-protocol/tests/", "crates/ariadne-core/tests/")))
                 or (name.startswith(("apps/", "crates/", "integrations/")) and

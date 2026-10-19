@@ -45,6 +45,13 @@ class ScopeTests(unittest.TestCase):
             (["crates/ariadne-core/README.md"], ("application", False)),
             (["crates/ariadne-core-extra/src/fake.rs"], ("application", False)),
             (["crates/ariadne-domain/src/validation.rs"], ("application", False)),
+            # What the saved data looks like: the previous release must still read it.
+            (["crates/ariadne-store/src/session/mod.rs"], ("application", True)),
+            (["crates/ariadne-store/src/ui.rs"], ("application", True)),
+            (["crates/ariadne-domain/src/models/entities.rs"], ("application", True)),
+            (["crates/ariadne-store/tests/ui.rs"], ("application", False)),
+            (["crates/ariadne-store/README.md"], ("application", False)),
+            (["crates/ariadne-store-extra/src/fake.rs"], ("application", False)),
             (["apps/desktop/src-tauri/src/lib.rs"], ("application", True)),
             (["apps/desktop/vite.config.ts"], ("application", True)),
             (["apps/desktop/src/main.tsx"], ("application", True)),

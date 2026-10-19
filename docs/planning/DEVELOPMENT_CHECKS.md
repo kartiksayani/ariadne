@@ -82,6 +82,15 @@ External Rust integration tests in `ariadne-core/tests/` and
 to those `.rs` files retain all application/coverage/native checks without packaged
 release isolation. Production crate sources, manifests/configuration, unknown paths,
 missing bases and full/manual runs keep their existing release selection.
+Rust that decides what the saved data looks like (`crates/ariadne-store/src/` and
+the domain models in `crates/ariadne-domain/src/models/`) is release scope too. On
+release scope, the native CI stage also runs the previous-release read check,
+`scripts/check-previous-release.py`: it downloads the latest earlier release, writes a
+populated store (a project, a session with items, an answer and a reply, UI preferences
+with seen markers, and the recovery file) with this build's helper, then reads it with
+the old helper (`doctor --json`, a session read, item messages, `preferences get`) and
+requires the data that was written, not just a zero exit. Run it locally with
+`scripts/check-previous-release.py --new target/debug/ariadne [--old <previous helper>]`.
 When frontend type/CSS checks run, `npm run check` owns the single repository-wide
 ESLint pass. JS-only changes retain standalone ESLint; maintained inline HTML
 scripts still receive their separate stdin lint.
