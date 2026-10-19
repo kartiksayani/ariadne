@@ -137,7 +137,8 @@ function appModel() {
         app.late = () => { app.late = null; return commit(request); };
         return failure('host_unreachable');
       }
-      if (app.gate) { const gate = app.gate; app.gate = null; await gate.promise; }
+      // Without a gate the connect commits at once, even when its call is not awaited.
+      if (app.gate) await gated('gate');
       return connect(request);
     }
     if (noun === 'binding' && verb === 'disconnect') {
@@ -172,9 +173,10 @@ function appModel() {
 
 // One plugin instance (one Claude process load of the plugin). /reload-plugins
 // drops an instance and loads another against the same app, Claude and store.
-function instance(app, store, publish = {waitMs:0,pollMs:0}) {
+// `step` runs at each await of a connect, before the plugin looks again.
+function instance(app, store, publish = {waitMs:0,pollMs:0}, step = undefined) {
   const hooks = new Map(), timers = [], logs = [], appended = [];
-  createRegister(descriptor,publish)((name, pattern, handler) => {
+  createRegister(descriptor,publish,step)((name, pattern, handler) => {
     if (typeof pattern === 'function') {handler = pattern;pattern = null;}
     hooks.set(pattern?.command ?? name,pattern?.command ? ($,event = {args:''}) => handler($,event) : handler);
   });
@@ -708,6 +710,129 @@ describe('a connect that spans a conversation end never sends for the ended conv
     expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
     expect(plugin.appended.some(row => JSON.stringify(row).includes(ended.generation))).toBe(false);
     expect(store.has(`binding:${OLD}`)).toBe(false);
+  });
+});
+
+// Every await on a connect path: by the name the plugin gives it (a step, run
+// through the test's step hook) or by the helper or store call the model holds
+// (a gate, inside setup's connect attempt and remember's write).
+const PATHS = Object.freeze({
+  // A second /ariadne-connect of a connected conversation (it replaces a loop).
+  explicit:{steps:['connect','replaced','remember','bind','note'],gates:['gate','statusGate','setGate']},
+  // `claude --resume` of a remembered conversation.
+  automatic:{steps:['drain','connect','remember','bind','note'],gates:['projectGate','gate','statusGate','setGate']},
+});
+const SUCCESS = 'This conversation is connected to Ariadne.';
+const RECONNECTED = 'Ariadne: this conversation is connected to its Ariadne session again.';
+const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
+// How a conversation end lands at a point.
+const SPANS = Object.freeze({
+  // /clear ran to its end, Claude switched the id, and a tick followed it.
+  'end, switch, tick':async ctx => {
+    await ctx.plugin.end('clear');
+    ctx.app.claude.id = NEW;
+    await ctx.plugin.tick();
+  },
+  // /clear has started (its end report is in flight, health not reset yet); the id switches after.
+  'end started':ctx => { ctx.ending = ctx.plugin.end('clear'); },
+});
+async function connectPath(kind) {
+  const app = appModel(), store = kind === 'automatic' ? remembered(app) : new Map();
+  const ctx = {app,store,step:async () => {},ending:null,mark:null};
+  ctx.plugin = instance(app,store,undefined,name => ctx.step(name));
+  if (kind === 'explicit') {
+    await ctx.plugin.start();
+    expect((await ctx.plugin.command('ariadne-connect',app.session)).text).toContain(SUCCESS);
+  }
+  ctx.hold = name => { const gate = deferred(); if (name === 'setGate') store.setGate = gate; else app[name] = gate; return gate; };
+  // The explicit answer; the automatic reconnect answers nothing and is done once `done` holds.
+  ctx.run = async done => {
+    if (kind === 'explicit') return (await ctx.plugin.command('ariadne-connect',app.session)).text;
+    await ctx.plugin.start();
+    await vi.waitFor(() => expect(done()).toBe(true));
+    await sleep(50);
+    return null;
+  };
+  ctx.span = async variant => {
+    ctx.mark = {appended:ctx.plugin.appended.length,logs:ctx.plugin.logs.length};
+    app.claude.real = NEW;
+    await SPANS[variant](ctx);
+  };
+  return ctx;
+}
+const noEndTwice = app => {
+  const ends = app.reports.filter(event => event.kind === 'disconnected').map(event => `${event.binding_id}:${event.generation}`);
+  expect(new Set(ends).size).toBe(ends.length);
+};
+const points = Object.entries(PATHS).flatMap(([kind,{steps,gates}]) => [
+  ...steps.map(name => ({kind,step:name})),...gates.map(name => ({kind,gate:name})),
+]).flatMap(point => Object.keys(SPANS).map(variant => [point.kind,point.step ? `step ${point.step}` : `gate ${point.gate}`,variant,point]));
+
+describe('a conversation end at any await of a connect stops it the same way', () => {
+  it.each(Object.keys(PATHS))('the %s path names every await it takes', async kind => {
+    const ctx = await connectPath(kind), names = [];
+    ctx.step = async name => { names.push(name); };
+    const answer = await ctx.run(() => ctx.plugin.logs.includes(RECONNECTED));
+    if (kind === 'explicit') expect(answer).toContain(SUCCESS);
+    expect(names).toEqual(PATHS[kind].steps);
+  });
+
+  it.each(points)('%s path, %s, %s: no note or success, the old binding ends once, its memory goes, the next tick binds the new conversation', async (kind, _, variant, point) => {
+    const ctx = await connectPath(kind), {app,store,plugin} = ctx;
+    let spanned = false;
+    const span = async () => { await ctx.span(variant); spanned = true; };
+    let fired = false;
+    ctx.step = async name => { if (name === point.step && !fired) { fired = true; await span(); } };
+    const gate = point.gate ? ctx.hold(point.gate) : null;
+    const running = ctx.run(() => spanned);
+    if (gate) {
+      await vi.waitFor(() => expect(gate.reached).toBe(true));
+      await span();
+      gate.resolve();
+    }
+    const answer = await running;
+    if (ctx.ending) { await ctx.ending; app.claude.id = NEW; }
+    expect(spanned).toBe(true);
+    if (kind === 'explicit') expect(answer).toBe(CONNECT_AGAIN);
+    expect(plugin.logs.slice(ctx.mark.logs)).not.toContain(RECONNECTED);
+    expect(plugin.appended.slice(ctx.mark.appended)).toEqual([]);
+    const dead = app.binding() ? {...app.binding()} : null;
+    if (kind === 'explicit') expect(dead).not.toBeNull();
+    if (dead) {
+      expect(dead).toMatchObject({external:OLD});
+      expect(endReports(app,dead)).toHaveLength(1);
+    }
+    noEndTwice(app);
+    await plugin.tick();
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(store.has(`binding:${OLD}`)).toBe(false);
+    await settled(plugin,2);
+    if (dead) expect(endReports(app,dead)).toHaveLength(1);
+    noEndTwice(app);
+    expect(store.has(`binding:${OLD}`)).toBe(false);
+    if (dead) expect(plugin.appended.slice(ctx.mark.appended).map(row => row.message.content[0].text).join('\n')).not.toContain(dead.id);
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+  });
+
+  it.each(Object.keys(PATHS))('a %s connect held at every await of the same conversation still connects', async kind => {
+    const ctx = await connectPath(kind), {app,store,plugin} = ctx;
+    const names = [];
+    ctx.step = async name => { names.push(name); await sleep(0); };
+    const gates = PATHS[kind].gates.map(ctx.hold), before = plugin.appended.length;
+    const running = ctx.run(() => plugin.logs.includes(RECONNECTED));
+    await vi.waitFor(() => {
+      for (const gate of gates) if (gate.reached) gate.resolve();
+      expect(gates.every(gate => gate.reached)).toBe(true);
+    });
+    const answer = await running;
+    if (kind === 'explicit') expect(answer).toContain(SUCCESS);
+    else expect(plugin.logs).toContain(RECONNECTED);
+    expect(names).toEqual(PATHS[kind].steps);
+    const bound = app.binding();
+    expect(bound).toMatchObject({external:OLD,state:'connected'});
+    expect(endReports(app,bound)).toHaveLength(0);
+    expect(plugin.appended.slice(before).map(row => row.message.content[0].text).join('\n')).toContain(bound.generation);
+    expect(store.get(`binding:${OLD}`)).toMatchObject({session_id:app.session});
   });
 });
 
