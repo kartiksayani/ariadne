@@ -113,6 +113,7 @@ async function perform(page: Page, step: Step): Promise<void> {
     await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
   else if ('wait' in step) await page.waitForTimeout(step.wait);
+  else if ('see' in step) await expect(page.getByRole(step.see).first()).toBeVisible();
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else if ('scroll' in step) {
     // The Map's scroller is the nearest ancestor of the item tree (or of the Graph's topic) that scrolls.
@@ -207,6 +208,35 @@ for (const state of finalStates) for (const variant of variantNames) {
       await captureFrame(canvas, { id, design, app, directory: output, masks: corners(width, height), ...score,
         report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured, ...report(result) }),
         denied: [...boardDenied, ...denied] });
+    } finally { await context.close(); }
+  });
+}
+
+// The sessions list draws four 28px action buttons per row where the board draws three (final-frames.ts, 14.2), so no frame compares that column.
+// This holds it instead: with a two-digit wait count at the largest text size, the pill ends before the first button, in every row, at both widths.
+for (const variant of ['light', 'narrow'] as const) {
+  test(`sessions list ${variant}: a two-digit wait count at the largest text size stays clear of the row's four buttons`, async ({ browser, origin }) => {
+    const state = finalStates.find(value => value.id === '14.2')!, context = await appContext(browser, origin, variant, []);
+    try {
+      const page = await context.newPage();
+      await renderApp(page, origin, state, variant);
+      await page.evaluate(() => {
+        document.documentElement.style.setProperty('--text-scale', '1.2');
+        for (const pill of document.querySelectorAll('.p-wait')) pill.lastChild!.textContent = '88';
+      });
+      const rows = await page.locator('.sl-row').evaluateAll(items => items.map(item => {
+        const pill = item.querySelector('.p-wait')?.getBoundingClientRect(), column = item.querySelector('.sl-wait')!.getBoundingClientRect();
+        const buttons = [...item.querySelectorAll('.sl-act')].map(button => button.getBoundingClientRect()), box = item.getBoundingClientRect();
+        return { name: item.querySelector('.sl-name')?.textContent ?? '', pillRight: pill?.right ?? null, column: column.right, first: buttons[0]!.left, count: buttons.length, last: buttons.at(-1)!.right, row: box.right };
+      }));
+      expect(rows.length, 'the list draws rows').toBeGreaterThan(0);
+      expect(rows.some(row => row.pillRight !== null), 'a row has a wait pill').toBe(true);
+      for (const row of rows) {
+        expect(row.count, `${row.name} has four buttons`).toBe(4);
+        expect(row.first, `${row.name}: the buttons start after the wait column`).toBeGreaterThanOrEqual(row.column);
+        if (row.pillRight !== null) expect(row.pillRight, `${row.name}: the pill ends before the first button`).toBeLessThanOrEqual(row.first);
+        expect(row.last, `${row.name}: the buttons stay inside the row`).toBeLessThanOrEqual(row.row);
+      }
     } finally { await context.close(); }
   });
 }

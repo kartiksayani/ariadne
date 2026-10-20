@@ -125,12 +125,12 @@ renderers.register = context => <>{pageBar(context)}{projectsPage}<RegisterProje
 renderers['remove-project'] = context => <>{pageBar(context)}{projectsPage}<RemoveProjectDialog name="notes-api" path="~/code/notes-api" sessionCount={2} waitingCount={2} words={{ words: [], complete: true }} onRemove={noop} onCancel={noop} /></>;
 renderers.sessions = context => <>{pageBar(context)}
   <SessionsList narrow={context.narrow} back={back} title="All sessions" sub="6 sessions in 3 projects" tabs={{ value: 'all', counts: { open: 5, closed: 1, all: 6 }, onChange: noop }}
-    groups={sessionGroups()} onOpen={noop} onRename={noop} onClose={noop} onArchive={noop} /></>;
+    groups={sessionGroups()} onOpen={noop} onRename={noop} onClose={noop} onArchive={noop} onCopyId={copied} /></>;
 renderers['no-sessions'] = context => <>{pageBar(context)}
   <SessionsList narrow={context.narrow} back={{ label: 'Projects', onBack: noop }} title="notes-site" sub="No sessions"
     groups={[{ id: 'site', name: 'notes-site', path: '~/code/notes-site', sessions: [], empty: { title: 'No sessions in notes-site',
       text: 'Start Claude Code or Codex in ~/code/notes-site and run /ariadne-connect; the session shows up here. Its last one, “landing copy”, is in Archive.', action: { label: 'Open Archive', onClick: noop } } }]}
-    onOpen={noop} onRename={noop} onClose={noop} onArchive={noop} /></>;
+    onOpen={noop} onRename={noop} onClose={noop} onArchive={noop} onCopyId={copied} /></>;
 renderers.archive = context => <>{pageBar(context, { archive: { active: true, onOpen: noop } })}
   <ArchiveList back={back} sub="3 sessions · 1 topic" onRestore={noop} onRemove={noop}
     sessions={[

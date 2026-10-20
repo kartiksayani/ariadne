@@ -28,6 +28,8 @@ export type Step =
   | { readonly type: string }
   /** Time passing in the app: milliseconds waited, for what a dwell does (the 1 s that clears a marker, 9.10). */
   | { readonly wait: number }
+  /** Wait until a dialog is on screen (12.9: the peek card a resting pointer opens after PEEK_OPEN_MS), however long a slow runner takes. */
+  | { readonly see: 'dialog' }
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
   | { readonly scroll: 'top' }
@@ -234,7 +236,7 @@ const stateList: readonly FinalState[] = [
   { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: false, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
   { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: false, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
   { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: false, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' }, act: [{ drive: 'read-fails' }] } },
-  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: false, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] }, act: [{ drive: 'save-unsure' }, { hover: '.tree-item[data-item-id="a2.2.2"]' }, { click: 'Later' }, { hover: '.tb' }, { hover: '.tb' }] } },
+  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: false, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] }, act: [{ drive: 'save-unsure' }, { hover: '.tree-item[data-item-id="a2.2.2"]' }, { see: 'dialog' }, { click: 'Later' }, { hover: '.tb' }, { hover: '.tb' }] } },
   // 13. Session and project switcher
   { id: '13.1', part: 'R4-Switcher', sid: 's-open', owner: 'nav-state', pending: false, title: 'Open', app: { chrome: { overlay: 'switcher' }, act: [{ key: 'Meta+o' }] } },
   { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: false, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
@@ -415,7 +417,17 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // The board's first run offers "Copy instruction" for Codex, but there is nothing to copy before a project is registered, so the
   // app says to register first and offers "Register a project". The taller card re-centres the page, so only the top bar compares
   // (dark measured 0.13%: the right-hand glyphs' anti-aliasing).
-  '15.1': [...topBar([0.002, 0.002])]
+  '15.1': [...topBar([0.002, 0.002])],
+  // The owner asked for Copy session ID on every row (2026-10-19), so each row draws four action buttons where the board draws three.
+  // The actions column is 116px wide where the board's is 92px (four 28px buttons fit; the board's three fit in 92), so the rows' flexible columns
+  // (the agent, the status) sit 11-13px left of the board's and the wait pill and buttons are not where the board's are. What is held to the board:
+  // everything above the first row (the top bar and the page head, tabs included), the group headings and the names to their left (x < 500 wide,
+  // < 340 narrow), the page right of the boxes, and the empty page below the last box. The columns that moved are held by final.spec.mts instead
+  // (a two-digit wait count at the largest text size stays clear of the four buttons).
+  '14.2': [...band('sessions page above the rows', [0, 123], [0, 123], [0.0002, 0.0001]),
+    ...box('sessions page, group headings and names', [0, 123, 500, 677], [0, 123, 340, 527], [0.0001, 0.0001]),
+    ...box('sessions page, right of the boxes', [1144, 123, 136, 677], [870, 123, 30, 527], [0.0001, 0.0001]),
+    ...band('sessions page below the last box', [458, 342], [458, 192], [0.0001, 0.0001])]
 };
 
 /**

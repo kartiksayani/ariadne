@@ -80,6 +80,8 @@ export interface SessionsListProps<R> {
   /** Greyed ("Already closed") on a closed row: Reopen is on the opened session's connection card. */
   readonly onClose: (session: PageSession<R>) => void;
   readonly onArchive: (session: PageSession<R>) => void;
+  /** Copies the session's ID; resolves to whether it landed. Never called for a row without an ID (its button is off). */
+  readonly onCopyId: (session: PageSession<R>) => Promise<boolean>;
 }
 
 export interface ArchiveRowData {

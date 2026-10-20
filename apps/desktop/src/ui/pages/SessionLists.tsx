@@ -15,6 +15,7 @@ import { ArchiveSessionDialog, DispatchDialog } from './SessionDialogs';
 import { closeImpact } from '../../components/history-actions/selectors';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
 import { isViewConflict } from '../shared/conflictNotice';
+import { copySessionReference } from '../shared/CopySessionId';
 import { SessionsList } from './SessionsList';
 import { SessionRowAction, type RowAct } from './SessionRowAction';
 import type { PageBack, PageSession } from './page-types';
@@ -215,6 +216,7 @@ export function SessionLists({ navigation, actions, projects, sessions, single =
       // While navigation is held (a Refresh) a row opens nothing; during a save it queues. Rename, Close and Archive wait for both.
       onOpen={row => { if (!navigationDisabled) onOpenSession(row.route); }} onRename={act('rename')} onClose={act('close')}
       onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }}
+      onCopyId={row => row.id ? copySessionReference(row.id) : Promise.resolve(false)}
       notes={notes}>{children}</SessionsList>
     {acting && store && <SessionRowAction key={`${sessionKey(acting.summary)}:${acting.act}`} actions={actions.forSession(store)} act={acting.act}
       naming={{ name: ownerName(acting.summary) ?? '', description: ownerDescription(acting.summary) ?? '',
