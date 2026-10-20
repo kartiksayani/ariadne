@@ -236,7 +236,7 @@
   padding: 5px calc(18px + (var(--depth) - 1) * 6px) 5px calc(var(--tree-x) - 9px);
   display: flex;
   align-items: center;
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
   cursor: pointer;
 }
 
@@ -274,7 +274,7 @@
 }
 
 /* A strip in an item's or topic's place (E29) is a button: Undo, or open the bin. The board's strip (SPEC 10.3, 11.3):
-   12.5px, text 62% on a 6% ground, a 14px icon. */
+   12.5px, text 84% (the board: 62%; owner 2026-10-19, AA) on a 6% ground, a 14px icon. */
 .tree-place .tree-strip {
   gap: 5px;
   padding: 0 8px 0 5px;
@@ -282,7 +282,7 @@
   background: color-mix(in srgb, var(--color-text) 6%, transparent);
   font: inherit;
   font-size: calc(12.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  color: color-mix(in srgb, var(--color-text) 84%, transparent);
   cursor: pointer;
 }
 

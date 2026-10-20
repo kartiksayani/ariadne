@@ -290,12 +290,12 @@
 }
 
 .tree-item-hidden .tree-collapsed {
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  color: color-mix(in srgb, var(--color-text) 86%, transparent);
   background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .tree-item-hidden .tree-collapsed:hover {
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  color: color-mix(in srgb, var(--color-text) 86%, transparent);
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
