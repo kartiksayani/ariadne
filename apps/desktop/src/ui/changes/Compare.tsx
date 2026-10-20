@@ -34,7 +34,7 @@ export function Compare({ row, session, why, variant = 'icon' }: { readonly row:
         <path d="M4 3h6v18H4zM14 3h6v18h-6M7 8h10m-3-3 3 3-3 3M17 16H7m3-3-3 3 3 3" />
       </svg>
     </button>}
-    {open && <span id={id} className="change-comparison">{row.fields.map(field => <span key={field.field} className="change-field">
+    {open && <span id={id} className="change-comparison" data-single={row.fields.length === 1 || undefined}>{row.fields.map(field => <span key={field.field} className="change-field">
       <strong>{fieldNames[field.field]}</strong><span><span className="change-value-label">Before</span><del>{valueText(field.before, field.field, session)}</del></span>
       <span><span className="change-value-label">After</span><mark>{valueText(field.current, field.field, session)}</mark></span>
     </span>)}{why && !row.fields.some(field => field.field === 'why') && <span className="change-field"><strong>Why</strong><span>{why}</span></span>}</span>}

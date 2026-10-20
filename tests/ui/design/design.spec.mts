@@ -247,6 +247,57 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(again.getByRole('button', { name: 'Retry schedule', exact: true })).toHaveCount(0);
   });
 
+  // SPEC 5.5 / 5.3: the structure of the What changed popover, held here because its text is the fixture's own data (final-frames.ts).
+  test(`What changed popover structure: the away summary and its three 28px actions (${theme})`, async ({ page, origin }) => {
+    await openApp(page, origin, { ...frameSpec('changes-away'), theme });
+    const away = (await openChanges(page)).getByRole('region', { name: 'While you were away', exact: true });
+    const lines = away.getByRole('listitem');
+    expect(await lines.count()).toBeGreaterThan(0);
+    for (const line of await lines.all()) {
+      await expect(line.locator('i').first()).toBeVisible();
+      // The count is bold and right-aligned in its own column; the label follows it.
+      const count = line.locator('span').first();
+      expect(await count.evaluate(element => getComputedStyle(element).fontWeight)).toBe('500');
+      expect(await count.evaluate(element => getComputedStyle(element).textAlign)).toBe('right');
+    }
+    const look = (name: string) => away.getByRole('button', { name, exact: true }).evaluate(element => {
+      const style = getComputedStyle(element);
+      return { height: element.getBoundingClientRect().height, filled: style.backgroundColor !== 'rgba(0, 0, 0, 0)', ring: style.boxShadow !== 'none' };
+    });
+    expect(await look('Start with what’s waiting')).toEqual({ height: 28, filled: true, ring: false });
+    expect(await look('Read the brief')).toEqual({ height: 28, filled: false, ring: true });
+    expect(await look('Mark all caught up')).toEqual({ height: 28, filled: false, ring: false });
+  });
+
+  test(`What changed popover structure: a change is a card with time and check at the right (${theme})`, async ({ page, origin }) => {
+    await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
+    const popover = await openChanges(page);
+    await page.evaluate(() => document.fonts.ready);
+    const card = popover.getByTestId('changes-row').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    const box = (locator: Locator) => locator.evaluate(element => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; });
+    const check = await box(card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }));
+    expect([check.width, check.height]).toEqual([24, 22]);
+    const name = await box(card.getByRole('button', { name: 'Retry schedule', exact: true })), time = await box(card.locator('time')), whole = await box(card);
+    expect(time.x).toBeGreaterThan(name.x + name.width);
+    expect(check.x).toBeGreaterThan(time.x + time.width);
+    expect(check.x + check.width).toBeLessThanOrEqual(whole.x + whole.width);
+    // "› Before → after" sits under the name column; opening it tints the card and draws a Before / After grid.
+    const toggle = card.getByRole('button', { name: 'Before → after', exact: true });
+    const toggleBox = await box(toggle);
+    expect(toggleBox.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
+    await expect(card).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await toggle.click();
+    await expect(card).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    const comparison = page.locator(`[id="${await card.getByRole('button', { name: 'Hide before → after', exact: true }).getAttribute('aria-controls')}"]`);
+    const label = await box(comparison.getByText('Before', { exact: true }).first()), value = await box(comparison.locator('del').first());
+    expect(value.x).toBeGreaterThan(label.x + label.width - 1);
+    expect(Math.abs(value.y - label.y)).toBeLessThan(6);
+    // Seen: the whole row dims to half, the open Before → after panel with it (the board dims the row, not its parts).
+    await card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }).click();
+    await expect(card.locator('time')).toHaveCSS('opacity', '0.5');
+    await expect(comparison).toHaveCSS('opacity', '0.5');
+  });
+
   test(`M2 long absence leads with a calm summary, then the brief, and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec('changes-away'), theme });
     const popover = await openChanges(page);

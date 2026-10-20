@@ -42,12 +42,13 @@ describe('topic brief and shared catch-up', () => {
     value.unmount(); render(value.element()); open();
     expect(within(popover()).getByRole('button', { name: /Brief/ }).getAttribute('aria-expanded')).toBe('true');
   });
-  it('keeps a row’s ✓ Seen while the popover is open and drops it when reopened', async () => {
+  it('keeps a row, checked and dimmed, while the popover is open and drops it when reopened', async () => {
     const value = await setup(2);
     open();
     const row = screen.getByText('Updated name A').closest('li')!;
     fireEvent.click(within(row).getByRole('button', { name: 'Mark Updated name A seen' }));
-    expect(within(row).getByRole('button', { name: 'Updated name A is seen' }).textContent).toBe('✓ Seen');
+    expect((within(row).getByRole('button', { name: 'Updated name A is seen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(row.getAttribute('data-seen')).toBe('true');
     expect(within(row).queryByTestId('change-marker')).toBeNull();
     expect(value.navigation.reading.getSnapshot().some(patch => patch.items.some(item => item.item_id === 'updated-0'))).toBe(true);
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -142,6 +143,31 @@ describe('topic brief and shared catch-up', () => {
     expect(within(popover()).getByRole('region', { name: 'While you were away' })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     expect(value.transport.preferences.seen![0].items).toHaveLength(0);
+  });
+  it('draws the away summary as the board does: a status icon, a count and a label per line, names after, and three actions', async () => {
+    await setup(1, 1, 0, true);
+    open();
+    const away = within(popover()).getByRole('region', { name: 'While you were away' });
+    const lines = within(away).getAllByRole('listitem');
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line.querySelector('i[aria-hidden="true"]')).toBeTruthy();
+      expect(line.children[1]!.textContent).toMatch(/^\d+$/);
+    }
+    expect(within(away).getAllByRole('button').filter(button => button.getAttribute('data-kind')).map(button => button.getAttribute('data-kind')))
+      .toEqual(['outline', 'ghost']);
+  });
+  it('shows a change as a card whose Before → after opens a Before / After grid', async () => {
+    await setup(2);
+    open();
+    const row = screen.getAllByTestId('changes-row')[0]!;
+    expect(row.querySelector('time')).toBeTruthy();
+    const toggle = within(row).getByRole('button', { name: 'Before → after' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(within(row).getByRole('button', { name: 'Hide before → after' }).getAttribute('aria-expanded')).toBe('true');
+    expect(row.textContent).toMatch(/Before/);
+    expect(row.textContent).toMatch(/After/);
   });
   it('starts with what is waiting: the oldest question in the topic', async () => {
     const value = await setup(2, 0, 0, true);

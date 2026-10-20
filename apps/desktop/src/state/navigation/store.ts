@@ -55,6 +55,12 @@ export interface NavigationState {
   readonly pendingOperationId: string | null;
   readonly pendingNavigation: Immutable<NavigationSelection> | null;
   readonly reveal: RevealedItem | null;
+  /**
+   * Counts the navigations that asked to reveal an item (a link, Back or Forward, the peek's "Go to", the dock, a native route),
+   * moved when each is asked for, not when it publishes: publishing waits behind a pending save and the item lookup. The Graph
+   * drops the late answer to its own click when this moved since the click: the jump asked for last wins.
+   */
+  readonly revealAsks: number;
   readonly setup: Immutable<Extract<MutationReceipt, { session_id: string }>> | null;
   readonly setupAdapterId: string | null;
   /** The project whose page shows the setup card: the one the session was connected in. */
@@ -101,7 +107,7 @@ export class NavigationStore {
   readonly opened: OpenSessions;
   readonly routes: RegisteredRoutes;
   private state: NavigationState = Object.freeze({ lastSession: null, page: null, preferences: null, projects: null, sessions: null,
-    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, pendingNavigation: null, reveal: null, setup: null, setupAdapterId: null, setupProjectId: null });
+    sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, pendingNavigation: null, reveal: null, revealAsks: 0, setup: null, setupAdapterId: null, setupProjectId: null });
   private readonly listeners = new Set<() => void>();
   private subscriptions: Unsubscribe[] = [];
   private setup: Promise<void> | null = null;
@@ -807,7 +813,8 @@ export class NavigationStore {
         running: false, confirmed: false, fresh: !!this.pending, resolve, completion, confirm, timer };
     });
     // A page stays on screen until the destination is confirmed, so the old session never flashes back.
-    this.publish({ pendingNavigation: immutable(selection) });
+    this.publish({ pendingNavigation: immutable(selection),
+      ...(reveal || resolveReveal ? { revealAsks: this.state.revealAsks + 1 } : {}) });
     this.flushNavigation();
     return result;
   }

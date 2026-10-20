@@ -220,29 +220,52 @@
   text-decoration: underline;
 }
 
+/* SPEC 5.2: the closed brief is its head, then one line of counts under the caret's column. */
+.changes-section:has(> .changes-brief-head) {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
 .changes-brief-counts {
-  margin: 2px 0 0 calc(12px * var(--text-scale) + 8px);
+  margin: 0;
+  padding-left: 19px;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  line-height: 1.45;
 }
 
 .changes-brief-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 8px;
+  gap: 9px;
 }
 
 /* SPEC 5.2: a group is its label (with the status icon), then one row per name: the name, then its one-line text. */
+.brief-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .brief-group-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 0 2px;
+  gap: 7px;
+  margin: 0;
   font-size: inherit;
   font-weight: 500;
+  line-height: inherit;
+}
+
+.brief-group-label > i {
+  font-size: calc(14px * var(--text-scale));
 }
 
 .brief-group ul {
-  padding: 0 0 0 calc(12px * var(--text-scale) + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 0 21px;
   margin: 0;
   list-style: none;
 }
@@ -251,8 +274,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 8px;
-  padding: 1px 0;
+  gap: 1px 7px;
+  padding: 0;
+  line-height: 1.5;
 }
 
 .brief-names {
@@ -263,131 +287,344 @@
 .brief-line {
   flex: 1 1 14ch;
   min-width: 0;
-  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
 }
 
-.changes-catch-up {
-  margin-left: auto;
-  padding: 2px 9px;
-  border: 1px solid var(--a-edge-strong);
+/* SPEC 5.3: the head is the label and its meta on one line, with "Mark all caught up" at the right. */
+.changes-since-head {
+  align-items: center;
+  min-height: 26px;
+  padding-bottom: 2px;
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.changes-since-head .changes-label-caps {
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.changes-since-head > .change-muted {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: inherit;
+}
+
+.changes-catch-up,
+.changes-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  color: var(--color-text);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* SPEC 5.3: at the narrow window the button reads "All caught up". */
+@media (width <= 900px) {
+  .changes-catch-up-verb {
+    display: none;
+  }
+
+  .changes-catch-up-rest {
+    display: inline-block;
+  }
+
+  .changes-catch-up-rest::first-letter {
+    text-transform: uppercase;
+  }
+}
+
+/* SPEC 5.5: the three actions are 28px: filled, outlined, plain. */
+.changes-action {
+  height: 28px;
+  padding: 0 10px;
+}
+
+.changes-catch-up:hover,
+.changes-action:hover {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.changes-action[data-kind="primary"] {
+  gap: 6px;
+  padding: 0 11px 0 9px;
   border-radius: 6px;
-  background: var(--a-card);
-  font-size: inherit;
+  background: var(--a-acc-text);
+  box-shadow: none;
+  color: var(--a-bg);
+  font-size: calc(12.5px * var(--text-scale));
+  font-weight: 500;
+}
+
+.changes-action[data-kind="primary"]:hover {
+  background: color-mix(in srgb, var(--a-acc-text) 88%, var(--color-text));
+}
+
+.changes-action[data-kind="ghost"] {
+  box-shadow: none;
 }
 
 .changes-rows {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   padding: 0;
-  margin: 6px 0 0;
+  margin: 0;
   list-style: none;
 }
 
+/* SPEC 5.3: one card per change: icon, name line (pill, name, what), "› Before → after", time and a check at the right.
+   An open comparison tints the card. */
 .changes-row {
+  display: grid;
+  grid-template-columns: calc(14px * var(--text-scale)) minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 2px 8px;
+  margin: 0 -6px;
+  padding: 6px;
+  border-radius: 7px;
+}
+
+.changes-row:has(.change-comparison) {
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.changes-row > .status-badge-icon {
+  grid-area: 1 / 1;
+  margin-top: 2px;
+}
+
+.changes-line {
   display: flex;
+  grid-area: 1 / 2;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--color-divider);
+  align-items: baseline;
+  gap: 1px 8px;
+  min-width: 0;
+  line-height: 1.45;
 }
 
-.changes-row[data-seen] > *:not(.changes-seen, .change-compare) {
+.changes-row[data-seen] > :not(.change-compare, .changes-seen) {
   opacity: .5;
-}
-
-.changes-row .change-name {
-  padding: 0;
-  font-weight: 500;
 }
 
 /* Names in this popover read as the board's peekable names: text colour, underlined. */
 .changes-popover .change-name {
+  padding: 0;
   color: inherit;
   font-weight: 500;
   text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  text-underline-offset: 3px;
+  text-decoration-color: var(--a-edge);
 }
 
 .changes-popover .change-name:hover {
-  text-decoration-color: currentcolor;
+  text-decoration-color: var(--color-accent);
 }
 
 .changes-what {
-  flex: 1;
-  min-width: 0;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
 
-.changes-what[data-tone="new"] {
+/* A question waiting on the owner reads in the accent colour. */
+.changes-what[data-tone="ask"] {
   color: var(--a-acc-text);
 }
 
 .changes-time {
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  grid-area: 1 / 3;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font-size: calc(12px * var(--text-scale));
   font-variant-numeric: tabular-nums;
+  line-height: 1.6;
 }
 
 .changes-seen {
-  padding: 1px 8px;
+  display: grid;
+  grid-area: 1 / 4;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
-  font-size: inherit;
+  cursor: pointer;
+}
+
+.changes-seen:disabled {
+  color: var(--st-done);
+  cursor: default;
+}
+
+.changes-seen:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .changes-row .change-compare {
   display: contents;
 }
 
+.changes-row .change-compare-toggle {
+  grid-area: 2 / 2;
+  justify-self: start;
+}
+
+.changes-row[data-seen] .change-compare-toggle,
+.changes-row[data-seen] .changes-seen {
+  opacity: .5;
+}
+
 .changes-row .change-comparison {
-  flex-basis: 100%;
-}
-
-/* "› Before → after" sits on its own line under the row, in line with the pill; its card opens below it. */
-.changes-row .change-compare-link {
-  display: block;
-  flex-basis: 100%;
-  min-width: 0;
-  padding-left: calc(15px * var(--text-scale) + 8px);
-}
-
-.changes-row .change-compare-link .change-comparison {
+  display: grid;
+  grid-area: 3 / 2 / 3 / -1;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
   box-sizing: border-box;
-  margin: 4px 0 2px;
+  margin: 4px 0 0;
   padding: 8px 10px;
   border-radius: 6px;
   background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
 }
 
-.changes-away p {
-  margin: 0 0 6px;
+/* The compare wrapper is `display: contents`, so the seen dim on the row's children skips it: the open panel dims here, as the board dims the row. */
+.changes-row[data-seen] .change-comparison {
+  opacity: .5;
+}
+
+/* SPEC 5.3: Before / After / Why are a label column and a text column; a change of one field needs no field name. */
+.changes-row .change-field,
+.changes-row .change-field > span {
+  display: contents;
+}
+
+.changes-row .change-field > strong {
+  grid-column: 1 / -1;
+  font-weight: 500;
+}
+
+.changes-row .change-comparison[data-single] .change-field:has(.change-value-label) > strong {
+  display: none;
+}
+
+.changes-row .change-value-label {
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.changes-row .change-field del {
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+  text-decoration: none;
+}
+
+.changes-row .change-field mark {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.changes-away {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.changes-away-lead {
+  margin: 0;
+  font-size: calc(14px * var(--text-scale));
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .changes-away-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
+/* SPEC 5.5: icon, bold count, label, then the names on one muted line. */
 .changes-away-list li {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 6px;
-  padding: 2px 0;
+  gap: 9px;
+  padding: 5px 0;
+  line-height: 1.45;
+}
+
+.changes-away-icon {
+  flex: none;
+  font-size: calc(14px * var(--text-scale));
+  transform: translateY(2px);
+}
+
+.changes-away-count {
+  flex: none;
+  min-width: 2ch;
+  font-weight: 500;
+  text-align: right;
+}
+
+.changes-away-label {
+  flex: none;
+  font-weight: 500;
 }
 
 .changes-away-names {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-popover .changes-away-names .change-name {
+  padding: 0;
+  color: inherit;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.changes-popover .changes-away-names .change-name:hover {
+  text-decoration: underline;
+}
+
+.changes-away-names .change-muted {
+  color: inherit;
 }
 
 .changes-away-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  padding-top: 2px;
+  margin-top: 0;
 }
 
 .changes-caught-up {

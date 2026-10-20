@@ -1364,6 +1364,22 @@ describe('session tree filters', () => {
     rerender({ reveal: null, selectedId: null });
     await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull()); expect(ids()).toEqual(['2']);
   });
+  it('ends the outside-filter notice for a reveal the Graph dismissed, keeps drawing the item, and raises it again for a new reveal', async () => {
+    const { transport, store, rerender } = await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['waiting_on_me']; viewOf(transport).expanded_item_ids = [];
+    } });
+    render(<Notices />);
+    const reveal: RevealedItem = { kind: 'item', route: { ...route, item_id: '1.1' }, store, temporaryExpandedItemIds: ['1'] };
+    rerender({ reveal, selectedId: '1.1' });
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    rerender({ reveal, selectedId: '1.1', bannerDismissed: true });
+    await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull());
+    // Only the notice goes: the item is still drawn, and the saved view is untouched.
+    expect(ids()).toEqual(['1', '1.1', '2']);
+    expect(viewOf(transport).selected_item_id).toBeNull();
+    rerender({ reveal: { ...reveal }, selectedId: '1.1', bannerDismissed: false });
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
+  });
   it('holds the chips while a preference write is unconfirmed', async () => {
     const { transport } = await mount();
     transport.failNext = 'preferences_patch';
