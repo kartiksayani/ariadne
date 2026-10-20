@@ -18,7 +18,7 @@ for (const width of [1100, 1200, 1299]) {
       await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
       await page.setViewportSize({ width, height: 700 });
       await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?still`);
-      const bar = page.locator('header.tb');
+      const bar = page.getByRole('banner');
       await expect(bar).toBeVisible();
       await expect(bar).not.toHaveClass(/tb-narrow/);
       await page.evaluate(async () => { await document.fonts.ready; });
