@@ -519,6 +519,34 @@ async function isolated(configuration, original, journal, demoBytes) {
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBytes);
 }
 
+const treeSessionStatus = () => browser.execute(() => document.querySelector('.tree-column')?.getAttribute('data-session-status') ?? null);
+const revealNotice = () => browser.execute(() => document.querySelector('.pw-note[data-notice-id="tree-reveal-failed"] .pw-note-text')?.textContent ?? null);
+// Click a row and wait for its selection to persist. The app refuses a click while the session store is not ready (the retryable
+// notice 'Ariadne is still loading this session's latest changes'). Wait for ready first; on one refusal, record it, dismiss it and click once more.
+async function selectRow(tree, id, message) {
+  const ready = () => wait(async () => await treeSessionStatus() === 'ready', `The tree was not ready before clicking ${id}`);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await ready();
+    const clickedAt = new Date().toISOString();
+    await (await row(id)).click();
+    let refusal = null;
+    await wait(async () => {
+      if ((await preferences(tree)).view.selected_item_id === id) return true;
+      refusal = await revealNotice();
+      return refusal !== null;
+    }, message);
+    if (refusal === null) return;
+    const sessionStatus = await treeSessionStatus();
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, `tree-reveal-refused-${id}-attempt-${attempt}.json`),
+      JSON.stringify({ id, attempt, notice: refusal, sessionStatus, clickedAt, observedAt: new Date().toISOString() }, null, 2));
+    if (attempt === 2) break;
+    const dismiss = await browser.$('.pw-note[data-notice-id="tree-reveal-failed"] .pw-note-dismiss');
+    if (await dismiss.isExisting()) await dismiss.click();
+    await wait(async () => await revealNotice() === null, 'The refused-reveal notice did not close');
+  }
+  throw new Error(message);
+}
+
 export async function runTreeAcceptance(configuration) {
   try { await treeAcceptance(configuration); }
   catch (error) {
@@ -528,6 +556,7 @@ export async function runTreeAcceptance(configuration) {
     try {
       const observed = await browser.execute(() => ({
         viewport: { width: window.innerWidth, height: window.innerHeight },
+        sessionStatus: document.querySelector('.tree-column')?.getAttribute('data-session-status') ?? null,
         visibilityState: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus(),
         measurement: window.__ariadneTreeMeasurement, filterAction: window.__ariadneTreeFilterAction,
         rows: [...document.querySelectorAll('.tree-rows [role="treeitem"]')].slice(0, 2000)
@@ -649,7 +678,7 @@ async function treeAcceptance(configuration) {
   await browser.$('button=Show them').click();
   await wait(async () => (await visibleIds()).includes('1.1'), 'Show them did not reveal the matching item');
   assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Show them must not save a fold');
-  await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
+  await (await search()).waitForEnabled(); await selectRow(tree, '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
   // Home lands on the topic band (no item id); → steps into its first row; ← goes back to the parent (h and l are gone: SPEC 6.1).
   for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '20.99'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
@@ -657,8 +686,7 @@ async function treeAcceptance(configuration) {
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
   await (await search()).waitForEnabled(); await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
-  await (await search()).waitForEnabled(); await (await row('1.1')).click();
-  await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
+  await (await search()).waitForEnabled(); await selectRow(tree, '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
   // A search it does not match hides nothing and raises no banner; the selection stays.
