@@ -555,6 +555,8 @@ export async function runTreeAcceptance(configuration) {
 }
 async function treeAcceptance(configuration) {
   const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  // The visible screen: a screen smaller than the minimum lowers it, so the window still fits (CI's screen is 1024×768).
+  const screenArea = await browser.execute(() => ({ width: window.screen.availWidth, height: window.screen.availHeight }));
   const nativeWindow = await browser.execute(async () => {
     try {
       const physical = await window.__TAURI_INTERNALS__.invoke('plugin:window|outer_size', { label: 'main' });
@@ -562,10 +564,10 @@ async function treeAcceptance(configuration) {
       return { ok: true, physical, scaleFactor, logical: { width: physical.width / scaleFactor, height: physical.height / scaleFactor } };
     } catch (error) { return { ok: false, message: String(error) }; }
   });
-  await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-window.json'), JSON.stringify({ viewport, nativeWindow }, null, 2));
+  await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-window.json'), JSON.stringify({ viewport, screenArea, nativeWindow }, null, 2));
   assert.equal(nativeWindow.ok, true, nativeWindow.message);
-  assert.ok(nativeWindow.logical.width >= 1100 && nativeWindow.logical.height >= 760,
-    'Native tree acceptance must use the supported minimum outer-window size');
+  assert.ok(nativeWindow.logical.width >= Math.min(1100, screenArea.width) - 1 && nativeWindow.logical.height >= Math.min(760, screenArea.height) - 1,
+    'Native tree acceptance must use the supported minimum outer-window size, or the visible screen when that is smaller');
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-publication.json'), JSON.stringify({ tree, publication, initialSession }, null, 2));

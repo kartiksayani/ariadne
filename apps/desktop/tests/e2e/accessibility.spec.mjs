@@ -11,6 +11,8 @@ const active = selector => browser.execute(selector => document.activeElement ==
 // writes only a retained preference draft; it never submits demo owner work.
 export async function runAccessibilityAcceptance(configuration) {
   const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  // The visible screen: a screen smaller than the minimum lowers it, so the window still fits (CI's screen is 1024×768).
+  const screenArea = await browser.execute(() => ({ width: window.screen.availWidth, height: window.screen.availHeight }));
   const nativeWindow = await browser.execute(async () => {
     try {
       const physical = await window.__TAURI_INTERNALS__.invoke('plugin:window|outer_size', { label: 'main' });
@@ -19,10 +21,10 @@ export async function runAccessibilityAcceptance(configuration) {
     } catch (error) { return { ok: false, message: String(error) }; }
   });
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-minimum-window.json'), { actualWebView: true,
-    viewport, nativeWindow, minimum: { width: 1100, height: 760 } });
+    viewport, screenArea, nativeWindow, minimum: { width: 1100, height: 760 } });
   assert.equal(nativeWindow.ok, true, nativeWindow.message);
-  assert.ok(nativeWindow.logical.width >= 1100 && nativeWindow.logical.height >= 760,
-    'Ordinary native window must reach minimum outer size 1100×760');
+  assert.ok(nativeWindow.logical.width >= Math.min(1100, screenArea.width) - 1 && nativeWindow.logical.height >= Math.min(760, screenArea.height) - 1,
+    'Ordinary native window must reach minimum outer size 1100×760, or the visible screen when that is smaller');
   const before = await readFile(configuration.demo.sessionPath);
   await openSession(configuration.demo.session_id);
   // An open item keeps its reply box docked in Details, so Reply focuses a text editor (a waiting item's Reply lands on its
