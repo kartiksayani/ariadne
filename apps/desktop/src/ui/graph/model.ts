@@ -35,9 +35,8 @@ const COLUMN_MIN = 150, COLUMN_MAX = 196, NODE_GAP = 26;
 
 /**
  * SPEC 1.3's column, `clamp(150, floor((mapW − 56) / 5), 196)`. Deviation (maintainer, alpha.20): the view fits it to
- * the Map's width (as it is with Details folded, so the names fit on one line) only when the Graph opens or the session
- * changes, never on a Details or window width change, because re-fitting slides every node sideways and the Map never moves
- * on its own.
+ * the Map's width at that moment (Details open or not) only when the Graph opens or the session changes, never on a
+ * Details or window width change, because re-fitting slides every node sideways and the Map never moves on its own.
  */
 export const graphColumn = (mapWidth: number): number => Math.min(COLUMN_MAX, Math.max(COLUMN_MIN, Math.floor((mapWidth - 56) / 5)));
 export const nodeWidth = (column: number): number => column - NODE_GAP;

@@ -44,7 +44,18 @@ class ScopeTests(unittest.TestCase):
             (["crates/ariadne-core/tests/Cargo.toml"], ("application", True)),
             (["crates/ariadne-core/README.md"], ("application", False)),
             (["crates/ariadne-core-extra/src/fake.rs"], ("application", False)),
-            (["crates/ariadne-domain/src/validation.rs"], ("application", False)),
+            (["crates/ariadne-domain/src/validation/mod.rs"], ("application", True)),
+            (["crates/ariadne-domain/src/history/mod.rs"], ("application", True)),
+            (["crates/ariadne-domain/src/lib.rs"], ("application", True)),
+            (["crates/ariadne-domain/src/README.md"], ("application", False)),
+            (["crates/ariadne-domain/tests/schema.rs"], ("application", False)),
+            # What the saved data looks like: the previous release must still read it.
+            (["crates/ariadne-store/src/session/mod.rs"], ("application", True)),
+            (["crates/ariadne-store/src/ui.rs"], ("application", True)),
+            (["crates/ariadne-domain/src/models/entities.rs"], ("application", True)),
+            (["crates/ariadne-store/tests/ui.rs"], ("application", False)),
+            (["crates/ariadne-store/README.md"], ("application", False)),
+            (["crates/ariadne-store-extra/src/fake.rs"], ("application", False)),
             (["apps/desktop/src-tauri/src/lib.rs"], ("application", True)),
             (["apps/desktop/vite.config.ts"], ("application", True)),
             (["apps/desktop/src/main.tsx"], ("application", True)),
@@ -272,7 +283,8 @@ class LintTests(unittest.TestCase):
 class CoverageTests(unittest.TestCase):
     def test_ci_exports_independent_xtask_report_from_workspace_profiles(self):
         for changed, native_command in [
-            ("crates/ariadne-domain/src/validation.rs", "test:native"),
+            ("crates/ariadne-domain/tests/schema.rs", "test:native"),
+            ("crates/ariadne-domain/src/validation/mod.rs", "test:e2e"),
             ("crates/ariadne-core/src/service.rs", "test:e2e"),
             ("crates/ariadne-core/tests/native.rs", "test:native"),
             ("crates/ariadne-agent-protocol/tests/contract.rs", "test:native"),

@@ -587,7 +587,7 @@ macro_rules! mutations {
             // current global preferences rather than reapplying captured values.
             notify_native_preferences(&request.command, &envelope, || {
                 if let Some(window) = app.try_state::<crate::native::window::NativeWindow>() {
-                    window.reconcile(app.clone(), false);
+                    window.reconcile(app.clone(), crate::native::window::Fit::Keep);
                 }
             }, || {
                 if let Some(tray) = app.try_state::<crate::native::tray::NativeTray>() {

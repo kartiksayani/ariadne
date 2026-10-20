@@ -63,13 +63,17 @@ impl ClaudeFiles {
         let project = root.path().join("project");
         fs::create_dir(&project).unwrap();
         let helper = root.path().join("ariadne");
-        fs::write(&helper, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne 0.1.0'\n").unwrap();
+        fs::write(&helper, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne {}'\n", env!("CARGO_PKG_VERSION"))).unwrap();
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         for root in [&installed, &loaded] {
             for (name, bytes) in [
                 (
                     ".claude-plugin/plugin.json",
-                    "{\"name\":\"ariadne\",\"version\":\"0.1.0\"}",
+                    concat!(
+                        "{\"name\":\"ariadne\",\"version\":\"",
+                        env!("CARGO_PKG_VERSION"),
+                        "\"}"
+                    ),
                 ),
                 ("hooks/hooks.json", "{}"),
                 ("hooks/register.js", "// register"),
@@ -100,7 +104,7 @@ impl ClaudeFiles {
                 installed_plugin: installed,
                 helper,
                 project_root: project,
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
             },
             loaded,
         }
@@ -140,7 +144,7 @@ fn announcement(root: &Path) -> SessionAnnouncement {
         },
         descriptor: ModDescriptor {
             helper_path: "/Applications/Ariadne/helper".into(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
             api_version: 1,
         },
         binding_scope: None,
@@ -286,6 +290,115 @@ fn qualification_replaces_slots_but_heartbeats_do_not_refresh_prior_evidence() {
         .unwrap();
     assert_eq!(files.availability(&rt, new), Availability::Unavailable);
     assert!(core.history().unwrap().is_empty());
+    server.stop(&rt);
+}
+
+const OLDER_ALPHA: &str = "0.1.0-alpha.21";
+
+/// What the app remembers about one announcing conversation: whether its plugin was refused as not the app's version.
+fn plugin_mismatch(d: &Discovery) -> bool {
+    d.snapshot().unwrap().candidates[0].plugin_mismatch
+}
+fn qualify_once(d: &Discovery, options: &ClaudeOptions) -> Result<(), ariadne_core::CoreError> {
+    let selected = d.snapshot().unwrap().candidates.remove(0);
+    d.qualify_claude_host_before(
+        selected,
+        options.clone(),
+        ModEvidenceSlot::default(),
+        std::time::Instant::now() + Duration::from_secs(5),
+    )
+    .map(|_| ())
+}
+
+/// The three ways a plugin and an app can disagree, and one refusal that is not a disagreement. The cause stays on the
+/// announcing conversation, survives its repeat heartbeats, and goes when the claims change or a qualification succeeds.
+#[test]
+fn a_plugin_that_does_not_match_the_app_is_remembered_until_the_conversation_qualifies() {
+    let home = home();
+    let rt = runtime();
+    let d = Discovery::new(Arc::new(time), None);
+    let core = Arc::new(ScriptedCoreService::new([]));
+    let server = Running::start(&rt, home.path(), core, Some(d.clone()));
+    let announce = |a: &SessionAnnouncement| {
+        rt.block_on(call(home.path().into(), request(a.clone())))
+            .unwrap();
+    };
+
+    // An older plugin, a newer app: the plugin announces the version it was installed with.
+    let files = ClaudeFiles::new();
+    let mut old_plugin = files.announcement();
+    old_plugin.descriptor.app_version = OLDER_ALPHA.into();
+    announce(&old_plugin);
+    assert!(
+        !plugin_mismatch(&d),
+        "nothing is refused before a qualification"
+    );
+    let refused = qualify_once(&d, &files.options).unwrap_err();
+    assert_eq!(refused.code, CoreErrorCode::IncompatibleAdapter);
+    assert!(plugin_mismatch(&d));
+    // The same claims heartbeat again: still the same cause.
+    announce(&old_plugin);
+    assert!(plugin_mismatch(&d));
+    // The owner reloads the plugin: new claims, no remembered cause, and the next qualification succeeds.
+    announce(&files.announcement());
+    assert!(!plugin_mismatch(&d));
+    qualify_once(&d, &files.options).unwrap();
+    assert!(!plugin_mismatch(&d));
+
+    // A newer plugin, an older app: the app's own version is the one that differs.
+    let mut old_app = files.options.clone();
+    old_app.app_version = OLDER_ALPHA.into();
+    qualify_once(&d, &old_app).unwrap_err();
+    assert!(plugin_mismatch(&d));
+    // The next successful qualification clears it.
+    qualify_once(&d, &files.options).unwrap();
+    assert!(!plugin_mismatch(&d));
+
+    // A newer plugin whose helper is an older build: the helper answers with the old version.
+    let helper = files.options.helper.clone();
+    fs::write(
+        &helper,
+        format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne {OLDER_ALPHA}'\n"),
+    )
+    .unwrap();
+    qualify_once(&d, &files.options).unwrap_err();
+    assert!(plugin_mismatch(&d));
+
+    // A refusal that is not a disagreement (the announced helper can't be found) is not reported as one.
+    let other = ClaudeFiles::new();
+    let mut lost = other.announcement();
+    lost.external_session_id = "another-session".into();
+    lost.descriptor.helper_path = other
+        .options
+        .helper
+        .with_extension("gone")
+        .to_str()
+        .unwrap()
+        .into();
+    announce(&lost);
+    let selected = d
+        .snapshot()
+        .unwrap()
+        .candidates
+        .into_iter()
+        .find(|candidate| candidate.external_session_id == "another-session")
+        .unwrap();
+    let refused = d
+        .qualify_claude_host_before(
+            selected,
+            other.options.clone(),
+            ModEvidenceSlot::default(),
+            std::time::Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap_err();
+    assert_eq!(refused.code, CoreErrorCode::IncompatibleAdapter);
+    assert!(d
+        .snapshot()
+        .unwrap()
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.external_session_id == "another-session")
+        .all(|candidate| !candidate.plugin_mismatch));
     server.stop(&rt);
 }
 

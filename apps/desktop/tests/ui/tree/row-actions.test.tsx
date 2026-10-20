@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { ItemRow, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
+import { ItemRow, placeActions, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
+import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { TopicRow, type TopicAction, type TopicRowProps } from '../../../src/ui/tree/TopicRow';
 
 afterEach(cleanup);
@@ -37,6 +38,31 @@ describe('compact row actions', () => {
     expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
   });
 
+  // owner 2026-10-20: visible Ack target. Only the Ack names where it leads; the hover bar's buttons stay icons.
+  it.each(['→ Done', '→ Decided', '→ Dropped', '→ Open', '→ In progress'])('shows "%s" after the Ack check and keeps the hover bar icon-only', label => {
+    const props = itemProps([{ title: `Ack ${label}`, label, icon: 'ph ph-check', persistent: true, run: vi.fn() }, { title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const { container } = render(<ItemRow {...props} />);
+    const ack = within(container.querySelector('.tree-ack-slot') as HTMLElement).getByRole('button', { name: `Ack ${label}` });
+    expect(ack.textContent).toBe(label);
+    expect(ack.firstElementChild?.className).toContain('ph-check');
+    expect(ack.querySelector('.tree-action-label')?.textContent).toBe(label);
+    expect(within(container.querySelector('.tree-actions') as HTMLElement).getByRole('button', { name: 'Reply (r)' }).textContent).toBe('');
+    expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
+  });
+
+  it('keeps the 22px Ack slot on a row with no Ack, and the wide one through the 6 s hold', () => {
+    const bare = render(<ItemRow {...itemProps([])} />);
+    expect(bare.container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(false);
+    bare.unmount();
+    const props = itemProps([{ title: 'Ack → Done', label: '→ Done', icon: 'ph ph-check', persistent: true, run: vi.fn() }]);
+    const { container, rerender } = render(<ItemRow {...props} />);
+    expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
+    // Held: the button is replaced by "Acked · Undo", and the cluster stays as wide so the row does not rewrap until the Ack is saved.
+    rerender(<ItemRow {...props} acked onUndoAck={vi.fn()} />);
+    expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
+    expect(container.querySelector('.tree-acked')).not.toBeNull();
+  });
+
   it('draws a held Ack over the area left of the Ack slot, hides the Ack button, and Undo cancels it', () => {
     const undo = vi.fn(), ack = vi.fn(), props = itemProps([{ title: 'Ack → Done', icon: 'ph ph-check', persistent: true, run: ack }]);
     const { container, rerender } = render(<ItemRow {...props} />);
@@ -61,8 +87,8 @@ describe('compact row actions', () => {
       ...(index === 0 ? { persistent: true } : {}),
       ...(title === 'Hide (x)' ? { glyph: <svg aria-hidden="true" data-testid="hide-icon" /> } : {}) }));
     const props = itemProps(actions), { container } = render(<ItemRow {...props} />);
-    // The end cluster holds both: the floating hover bar in order, then Ack in its own reserved slot at the end.
-    const cluster = container.querySelector('.tree-end')!, buttons = within(cluster as HTMLElement).getAllByRole('button');
+    // The row holds both: the floating hover bar in order, then Ack in its own reserved slot at the end of the cluster.
+    const cluster = container.querySelector('.tree-item')!, buttons = within(cluster as HTMLElement).getAllByRole('button');
     const shown = [...names.slice(1), names[0]!], byTitle = new Map(actions.map(action => [action.title, action]));
     expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(shown);
     expect(buttons.map(button => button.title)).toEqual(shown);
@@ -93,13 +119,14 @@ describe('compact row actions', () => {
       { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
     ]);
     const { container, rerender } = render(<ItemRow {...props} />);
-    const row = container.querySelector('.tree-item')!, grid = container.querySelector('.tree-end')!, before = grid.innerHTML;
+    const row = container.querySelector('.tree-item')!, grid = row;
+    const markup = () => `${container.querySelector('.tree-actions')!.innerHTML}|${container.querySelector('.tree-end')!.innerHTML}`, before = markup();
     const button = within(grid as HTMLElement).getByRole('button', { name: 'Ack → Done' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     fireEvent.click(button); expect(ack).not.toHaveBeenCalled();
     fireEvent.mouseEnter(row);
     rerender(<ItemRow {...props} selected />);
-    expect(container.querySelector('.tree-end')?.innerHTML).toBe(before);
+    expect(markup()).toBe(before);
     expect(within(grid as HTMLElement).getByRole('button', { name: 'Reply (r)' }).tabIndex).toBe(-1);
     const selections = vi.mocked(props.onSelect).mock.calls.length;
     fireEvent.click(within(grid as HTMLElement).getByRole('button', { name: 'Reply (r)' }));
@@ -124,6 +151,116 @@ describe('compact row actions', () => {
     expect(props.onSelect).toHaveBeenCalledWith(props.row.item.id);
     expect(later).not.toHaveBeenCalled();
     expect(reply).not.toHaveBeenCalled();
+  });
+
+  // The bar floats above the row unless the sticky band or the top of the Map/window is closer than its reach (24px).
+  it.each([
+    ['plenty of room under a band', { row: 200, band: 80, scroll: 40 }, 'above'],
+    ['exactly the bar\'s reach under the band', { row: 104, band: 80, scroll: 40 }, 'above'],
+    ['a pixel short of the reach under the band', { row: 103, band: 80, scroll: 40 }, 'below'],
+    ['the first row right under the band', { row: 80, band: 80, scroll: 40 }, 'below'],
+    ['partly under the sticky band', { row: 60, band: 80, scroll: 40 }, 'below'],
+    ['no band: room above the Map\'s top', { row: 90, band: null, scroll: 40 }, 'above'],
+    ['no band: the first row at the Map\'s top', { row: 40, band: null, scroll: 40 }, 'below'],
+    ['no band and no Map: the window\'s top', { row: 10, band: null, scroll: null }, 'below'],
+    ['a row taller than the window, its top under the band', { row: 60, band: 80, scroll: 40, height: 900 }, 'inside'],
+    ['a row whose bottom is exactly the bar\'s reach from the Map\'s bottom', { row: 60, band: 80, scroll: 40, height: 516 }, 'below'],
+    ['a row whose bottom is a pixel short of the bar\'s reach', { row: 60, band: 80, scroll: 40, height: 517 }, 'inside'],
+  ] as const)('puts the hover bar %s: %s', (_name, at, side) => {
+    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const group = document.createElement('div'), scroller = document.createElement('div');
+    group.className = 'tree-topic-group'; scroller.className = 'tree-scroll';
+    const height = 'height' in at ? at.height : 30, rect = (top: number) => ({ top, bottom: top + height }) as DOMRect;
+    // The Map runs from `scroll` to 600; the band is 30px high and ends at `band`.
+    if (at.scroll !== null) { scroller.append(group); scroller.getBoundingClientRect = () => ({ top: at.scroll, bottom: 600 }) as DOMRect; }
+    document.body.append(at.scroll !== null ? scroller : group);
+    if (at.band !== null) {
+      const band = document.createElement('div'); band.className = 'tree-topic';
+      band.getBoundingClientRect = () => ({ top: at.band - 30, bottom: at.band }) as DOMRect; group.append(band);
+    }
+    const { container } = render(<ItemRow {...props} />, { container: group.appendChild(document.createElement('div')) });
+    const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
+    expect(bar.dataset.side).toBe('above');
+    row.getBoundingClientRect = () => rect(at.row);
+    fireEvent.mouseEnter(row);
+    expect(bar.dataset.side).toBe(side);
+    // Inside a tall row it sits in the first visible spot below the cluster (here: the band's bottom plus a little); elsewhere it sets no top.
+    expect(bar.style.top).toBe(side === 'inside' ? `${at.band! - at.row + 4}px` : '');
+    // It follows the row as the Map scrolls under a resting pointer, and never changes the rendered tree otherwise.
+    row.getBoundingClientRect = () => rect(at.row + 500);
+    fireEvent.mouseMove(row);
+    expect(bar.dataset.side).toBe('above');
+    row.getBoundingClientRect = () => rect(at.row);
+    fireEvent.focus(row);
+    expect(bar.dataset.side).toBe(side);
+    expect(placeActions(row, null)).toBeUndefined();
+    scroller.remove(); group.remove();
+  });
+
+  // The answer dock covers the bottom of the Map (TreeView `visibleBottom` subtracts its inset): a bar that would land under it goes
+  // above, or inside, instead.
+  it.each([
+    ['no dock: room below the row', 0, 'below'],
+    ['a dock that leaves the bar\'s reach below the row', 100, 'below'],
+    ['a dock that covers the space right under the row', 740, 'inside'],
+  ] as const)('counts the dock when it picks the side of the hover bar: %s', (_name, inset, side) => {
+    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    // The window is 768px high in jsdom; the row is at its top (no room above), 30px high, so its bottom edge is at 40.
+    const { container } = render(<DockInsetProvider height={inset}><ItemRow {...props} /></DockInsetProvider>);
+    const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
+    row.getBoundingClientRect = () => ({ top: 10, bottom: 40, right: 500 }) as DOMRect;
+    fireEvent.mouseEnter(row);
+    expect(bar.dataset.side).toBe(side);
+    // With room above (a dock under a row near the bottom): the bar stays above.
+    row.getBoundingClientRect = () => ({ top: 700, bottom: 730, right: 500 }) as DOMRect;
+    fireEvent.mouseMove(row);
+    expect(bar.dataset.side).toBe('above');
+    row.getBoundingClientRect = () => ({ top: 10, bottom: 40, right: 500 }) as DOMRect;
+    expect(placeActions(row, bar, inset)).toBeUndefined();
+    expect(bar.dataset.side).toBe(side);
+    expect(placeActions(row, bar, 0)).toBeUndefined();
+    expect(bar.dataset.side).toBe('below');
+  });
+
+  // Above or below, the bar ends where the end cluster begins, so it never covers the Ack, status pill or related count of the row it
+  // floats over (a deeper neighbour's cluster starts further left, and counts too). Inside a tall row it stays under the cluster.
+  it.each([
+    ['above: the row alone', 'above', 340, null, '160px'],
+    ['above: a deeper row above, whose cluster starts further left', 'above', 340, 328, '172px'],
+    ['above: a shallower row above does not push the bar left', 'above', 340, 346, '160px'],
+    ['below: a deeper row below', 'below', 340, 322, '178px'],
+  ] as const)('ends the hover bar at the end cluster %s', (_name, side, own, neighbour, right) => {
+    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const { container } = render(<ItemRow {...props} />);
+    const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
+    const at = (left: number) => () => ({ left, bottom: 0 }) as DOMRect;
+    row.querySelector('.tree-end')!.getBoundingClientRect = at(own);
+    if (neighbour !== null) {
+      const other = document.createElement('div'), end = document.createElement('div');
+      other.className = 'tree-item'; end.className = 'tree-end'; end.getBoundingClientRect = at(neighbour); other.append(end);
+      if (side === 'above') row.before(other); else row.after(other);
+    }
+    // 'above' needs room over the row; 'below' needs none (it is at the top of the window).
+    const top = side === 'above' ? 200 : 10;
+    row.getBoundingClientRect = () => ({ top, bottom: top + 30, right: 500 }) as DOMRect;
+    fireEvent.mouseEnter(row);
+    expect(bar.dataset.side).toBe(side);
+    expect(bar.style.right).toBe(right);
+    // Inside a row taller than the window it sits under the cluster, at the stylesheet's own right edge.
+    row.getBoundingClientRect = () => ({ top: -500, bottom: 5000, right: 500 }) as DOMRect;
+    fireEvent.mouseMove(row);
+    expect(bar.dataset.side).toBe('inside');
+    expect(bar.style.right).toBe('');
+  });
+
+  it('keeps the hover bar a direct child of the row, not of the end cluster, and a row without actions has none to place', () => {
+    const { container } = render(<ItemRow {...itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }])} />);
+    const row = container.querySelector('.tree-item')!;
+    expect(row.querySelector(':scope > .tree-actions')).not.toBeNull();
+    expect(row.querySelector('.tree-end .tree-actions')).toBeNull();
+    const none = render(<ItemRow {...itemProps([])} />);
+    fireEvent.mouseEnter(none.container.querySelector('.tree-item')!);
+    expect(none.container.querySelector('.tree-actions')).toBeNull();
   });
 
   it('retains item metadata without an empty hover bar, and keeps the empty Ack slot so an Ack never rewraps the row', () => {

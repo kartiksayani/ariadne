@@ -5,7 +5,7 @@ import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { isBlocked } from '../../../src/selectors/tree/blocked';
 import {
-  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, loadLocalChips, pickedChips, saveLocalChips, toggleLocalChip, toggleSavedChip,
+  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, loadLocalChips, pickedChips, saveLocalChips, savedChipEdit, setSavedChip, toggleLocalChip, toggleSavedChip,
   type Chip, type FilterScope, type LocalChip,
 } from '../../../src/selectors/tree/filter';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -241,6 +241,34 @@ describe('saved and local toggles', () => {
   });
   it('treats a complete saved set as no filter when toggling', () => {
     expect(toggleSavedChip(['waiting_on_me', 'open', 'in_progress', 'decided', 'done', 'dropped', 'replaced'], 'open')).toEqual(['open']);
+  });
+  it.each<[string, ItemStatus[], Chip]>([
+    ['every status but done, picking Done', ['waiting_on_me', 'open', 'in_progress', 'decided', 'dropped', 'replaced'], 'done'],
+    ['every status but done, no dropped, picking Done', ['waiting_on_me', 'open', 'in_progress', 'decided', 'replaced'], 'done'],
+    ['every status but open, picking Open', ['waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced'], 'open'],
+    ['no filter, picking Open', [], 'open'],
+    ['Open alone, dropping Open', ['open'], 'open'],
+    ['a lone dropped, picking Done', ['dropped'], 'done'],
+    ['a local chip', ['open'], 'sent'],
+  ])('a chip edit applied to its own result changes nothing: %s', (_name, seen, chip) => {
+    const edit = savedChipEdit(seen, chip);
+    const once = edit(seen);
+    expect(once).toEqual(toggleSavedChip(seen, chip));
+    expect(edit(once)).toEqual(once);
+    expect(edit(edit(once))).toEqual(once);
+  });
+  it('edits made together on the same seen statuses still compose', () => {
+    const open = savedChipEdit([], 'open'), progress = savedChipEdit([], 'progress');
+    expect(progress(open([]))).toEqual(['open', 'in_progress']);
+    // Replaying either on the composed result changes nothing.
+    expect(open(progress(open([])))).toEqual(['open', 'in_progress']);
+    expect(progress(progress(open([])))).toEqual(['open', 'in_progress']);
+  });
+  it('shows why the pick alone is not enough: Done on every status but done saves no filter, and picking again would filter', () => {
+    const legacy: ItemStatus[] = ['waiting_on_me', 'open', 'in_progress', 'decided', 'dropped', 'replaced'];
+    expect(setSavedChip(legacy, 'done', true)).toEqual([]);
+    expect(setSavedChip([], 'done', true)).toEqual(['done']);
+    expect(savedChipEdit(legacy, 'done')([])).toEqual([]);
   });
   it('toggles local chips in a stable order', () => {
     expect(toggleLocalChip(['sent'], 'toack')).toEqual(['toack', 'sent']);

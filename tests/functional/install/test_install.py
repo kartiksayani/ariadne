@@ -1074,29 +1074,91 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(installer.uninstall(self.home), [])
         self.assertFalse(installer.exists(self.home / "Applications/Ariadne.app"))
 
-    def test_replacing_names_every_version_it_removes(self):
+    def test_replacing_a_version_leaves_every_other_version_untouched(self):
         _, package = self.extract()
         self.make_artifacts("0.0.9")
         installer.install(self.home, self.artifacts, self.facts)
         self.make_artifacts()
         final = self.install_over(package)
         self.assertEqual(sorted(os.listdir(self.root / "versions")), ["0.0.9", "0.1.0"])
+        other = self.root / "versions/0.0.9"
+        # Even a changed file in the other version neither blocks the replacement nor is touched by it.
+        (other / "integrations/rules/claude.md").write_bytes(b"owner edited")
+        other_before = {str(path.relative_to(other)): path.read_bytes()
+                        for path in sorted(other.rglob("*")) if path.is_file() and not path.is_symlink()}
         self.output.truncate(0)
         self.output.seek(0)
         self.install_over(package)
-        self.assertIn("Replacing the Ariadne 0.1.0 already installed, and removing the other installed versions "
-                      "0.0.9 with it (your projects and history are kept).", self.output.getvalue())
-        self.assertEqual(os.listdir(self.root / "versions"), ["0.1.0"])
-        # A changed file in the other version blocks the replacement before anything is removed.
+        self.assertIn(self.replacing_line(), self.output.getvalue())
+        self.assertNotIn("other installed versions", self.output.getvalue())
+        self.assertEqual(sorted(os.listdir(self.root / "versions")), ["0.0.9", "0.1.0"])
+        self.assertEqual(other_before, {str(path.relative_to(other)): path.read_bytes()
+                                        for path in sorted(other.rglob("*")) if path.is_file() and not path.is_symlink()})
+        self.assertEqual((self.root / "current").resolve(), final)
+        self.assertTrue((self.home / "Applications/Ariadne.app").is_dir())
+
+    def test_installing_another_version_leaves_a_changed_old_folder_untouched(self):
+        # Nothing of the old version is removed, so an edit, a foreign file or a missing file in it blocks nothing.
+        self.make_artifacts("0.0.9")
+        old = installer.install(self.home, self.artifacts, self.facts)
+        (old / "owner-notes.txt").write_bytes(b"foreign notes")
+        (old / "integrations/rules/claude.md").write_bytes(b"owner edited")
+        missing = next(name for name in sorted(installer.inventory(old))
+                       if name.startswith("integrations/") and name != "integrations/rules/claude.md")
+        (old / missing).unlink()
+        before = {str(path.relative_to(old)): path.read_bytes()
+                  for path in sorted(old.rglob("*")) if path.is_file() and not path.is_symlink()}
+        self.make_artifacts()
+        final = installer.install(self.home, self.artifacts, self.facts)
+        self.assertEqual(final.name, "0.1.0")
+        self.assertEqual((self.root / "current").resolve(), final)
+        self.assertEqual(sorted(os.listdir(self.root / "versions")), ["0.0.9", "0.1.0"])
+        self.assertEqual(before, {str(path.relative_to(old)): path.read_bytes()
+                                  for path in sorted(old.rglob("*")) if path.is_file() and not path.is_symlink()})
+
+    def test_reinstall_of_an_older_version_does_not_claim_the_current_app_copy_was_edited(self):
         self.make_artifacts("0.0.9")
         installer.install(self.home, self.artifacts, self.facts)
         self.make_artifacts()
-        (self.root / "versions/0.0.9/integrations/rules/claude.md").write_bytes(b"owner edited")
-        before = self.snapshot()
-        with self.assertRaisesRegex(installer.InstallError, f"Move the folder {self.root / 'versions/0.0.9'} somewhere"):
-            self.install_over(package)
-        self.assertEqual(self.snapshot(), before)
-        self.assertTrue(final.is_dir())
+        installer.install(self.home, self.artifacts, self.facts)
+        copy = self.home / "Applications/Ariadne.app"
+        self.output.truncate(0)
+        self.output.seek(0)
+        self.make_artifacts("0.0.9")
+        installer.install(self.home, self.artifacts, self.facts)
+        self.assertIn("Replacing the Ariadne 0.0.9 already installed", self.output.getvalue())
+        self.assertNotIn("edited after install", self.output.getvalue())
+        self.assertNotIn("Delete it yourself", self.output.getvalue())
+        self.assertTrue(copy.is_dir())
+        self.assertEqual(installer.uninstall(self.home), [])
+
+    def test_successive_alpha_installs_keep_every_earlier_helper_runnable(self):
+        # A Claude session that outlives several upgrades still runs the absolute helper path it loaded.
+        alphas = ["0.1.0-alpha.20", "0.1.0-alpha.21", "0.1.0-alpha.22"]
+        helpers = {}
+        for alpha in alphas:
+            self.make_artifacts(alpha)
+            final = installer.install(self.home, self.artifacts, self.facts)
+            helpers[alpha] = final / "bin/ariadne"
+            self.assertEqual(final.name, alpha)
+            self.assertEqual((self.root / "current").resolve(), final)
+            for earlier in alphas[:alphas.index(alpha) + 1]:
+                self.assertEqual(subprocess.run([str(helpers[earlier]), "--version"], capture_output=True, text=True,
+                                                check=True).stdout.strip(), f"ariadne {earlier}")
+        self.assertEqual(sorted(os.listdir(self.root / "versions")), alphas)
+        # A same-version reinstall of the newest replaces only its own folder.
+        older = self.root / "versions" / alphas[0]
+        older_before = installer.inventory(older)
+        self.make_artifacts(alphas[-1])
+        installer.install(self.home, self.artifacts, self.facts)
+        self.assertEqual(sorted(os.listdir(self.root / "versions")), alphas)
+        self.assertEqual(installer.inventory(older), older_before)
+        for alpha in alphas:
+            self.assertEqual(subprocess.run([str(helpers[alpha]), "--version"], capture_output=True, text=True,
+                                            check=True).stdout.strip(), f"ariadne {alpha}")
+        # Uninstall still removes all of them.
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(self.root / "versions") and os.listdir(self.root / "versions"))
 
     def test_install_script_no_longer_blocks_on_an_existing_version(self):
         script = (SOURCE.parent / "install.sh").read_text()

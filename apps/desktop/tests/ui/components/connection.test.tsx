@@ -51,6 +51,28 @@ describe('connection card wording', () => {
   });
 });
 
+describe('a plugin that does not match the app', () => {
+  const words = 'This Claude session’s Ariadne plugin doesn’t match the app. Run /reload-plugins there, then /ariadne-connect.';
+  it.each(['off', 'reconnect'] as const)('%s: the line and the card say so', kind => {
+    const line = connectionLine(view(kind, { pluginMismatch: true }))!;
+    expect(`${line.title} ${line.text}`).toBe(words);
+    expect(connectionCopy(view(kind, { pluginMismatch: true })).lines[0]).toBe(words);
+  });
+  it.each(['none', 'live', 'loading', 'closed', 'unreadable', 'stale', 'unsaved'] as const)('%s: a stale mismatch never replaces what is true', kind => {
+    expect(connectionLine(view(kind, { pluginMismatch: true }))).toEqual(connectionLine(view(kind)));
+    expect(connectionCopy(view(kind, { pluginMismatch: true }))).toEqual(connectionCopy(view(kind)));
+  });
+  it('without a mismatch the words do not change', () => {
+    for (const kind of kinds) expect(connectionLine(view(kind, { pluginMismatch: false }))).toEqual(connectionLine(view(kind)));
+    expect(connectionCopy(view('off')).lines.join(' ')).not.toContain('/reload-plugins');
+  });
+  it('the line draws the words and keeps its buttons', () => {
+    render(<ConnectionLine view={view('reconnect', { pluginMismatch: true })} actions={everything()} />);
+    expect(screen.getByRole('status').textContent).toContain(words);
+    expect(screen.getByRole('button', { name: 'Try now' })).toBeTruthy();
+  });
+});
+
 describe('12.7 names a cut-off file only when the file is cut off', () => {
   const neutral = 'Nothing in the file was changed, and Ariadne tries again when it changes.';
   it('corrupt_session: the line and the card say the file ends partway through a line', () => {
@@ -100,6 +122,9 @@ describe('connection actions', () => {
   it('puts the state\'s own button first', () => {
     const a = everything();
     expect(cardActions(view('live'), a)[0]!.label).toBe('Sending…');
+    // Off has no sending to speak of: its button opens the Connection dialog, on the card and on the line.
+    expect(cardActions(view('off'), a)[0]!.label).toBe('Connection…');
+    expect(lineActions(view('off'), a).map(action => action.label)).toEqual(['Connection…']);
     expect(cardActions(view('none'), a)[0]!.label).toBe('How to connect');
     expect(cardActions(view('reconnect'), a)[0]!.label).toBe('Try now');
     expect(cardActions(view('unreadable'), a).slice(0, 2).map(action => action.label)).toEqual(['Try again', 'Show the file']);
@@ -162,7 +187,7 @@ describe('ConnectionLine', () => {
     const line = screen.getByRole('status');
     expect(line.textContent).toContain('Claude Code isn’t running for this session.');
     expect(line.textContent).toContain('What you send is queued and goes out once, when it runs again.');
-    fireEvent.click(screen.getByRole('button', { name: 'Sending…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connection…' }));
     expect(a.onSending).toHaveBeenCalledTimes(1);
   });
 

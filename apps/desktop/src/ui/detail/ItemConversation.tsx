@@ -652,7 +652,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       {expanded && answerState.live && <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
         {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
         <ConversationQuestion key={itemId} text={item.ask || item.question} /></div>}
-      <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout={expanded ? 'wide' : 'details'} head blocked={removing ? 'Being removed · Undo first' : model.answer?.blocked} focusRequest={answerFocus}
+      <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout={expanded ? 'wide' : 'details'} head blocked={removing ? 'Being removed · Undo first' : model.answer?.blocked} removing={removing} focusRequest={answerFocus}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}

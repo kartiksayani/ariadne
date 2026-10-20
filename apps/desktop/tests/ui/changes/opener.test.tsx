@@ -53,6 +53,16 @@ describe('ChangesOpener', () => {
     expect(popover.style.top).toBe('100px');
     expect(popover.style.width).toBe('540px');
   });
+  it('says "since you looked at {time}" in the head after a short absence and "since {weekday} {time}" after a long one', async () => {
+    await setupChanges(2, 1, 1);
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    expect(within(screen.getByRole('dialog', { name: 'What changed' })).getByText(/^since you looked at \d\d:\d\d$/)).toBeTruthy();
+    cleanup(); stores.splice(0).forEach(store => store.stop()); vi.useRealTimers();
+    await setupChanges(2, 1, 1, true);
+    fireEvent.click(screen.getByRole('button', { name: /\d+ changes since/ }));
+    const head = within(screen.getByRole('dialog', { name: 'What changed' })).getByText(/^since \w+ \d\d:\d\d$/);
+    expect(head.textContent).not.toContain('you looked');
+  });
   it('opens a popover with the since-you-were-here rows, labelled and marked', async () => {
     const value = await setupChanges(2, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));

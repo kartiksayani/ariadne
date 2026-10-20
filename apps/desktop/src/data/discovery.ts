@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { DesktopDiscoveryCandidate, DesktopDiscoverySnapshot } from '../generated/core';
 import { validateDiscovery, type RendererService } from './service';
 
@@ -79,12 +79,40 @@ export class DiscoveryController {
       if (!this.disposed) this.publish({ reading: false });
     }
   }
+  /** One read of the native snapshot for a caller that only looks: no polling and no connection-UI flag (which starts Codex scans). Null when the read fails. */
+  async peek(): Promise<DesktopDiscoverySnapshot | null> {
+    if (this.disposed) return null;
+    try { const snapshot = await this.service.discovery(); validateDiscovery(snapshot); return snapshot; } catch { return null; }
+  }
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true; this.consumers.clear(); this.setOpen(false); this.listeners.clear();
   }
 }
 const noSubscription = () => () => {};
+
+/** How often the top bar looks again while a session's agent isn't live. A Claude plugin announces itself every 30 s. */
+export const PLUGIN_CHECK_MS = 10_000;
+/** True when the Claude conversation that announced for this session has a plugin that does not match the app. */
+export const pluginMismatchFor = (snapshot: DesktopDiscoverySnapshot | null, sessionId: string): boolean =>
+  !!snapshot?.candidates.some(candidate => candidate.adapter_id === 'claude_code_mod' && candidate.plugin_mismatch && candidate.session?.session_id === sessionId);
+/**
+ * Whether the plugin of the session's Claude conversation doesn't match the app, read while `watching` (the agent isn't live).
+ * It only reads the native snapshot: no activation and no polling of the controller, so it starts none of the Codex scans that
+ * the connection dialogs ask for.
+ */
+export function usePluginMismatch(controller: DiscoveryController | undefined, sessionId: string | undefined, watching: boolean): boolean {
+  const [mismatch, setMismatch] = useState(false);
+  useEffect(() => {
+    if (!controller || !sessionId || !watching) { setMismatch(false); return; }
+    let live = true;
+    const look = () => { void controller.peek().then(snapshot => { if (live && snapshot) setMismatch(pluginMismatchFor(snapshot, sessionId)); }); };
+    look();
+    const timer = setInterval(look, PLUGIN_CHECK_MS);
+    return () => { live = false; clearInterval(timer); setMismatch(false); };
+  }, [controller, sessionId, watching]);
+  return mismatch;
+}
 const emptySnapshot = () => empty;
 export function useDiscovery(controller?: DiscoveryController): DiscoveryState {
   return useSyncExternalStore(controller?.subscribe ?? noSubscription, controller?.getSnapshot ?? emptySnapshot, controller?.getSnapshot ?? emptySnapshot);

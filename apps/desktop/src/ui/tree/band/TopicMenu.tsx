@@ -39,7 +39,7 @@ export function TopicMenu({ topicName, reply, bin, archive, remove, dismissKey }
       {reply && row({ icon: 'ph ph-chat-text', label: 'Reply to topic', detail: 'Write to the agent about the whole topic, in Details', run: reply.run,
         disabled: !!reply.unavailable, title: reply.unavailable ? `Reply to topic: ${reply.unavailable}` : undefined }, close)}
       {reply && <div className="tree-menu-divider" role="separator" />}
-      {row({ icon: 'ph ph-trash', label: 'Open the bin', detail: bin.count ? `${bin.count} removed · Restore or empty` : 'Nothing in the bin',
+      {row({ icon: 'ph ph-trash', label: 'Open the bin', detail: bin.count ? `${bin.count} removed · Restore or empty` : 'Empty',
         run: bin.open, disabled: bin.count === 0, title: 'Nothing in the bin' }, close)}
       <div className="tree-menu-divider" role="separator" />
       {row({ icon: 'ph ph-archive', label: 'Archive topic…', detail: 'Out of the Map and Waiting on me; restore it from Archive', run: archive }, close)}

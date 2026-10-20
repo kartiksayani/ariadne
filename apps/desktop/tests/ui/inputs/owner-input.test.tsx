@@ -2020,7 +2020,7 @@ describe('the item detail reads like a chat', () => {
     const reply = within(row).getByRole('button', { name: 'Reply' });
     const later = within(row).getByRole('button', { name: 'Later' });
     // One row in the body (SPEC 5.3 item 5): Ack is the primary, Reply and Later are icons beside it; the dock holds only the composer.
-    expect(ack.textContent).toBe('Ack');
+    expect(ack.textContent).toBe('Ack → In progress');
     expect(ack.closest('.detail-actions-row')).toBe(row);
     expect(reply.closest('.detail-actions-row')).toBe(row);
     expect(later.closest('.detail-actions-row')).toBe(row);

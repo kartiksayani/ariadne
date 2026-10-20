@@ -85,7 +85,7 @@ impl Profile {
             .unwrap()
             .publish(&registry, &id(900))
             .unwrap();
-        let version = home.path().join("0.1.0");
+        let version = home.path().join(ariadne_cli::setup::resources::VERSION);
         fs::create_dir(&version).unwrap();
         fs::set_permissions(&version, fs::Permissions::from_mode(0o700)).unwrap();
         owned::apply(&version, "both", false).unwrap();
@@ -588,13 +588,48 @@ fn busy_existing_lock_is_bounded_and_does_not_publish_an_unlocked_catalogue() {
     let report = profile.report();
     release.send(()).unwrap();
     holder.join().unwrap();
-    assert!(start.elapsed() < Duration::from_secs(4));
+    // Doctor waits out the lock, tries once more (the read budget, 5 s), and then says plainly that it was busy.
+    assert!(start.elapsed() < Duration::from_secs(6));
+    let unavailable = &checks(&report, "registry.unavailable")[0];
+    assert_eq!(unavailable["facts"]["cause"], "coordination_busy");
     assert_eq!(
-        checks(&report, "registry.unavailable")[0]["facts"]["cause"],
-        "coordination_busy"
+        unavailable["message"],
+        "Ariadne's list of projects is busy right now, so doctor couldn't read it."
+    );
+    assert_eq!(
+        unavailable["hint"],
+        "Nothing is wrong with it. Wait a moment and run doctor again."
     );
     assert!(checks(&report, "registry.valid").is_empty());
     assert_eq!(snapshot(profile.home.path()), before);
+}
+
+#[test]
+fn a_lock_that_is_busy_for_longer_than_one_wait_is_ridden_out_not_reported() {
+    let profile = Profile::new();
+    let path = profile.data.clone();
+    let (entered, entry) = std::sync::mpsc::channel();
+    // Held for longer than the store's 2 s lock wait, so the first try reports busy; the second finds it free.
+    let holder = std::thread::spawn(move || {
+        OwnedDirectory::root(&path)
+            .unwrap()
+            .with_lock::<_, StoreError>("registry.lock", false, || {
+                entered.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(2_600));
+                Ok(())
+            })
+            .unwrap();
+    });
+    entry.recv_timeout(HANG_GUARD).unwrap();
+    let report = profile.report();
+    holder.join().unwrap();
+    assert!(checks(&report, "registry.unavailable").is_empty());
+    assert_eq!(checks(&report, "registry.valid").len(), 1);
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|check| !check["code"].as_str().unwrap().contains("busy")));
 }
 
 #[test]

@@ -279,7 +279,7 @@ export function validateDiscovery(snapshot: DesktopDiscoverySnapshot): void {
         || !['fresh', 'stale', 'historical', 'unknown'].includes(candidate.freshness)
         || !['compatible', 'untested', 'incompatible', 'unknown'].includes(candidate.compatibility)
         || !['available', 'unavailable', 'unknown'].includes(candidate.availability)
-        || typeof candidate.loaded !== 'boolean' || typeof candidate.observed_at !== 'string' || !Number.isFinite(Date.parse(candidate.observed_at))
+        || typeof candidate.loaded !== 'boolean' || typeof candidate.plugin_mismatch !== 'boolean' || typeof candidate.observed_at !== 'string' || !Number.isFinite(Date.parse(candidate.observed_at))
         || (candidate.binding_id !== null && !uuid(candidate.binding_id))
         || (candidate.session !== null && (!candidate.session || !uuid(candidate.session.project_id) || !uuid(candidate.session.session_id)))
         || ((candidate.binding_id === null) !== (candidate.session === null))) invalid();

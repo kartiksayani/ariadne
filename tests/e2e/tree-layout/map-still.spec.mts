@@ -140,6 +140,13 @@ const triggers: readonly Trigger[] = [
       await expect(page.locator('.tree-hit[data-current]')).toHaveCount(3);
     }],
   ['a new agent row above the reading row', 'held', null, nothing, page => agent(page, 'add-above'), page => expect(row(page, '3.1')).toHaveCount(1)],
+  // owner 2026-10-20: visible Ack target. A row's Ack names its target, so its Ack slot is wider and its title may rewrap when the Ack arrives
+  // or is given: the reading row below it keeps its place all the same.
+  ['a row above the reading row gains an Ack', 'held', null, nothing, page => agent(page, 'ack-gains-above'),
+    page => expect(row(page, '9').getByRole('button', { name: /^Ack/ })).toHaveCount(1)],
+  ['a row above the reading row loses its Ack', 'held', null, async page => {
+    await agent(page, 'ack-gains-above'); await expect(row(page, '9').getByRole('button', { name: /^Ack/ })).toHaveCount(1);
+  }, page => agent(page, 'ack:9'), page => expect(row(page, '9').getByRole('button', { name: /^Ack/ })).toHaveCount(0)],
   ['a new agent row below the reading row', 'still', null, nothing, page => agent(page, 'add-below'), page => expect(row(page, '40')).toHaveCount(1)],
   ['Show them reveals a folded match above', 'held', null, page => search(page, 'receipt'),
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],
@@ -939,8 +946,8 @@ test('a row above that shrinks at the bottom is clamped by the browser, and the 
   await settle(page);
   expect(await scrollTopOf(page), 'the browser clamped the Map down').toBeLessThan(before);
   expect(Math.abs(await topOf(page, '17') - place), 'item 17 keeps its place').toBeLessThanOrEqual(1);
-  // One step up only: back down at the Map's end the rows no longer reach the row's old place (pinned or not), a separate matter.
-  await pinHolds(page, '17', place, 'after a row above shrank at the bottom', [1.2]);
+  // Up and back down at the Map's end: the hold re-pins the row on each text-size step, through the browser's clamp.
+  await pinHolds(page, '17', place, 'after a row above shrank at the bottom');
 }));
 
 // Details' body below the head never moves when the dwell clears the head's marker (alpha.21 E7-E9): the marker slot has one width
@@ -1099,10 +1106,10 @@ test.describe('a parent\'s strip and an archive strip hold the place', () => {
       if (read.key !== subject) expect(Math.abs((await windowTop(page, read.key))! - was), `${read.key} keeps its place`).toBeLessThanOrEqual(3);
       expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
     }));
-    // Open (found by this row): archiving the last topic while its tall row is read near the Map's end leaves the strip
-    // 11-23px below the row's place; the scroller is at its end, so the hold's bottom spacer doesn't make the room.
+    // Archiving the last topic while its tall row is read near the Map's end (alpha.22 E12): the strip comes in the same commit
+    // as the topic goes, keeps the row's window place (the band it was read under went with the topic), and the hold's bottom
+    // spacer makes the room at the end.
     test(`${name} while it holds a reading row taller than the window: its strip takes that row's window place`, ({ page }) => served(page, async () => {
-      test.fixme(subject === '8', 'the archive strip of the last topic is clamped at the Map\'s end');
       await tallReading(page, subject);
       const was = (await windowTop(page, subject))!, earlier = await stripKeys(page);
       await change(page);

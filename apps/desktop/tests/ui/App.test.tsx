@@ -494,7 +494,7 @@ describe('ordinary desktop composition', () => {
       await openSession(id);
       fireEvent.click(document.querySelector<HTMLElement>('[data-popover-trigger="connection"]')!);
       fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-      return screen.findByRole('dialog', { name: /Sending to / });
+      return screen.findByRole('dialog', { name: /Connection to / });
     };
     let dialog = await openDispatch(route.session_id);
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Pause sending' }));

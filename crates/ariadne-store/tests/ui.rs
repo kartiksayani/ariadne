@@ -200,7 +200,11 @@ fn failed_companion_quarantine_preserves_evidence_and_allows_main_publication() 
     registry
         .with_ui_file(|mut file| {
             assert!(file.recovery_bytes().is_none());
-            assert!(file.publish_recovery(b"new marker", &operation).is_err());
+            // A lasting refusal is not worded busy: trying again won't help.
+            assert!(matches!(
+                file.publish_recovery(b"new marker", &operation),
+                Err(StoreError::UnsafePath { .. })
+            ));
             file.publish_current(b"main draft save", &operation)
         })
         .unwrap();

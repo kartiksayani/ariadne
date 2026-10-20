@@ -9,6 +9,7 @@ import { copyText } from '../../../src/ui/shared/clipboard';
 import { notices } from '../../../src/ui/pages/notices';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { PresenceObservation } from '../../../src/generated/domain/models';
+import type { DesktopDiscoveryCandidate } from '../../../src/generated/core';
 import { AppTransport, route } from './transport';
 
 vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn() }));
@@ -178,7 +179,7 @@ describe('a save Ariadne isn’t sure of', () => {
     transport.failNext = 'binding_pause';
     fireEvent.click(dot());
     fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
     const shown = await screen.findByRole('status', { name: 'Connection' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
@@ -218,7 +219,7 @@ describe('a write in flight is not an unsure save (SPEC 12.9)', () => {
     transport.holdWrites('binding_pause');
     fireEvent.click(dot());
     fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
     await waitFor(() => expect(transport.held).toBe(1));
     expect(line()).toBeNull();
@@ -249,10 +250,82 @@ describe('a write in flight is not an unsure save (SPEC 12.9)', () => {
     transport.failNext = 'binding_pause';
     fireEvent.click(dot());
     fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
-    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    const dialog = await screen.findByRole('dialog', { name: /Connection to / });
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
     await waitFor(() => expect(unsure()).not.toBeNull());
     expect(dot().getAttribute('aria-label')).toMatch(/^Live/);
+  });
+});
+
+/** A desktop whose native discovery lists the conversations that announced themselves, as the app's snapshot does. */
+class Announcing extends Flaky {
+  candidates: DesktopDiscoveryCandidate[] = [];
+  reads = 0;
+  uiFlags = 0;
+  async discovery() { ++this.reads; return { candidates: structuredClone(this.candidates), error: null }; }
+  async setConnectionUiOpen() { ++this.uiFlags; }
+}
+const announced = (transport: AppTransport, patch: Partial<DesktopDiscoveryCandidate> = {}): DesktopDiscoveryCandidate => ({
+  adapter_id: 'claude_code_mod', endpoint: { kind: 'local_bridge', name: 'claude-mod' }, external_session_id: binding(transport).external_session_id, cwd: '/project',
+  title: null, host_version: '2.1.289', observed_at: '2026-10-03T12:01:00.000Z', freshness: 'fresh', compatibility: 'unknown', availability: 'unknown',
+  loaded: false, plugin_mismatch: true, binding_id: binding(transport).id, session: route, ...patch });
+/** A later host observation of the given state: it outranks the earlier ones. */
+let later = Date.parse('2026-10-03T12:05:00.000Z');
+const observed = (transport: AppTransport, state: 'connected' | 'reconnecting') => {
+  const observation = { ...structuredClone(sessionsFixture.items[0].active_binding.presence), connection_state: state, last_seen_at: new Date(later += 60_000).toISOString() } as PresenceObservation;
+  transport.emit('ariadne://presence_changed', { binding_id: binding(transport).id, generation: binding(transport).generation, observation });
+};
+const mismatchWords = 'This Claude session’s Ariadne plugin doesn’t match the app. Run /reload-plugins there, then /ariadne-connect.';
+
+describe('a Claude plugin that does not match the app (alpha.22 E6)', () => {
+  const start = async (change: (transport: Announcing) => void = () => {}) => {
+    const transport = new Announcing();
+    transport.preferences.global.selected_navigation = { kind: 'session', session: route };
+    Object.assign(transport.preferences.sessions[0]!, { tab_open: true });
+    change(transport);
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(dot()).not.toBeNull();
+    });
+    return transport;
+  };
+
+  it('a refused announcement from this session’s conversation is named on the line and the card, and goes when it qualifies', async () => {
+    const transport = await start(value => { value.candidates = [announced(value)]; });
+    await act(async () => { reconnecting(transport); });
+    await waitFor(() => expect(line()?.textContent).toContain(mismatchWords));
+    expect(line()?.textContent).not.toContain('Reconnecting to');
+    fireEvent.click(dot());
+    expect((await screen.findByRole('dialog')).textContent).toContain(mismatchWords);
+    fireEvent.click(dot());
+    // The conversation qualifies (the owner ran /reload-plugins): the cause is gone, and the next look finds none.
+    transport.candidates = [announced(transport, { plugin_mismatch: false })];
+    await act(async () => { observed(transport, 'connected'); });
+    await waitFor(() => expect(line()).toBeNull());
+    await act(async () => { observed(transport, 'reconnecting'); });
+    await waitFor(() => expect(line()?.textContent).toContain('Reconnecting to'));
+    expect(line()?.textContent).not.toContain('/reload-plugins');
+  });
+
+  it('only this session’s conversation counts: another session’s refusal, or a plugin that was not refused, adds nothing', async () => {
+    const other = { project_id: route.project_id, session_id: '00000000-0000-4000-8000-0000000000aa' };
+    const transport = await start(value => { value.candidates = [announced(value, { session: other }), announced(value, { external_session_id: 'another', binding_id: null, session: null, plugin_mismatch: true }), announced(value, { plugin_mismatch: false })]; });
+    await act(async () => { reconnecting(transport); });
+    await waitFor(() => expect(transport.reads).toBeGreaterThan(0));
+    expect(line()?.textContent).toContain('Reconnecting to');
+    expect(line()?.textContent).not.toContain('/reload-plugins');
+  });
+
+  it('a live session never looks: no read of the snapshot, and no connection-UI flag that would start Codex scans', async () => {
+    const transport = await start(value => { value.candidates = [announced(value)]; });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(transport.reads).toBe(0);
+    expect(transport.uiFlags).toBe(0);
+    expect(line()).toBeNull();
+    await act(async () => { reconnecting(transport); });
+    await waitFor(() => expect(line()?.textContent).toContain(mismatchWords));
+    expect(transport.uiFlags).toBe(0);
   });
 });
 

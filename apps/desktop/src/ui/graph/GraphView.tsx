@@ -12,6 +12,7 @@ import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { plainFailure } from '../../data/plain';
 import { statusColor } from '../shared/status';
 import { useWorkspaceKeys } from '../keys';
+import { useIntents } from '../intents';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { filterSignature, type LocalChip } from '../../selectors/tree/filter';
@@ -26,7 +27,6 @@ import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
 import { scrollIntoViewIfHidden } from '../shared/scroll';
 import { useDockInset } from '../shell/dockInset';
-import { DETAILS_RAIL } from '../../state/details/column';
 
 export interface GraphViewProps {
   readonly store: SessionStore;
@@ -35,6 +35,12 @@ export interface GraphViewProps {
   readonly later: ReadonlySet<string>;
   /** The navigation's current reveal (a link, waiting card or tree selection). */
   readonly reveal: RevealedItem | null;
+  /**
+   * Counts the reveals asked for from outside the Graph (NavigationState.revealAsks: a link, the dock, a native route), moved when
+   * each is asked for, not when it publishes. An answer to a click, or to `.`, is dropped when this changed since it was asked: the
+   * jump asked for last wins. A jump asked for before the click keeps no claim on it by publishing after it.
+   */
+  readonly revealAsks?: number;
   /** New and Changed markers by item id (ui/tree/model.ts `mapChanges`): a diamond alone on the node (SPEC 9.9). */
   readonly markers?: ReadonlyMap<string, MarkerKind>;
   readonly preferencesBusy?: boolean;
@@ -43,6 +49,10 @@ export interface GraphViewProps {
   /** The same Clear the chip row and the Tree's empty state use; shown when the filter leaves no topic to draw. */
   readonly onClearFilters?: () => void;
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
+  /** The bigger view of an item covers the Map: `.` then does nothing here, as in the Tree. */
+  readonly covered?: boolean;
+  /** A fold or unfold ends the "outside your filter" notice. It changes nothing the Graph draws: the Map never moves on its own. */
+  readonly onDismissBanner?: () => void;
   /** Selection reached the item; `openDetail` is false for ↑/↓ moves and folds. */
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }
@@ -132,25 +142,23 @@ function Legend({ drawn }: { readonly drawn: boolean }) {
 
 /** Each topic's top in the canvas, by topic id. */
 const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [topic.topic.id, topic.top]));
-/** The Map's width with Details folded to its rail: the shell body less the rail, never less than the Map's own width. */
-const mapRoom = (box: HTMLElement): number => Math.max(box.clientWidth, (box.closest('.shell-body')?.clientWidth ?? 0) - DETAILS_RAIL);
 const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
 const NO_LOCAL: readonly LocalChip[] = [];
 
-export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, markers, preferencesBusy = false, saveView, onReveal, onClearFilters }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, revealAsks = 0, markers, preferencesBusy = false, saveView, onReveal, onClearFilters, onDismissBanner, covered = false }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
   const peek = usePeek(), search = useMapSearch();
-  const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: RevealedItem | null } | null>(null);
-  const [localSelection, setLocalSelection] = useState<{ id: string; external: RevealedItem | null } | null>(null);
+  const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; asked: number } | null>(null);
+  const [localSelection, setLocalSelection] = useState<{ id: string; asked: number } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
   const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
-  // The column is fitted when the Graph opens or the session changes, and then kept (model.ts graphColumn). It is fitted to the
-  // Map as it is with Details folded to its rail, so names fit on one line as on the board whether Details is open or not.
+  // The column is fitted once, when the Graph opens or the session changes, to the Map's width at that moment (Details open or not),
+  // and then kept (model.ts graphColumn): opening or closing Details later never refits, because that would slide every node.
   const [fit, setFit] = useState<{ store: SessionStore; column: number } | null>(null);
-  useLayoutEffect(() => { if (scroller.current) setFit({ store, column: graphColumn(mapRoom(scroller.current)) }); }, [store]);
+  useLayoutEffect(() => { if (scroller.current) setFit({ store, column: graphColumn(scroller.current.clientWidth) }); }, [store]);
   const column = fit?.store === store ? fit.column : null;
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);
@@ -164,7 +172,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
-  const offered = localReveal?.external === reveal ? localReveal.result : reveal;
+  const offered = localReveal && localReveal.asked === revealAsks ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
   const itemReveal = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal : null;
   const shown = useMemo(() => applyChange(applyChange(view, inflight), pending), [view, inflight, pending]);
@@ -173,15 +181,15 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   // An outside reveal wins immediately over an older selection whose preference write is still pending. The owner's own selection
   // keeps winning over the reveal that was current when they made it, while its write runs and once it is saved: that reveal
   // is older, and its own (slower) reveal can land after the write (a ← then must act on the node they selected).
-  const optimisticSelection = localSelection?.external === reveal
+  const optimisticSelection = localSelection && localSelection.asked === revealAsks
     && (pending?.selected || inflight?.selected || view.selected_item_id === localSelection.id) ? localSelection.id : null;
   const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
   const graph = useMemo(() => session && column !== null ? sessionGraph({ session, view: shown, later, local, selectedId, column,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
   [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset, folds: filterFolds.items });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset, folds: filterFolds.items };
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner };
 
   // Related lines show for the selected node and the one under the pointer only (SPEC 1.3). They are drawn over the
   // canvas from the laid-out positions, so hovering never rebuilds the 2,000-node model.
@@ -340,28 +348,51 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     // so it is held at its pre-commit position instead of the old selection.
     const box = scroller.current, current = latest.current.graph, element = nodeElement(id);
     if (box && current?.nodes.has(id) && element) held.current = anchorOn(element, box, current);
-    setLocalSelection({ id, external: latest.current.external });
+    setLocalSelection({ id, asked: latest.current.asked });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
     setScrollTarget({ id, center: false });
-    const call = ++request.current, external = latest.current.external;
+    const call = ++request.current, asked = latest.current.asked;
+    // A jump asked for from outside since this click (even one still waiting to publish) is the newer one: this answer is dropped.
+    // One asked before the click is older, however late it publishes.
+    const stale = () => !mounted.current || call !== request.current || asked !== latest.current.asked;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
-      if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
+      if (stale() || !result) return;
       ownReveal.current = result;
-      setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
-    }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
+      setLocalReveal({ result, asked }); latest.current.onReveal(result, options.openDetail);
+    }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold, peek]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
+    if (node.folded) latest.current.onDismissBanner?.();
     select(node.item.id, { openDetail: true, expand: node.folded });
   }, [select]);
   /** ← on an unfolded node folds it, in the saved view (or the filter's own folds while filtering). */
   const fold = (node: GraphNode) => {
+    latest.current.onDismissBanner?.();
     if (latest.current.graph?.filtering) filterFolds.setFold('items', node.item.id, true);
     change({ expansion: [{ kind: 'collapse', id: node.item.id }] });
     if (itemReveal?.temporaryExpandedItemIds.includes(node.item.id)) setDismissedReveal(currentReveal);
   };
+
+  // `.` goes back to the selected node, as in the Tree (SPEC 8.5): a drawn node is scrolled into view and focused, and Details stays as
+  // it is. A selection folded or filtered away is revealed through its route, which opens Details on it (the Tree does the same).
+  useIntents({
+    'map.backToSelected': () => {
+      const { graph: current, selectedId: id } = latest.current;
+      if (covered || !id || !current) return false;
+      peek?.closeAll();
+      if (current.nodes.has(id)) { setScrollTarget({ id, center: false, focus: true }); return true; }
+      const call = ++request.current, asked = latest.current.asked;
+      const stale = () => !mounted.current || call !== request.current || asked !== latest.current.asked;
+      void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
+        if (stale() || !result) return;
+        latest.current.onReveal(result, true);
+      }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
+      return true;
+    },
+  });
 
   // ↑/↓ move the selection in layout order, ←/→ fold and unfold, Enter opens detail, Space peeks.
   const keys = useWorkspaceKeys<HTMLDivElement>({
@@ -370,6 +401,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
       if (!current || !node) return false;
       if (node.folded) {
+        latest.current.onDismissBanner?.();
         if (current.filtering) filterFolds.setFold('items', node.item.id, false);
         change({ expansion: [{ kind: 'expand', id: node.item.id }] }); return true;
       }
@@ -427,9 +459,12 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     if (scrollTarget) setScrollTarget(null);
     if (previousReveal.current !== reveal) {
       previousReveal.current = reveal;
-      setLocalReveal(null); setLocalSelection(null);
       const echo = reveal !== null && reveal === ownReveal.current;
       ownReveal.current = null;
+      // The Graph's own selection coming back ends what the Graph held for its click. A reveal that was only dismissed does not: the
+      // owner's click, its write and its answer are still in flight. A jump asked for since the click needs no clearing: the held
+      // state is stamped with the ask count and stops applying the moment it moves.
+      if (echo) { setLocalReveal(null); setLocalSelection(null); }
       if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true };
     }
     const initial = !!graph && opened.current !== store;
@@ -472,7 +507,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   const drawn = !!graph?.topics.length;
   const current = search.current?.id ?? null;
   return <div className="graph-view">
-    <div ref={scroller} className="graph-scroll" tabIndex={-1} onScroll={remember}
+    <div ref={scroller} className="graph-scroll" data-testid="graph-scroll" tabIndex={-1} onScroll={remember}
       onFocus={event => {
         const element = event.target instanceof Element ? event.target.closest('[data-row]') : null;
         focusedRow.current = element?.getAttribute('data-row') ?? null;

@@ -88,9 +88,17 @@ const FOLDER_FAILURE = 'The project folder is missing or inaccessible. Restore a
 export function folderFailure(error) {
   return error?.plain === FOLDER_FAILURE;
 }
-// A helper call is killed after HELPER_TIMEOUT_MS. A call still open two
-// seconds after that is hung: it counts as a temporary timeout until it ends.
-export const HUNG_CALL_MS = HELPER_TIMEOUT_MS + 2000;
+// A helper call is killed after HELPER_TIMEOUT_MS. One call of a producer can
+// run several helper calls one after another. The counts below are typical,
+// not maxima: a turn callback's start saves two events (accepted, then
+// started), a report flush typically saves up to five (accepted, started,
+// finished, one late conflict, the end), and an automatic reconnect typically
+// drains retired reports, registers the project, connects and waits for the
+// route. A larger backlog can run more. A call is hung once it has outlasted
+// the kills of its producer's typical helper runs, plus two seconds.
+const HELPER_RUNS = Object.freeze({announce:1,helper:2,qualification:1,claim:1,reports:5,auto:8});
+export const HUNG_CALL_MS = Object.freeze(Object.fromEntries(Object.entries(HELPER_RUNS)
+  .map(([producer,runs]) => [producer,runs * HELPER_TIMEOUT_MS + 2000])));
 const PRODUCERS = Object.freeze(['announce','helper','auto','qualification','claim','reports']);
 // Held codes whose advice the owner must act on. Other held codes, such as
 // protocol_error, wait out the grace and spacing like retries do.
@@ -102,8 +110,13 @@ function rank(condition) {
   return {ok:0,transient:1,install:4,terminal:5}[condition.kind];
 }
 const urgent = condition => rank(condition) >= 3;
-// Transient lines are the shared retry sentence, or the project-folder sentence.
-const retryLine = text => text === FOLDER_FAILURE ? FOLDER_FAILURE : BACKGROUND_RETRY;
+// A turn callback is not run again when it fails (its unsaved reports are retried by the report producer), so its
+// line makes no promise to keep trying.
+export const TURN_FAILURE = 'Ariadne could not record what just happened in this conversation. Open Ariadne to check on it.';
+// Transient lines are the shared retry sentence, the project-folder sentence, or the turn callback's own.
+const retryLine = text => text === FOLDER_FAILURE || text === TURN_FAILURE ? text : BACKGROUND_RETRY;
+// The line a hung call shows: a hung turn callback ('helper') is not run again either.
+const hungLine = producer => producer === 'helper' ? TURN_FAILURE : BACKGROUND_RETRY;
 // The kind comes from the error code alone, never from `retryable` or the hint.
 // The text is a fixed sentence: plainFailure may pick one from a fixed helper
 // message, but never echoes it. Background retries never inherit connect advice.
@@ -118,7 +131,7 @@ export function backgroundOutcome(error, text, {terminal = false} = {}) {
 // One conversation record. Liveness has one rule: every call records exactly
 // one outcome, and a producer counts from its first outcome until it is
 // retired (its loop stopped, its binding ended, it qualified, or reset). A call open longer
-// than HUNG_CALL_MS counts as a temporary timeout for its producer until it
+// than its producer's HUNG_CALL_MS counts as a temporary timeout for its producer until it
 // ends. Printing remembers continuous ill health, the last line, its producer
 // and the spacing of non-urgent lines.
 export function conversationHealth(now = () => Date.now()) {
@@ -131,7 +144,7 @@ export function conversationHealth(now = () => Date.now()) {
   function outcome(producer) {
     const open = [...calls.get(producer) ?? []].map(call => call.startedAt);
     const oldest = open.length ? Math.min(...open) : Infinity;
-    if (now() - oldest > HUNG_CALL_MS) return {kind:'transient',code:'timeout',text:BACKGROUND_RETRY,failedAt:oldest + HUNG_CALL_MS};
+    if (now() - oldest > HUNG_CALL_MS[producer]) return {kind:'transient',code:'timeout',text:hungLine(producer),failedAt:oldest + HUNG_CALL_MS[producer]};
     return producers.get(producer);
   }
   function failing() {
@@ -208,7 +221,7 @@ export function conversationHealth(now = () => Date.now()) {
 // text is never shown; one fixed helper message, a missing project folder, is
 // recognised to pick its own fixed sentence.
 const GENERIC_FAILURE = 'Ariadne ran into a problem and could not record this. Open the Ariadne app to see what happened; if it keeps happening, update Ariadne.';
-const MISMATCH_FAILURE = "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version.";
+const MISMATCH_FAILURE = "Ariadne and its Claude plugin don't match, so this was not recorded. Run /reload-plugins, then /ariadne-connect. If it still doesn't match, update Ariadne.";
 const UNREADABLE_FAILURE = "Ariadne's reply was cut off or unreadable, so this was not recorded. Open Ariadne and try again; if it keeps happening, update Ariadne.";
 const TIMEOUT_FAILURE = 'Ariadne took too long to answer. Open Ariadne, then try again.';
 const GONE_FAILURE ="This conversation's link to its Ariadne session is out of date or was removed. Run /ariadne-connect to connect it again.";
@@ -223,7 +236,7 @@ const HELPER_FAILURES = Object.freeze({
   stale_generation: GONE_FAILURE,
   binding_mismatch: "Ariadne could not use this conversation's project folder or session link. Check that its project folder is available, then run /ariadne-connect again.",
   binding_ambiguous: GONE_FAILURE,
-  binding_conflict: 'Check this session in Ariadne and disconnect its current conversation before trying again. If this conversation already follows the Ariadne session you chose earlier, copy that session in Ariadne and run /ariadne-connect followed by what you copied to reconnect here. To use a different Ariadne session, start another Claude conversation, then run /ariadne-connect there.',
+  binding_conflict: 'Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection… (or Sending…), then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).',
   not_found: "Ariadne can't find that session. Open Ariadne to check it still exists, then run /ariadne-connect.",
   invalid_argument: "Ariadne didn't accept that request. Run /ariadne-connect again; if it keeps happening, update the Ariadne app and plugin so they match.",
   permission_denied: "Ariadne isn't allowed to do that. Open the Ariadne app to check what is allowed for this session.",

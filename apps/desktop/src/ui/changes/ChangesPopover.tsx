@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Immutable } from '../../data/session-store';
 import type { SessionRef } from '../../generated/core';
 import type { Item, Session } from '../../generated/domain/models';
@@ -6,7 +6,7 @@ import type { NavigationStore } from '../../state/navigation/store';
 import type { ChangeRow } from '../../selectors/changes/card';
 import { briefLists } from '../../selectors/changes/topic';
 import { changeLabel } from '../../selectors/changes/label';
-import { awayGroups, type UnseenRow, unseenTopicRows } from '../../selectors/changes/unseen';
+import { type AwayGroup, awayGroups, type UnseenRow, unseenTopicRows } from '../../selectors/changes/unseen';
 import { activeItems } from '../../selectors/removed';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
 import { displayStatus } from '../../selectors/waiting/replied';
@@ -29,9 +29,22 @@ function Names({ items, session, route, onOpen }: { readonly items: readonly Imm
   readonly route: SessionRef; readonly onOpen: (id: string) => void }) {
   const labels = peekNames(session);
   const shown = items.slice(0, 3);
-  return <>{shown.map(item => <ItemName key={item.id} item={item} route={route} label={labels.get(item.id)} onOpen={onOpen} />)}
-    {items.length > shown.length && <span className="change-muted">and {items.length - shown.length} more</span>}</>;
+  return <>{shown.map((item, index) => <Fragment key={item.id}>{index > 0 && ', '}<ItemName item={item} route={route} label={labels.get(item.id)} onOpen={onOpen} /></Fragment>)}
+    {items.length > shown.length && <span className="change-muted"> and {items.length - shown.length} more</span>}</>;
 }
+
+const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+/** Small counts read as words in a sentence ("Two things need you"), larger ones as digits. */
+const countWord = (count: number) => COUNT_WORDS[count] ?? String(count);
+
+/** SPEC 5.5: each counted line of the away summary leads with its status icon; findings to ack use the plain check. */
+const AWAY_ICON: Readonly<Record<AwayGroup['key'], { readonly icon: string; readonly color: string }>> = {
+  waiting: { icon: STATUS.waiting.icon, color: statusColor('waiting') },
+  decided: { icon: STATUS.decided.icon, color: statusColor('decided') },
+  ack: { icon: 'ph ph-check', color: 'var(--color-text)' },
+  replaced: { icon: STATUS.replaced.icon, color: statusColor('replaced') },
+  progress: { icon: STATUS.progress.icon, color: statusColor('progress') },
+};
 
 /** The agent's own paragraph, folded to three lines; "Show more" appears only when the text is cut. */
 function BriefLead({ text }: { readonly text: string }) {
@@ -129,14 +142,16 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
 
   return <div className="changes-body" data-testid="changes-body">
     {longAway && <section className="changes-section changes-away" aria-label="While you were away">
-      <p>You were away since {weekdayName(summary.baseline!)} {clockTime(summary.baseline!)}. A lot moved in this topic{quiet && quiet.count * 2 >= summary.changeCount ? ', most of it progress notes' : ''}.
-        {needs ? ` ${needs.count === 1 ? 'One thing needs' : `${needs.count} things need`} you.` : ''}</p>
-      <ul className="changes-away-list">{away.map(group => <li key={group.key}><strong>{group.count}</strong> {group.label}
+      <p className="changes-away-lead">You were away since {weekdayName(summary.baseline!)} {clockTime(summary.baseline!)}. A lot moved in this topic{quiet && quiet.count * 2 >= summary.changeCount ? ', most of it progress notes' : ''}.
+        {needs ? ` ${needs.count === 1 ? 'One thing needs' : `${countWord(needs.count)} things need`} you.` : ''}</p>
+      <ul className="changes-away-list">{away.map(group => <li key={group.key}>
+        <i className={`${AWAY_ICON[group.key].icon} changes-away-icon`} style={{ color: AWAY_ICON[group.key].color }} aria-hidden="true" />
+        <span className="changes-away-count">{group.count}</span><span className="changes-away-label">{group.label}</span>
         {group.key !== 'progress' && <span className="changes-away-names"><Names items={group.items} session={session} route={route} onOpen={onOpenItem} /></span>}</li>)}</ul>
       <div className="changes-away-actions">
-        {waiting[0] && <button type="button" className="btn btn-primary" onClick={() => onOpenItem(waiting[0]!.id)}><i className="ph-fill ph-question" aria-hidden="true" /> Start with what’s waiting</button>}
-        <button type="button" className="btn btn-secondary" onClick={() => { toggleBrief(true); briefButton.current?.focus(); }}>Read the brief</button>
-        {canUndo ? undoButton : <button type="button" className="btn btn-ghost" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>Mark all caught up</button>}
+        {waiting[0] && <button type="button" className="changes-action" data-kind="primary" onClick={() => onOpenItem(waiting[0]!.id)}><i className="ph-fill ph-question" aria-hidden="true" />Start with what’s waiting</button>}
+        <button type="button" className="changes-action" data-kind="outline" onClick={() => { toggleBrief(true); briefButton.current?.focus(); }}>Read the brief</button>
+        {canUndo ? undoButton : <button type="button" className="changes-action" data-kind="ghost" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>Mark all caught up</button>}
       </div>
     </section>}
     {caughtUp && <p className="changes-caught-up" role="status"><i className="ph ph-check-circle" aria-hidden="true" />
@@ -147,21 +162,24 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
       <div className="changes-since-head">
         <span className="changes-label-caps">Since you were here</span>
         <span className="change-muted">{data.list.length} unseen{since ? ` · since ${since}` : ''}</span>
-        {!longAway && (canUndo ? undoButton : <button type="button" className="btn btn-ghost changes-catch-up" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>✓ Mark all caught up</button>)}
+        {!longAway && (canUndo ? undoButton : <button type="button" className="changes-catch-up" title="Clears every marker. Nothing is acked or changed." aria-label="Mark all caught up" onClick={catchUp}><i className="ph ph-check" aria-hidden="true" />
+          <span className="changes-catch-up-verb" aria-hidden="true">Mark </span><span className="changes-catch-up-rest" aria-hidden="true">all caught up</span></button>)}
       </div>
       <ul className="changes-rows">{rows.map(entry => {
         const { row, kind } = entry, item = row.item, marked = seenHere.has(item.id);
         const name = labels.get(item.id) ?? shortLabel(item);
         const label = row.replacement && item.status === 'replaced' ? `Replaced by “${labels.get(row.replacement.id) ?? shortLabel(row.replacement)}”` : changeLabel(item, entry.record, entry.later);
         return <li className="changes-row" data-testid="changes-row" key={item.id} data-item-id={item.id} data-kind={kind} data-seen={marked || undefined}>
-          <StatusBadge status={statusKey[displayStatus(session, item)]} variant="icon" size={15} />
-          {!marked && <ChangeMarker kind={kind} />}
-          <ItemName item={item} route={route} label={name} onOpen={onOpenItem} />
-          <span className="changes-what" data-tone={kind === 'new' ? 'new' : undefined}>{label}</span>
-          <time className="changes-time" dateTime={entry.at}>{clockTime(entry.at)}</time>
-          <button type="button" className="btn btn-ghost changes-seen" disabled={marked} title="Mark seen" aria-label={marked ? `${name} is seen` : `Mark ${name} seen`}
-            onClick={() => markSeen(entry)}>{marked ? '✓ Seen' : '✓'}</button>
+          <StatusBadge status={statusKey[displayStatus(session, item)]} variant="icon" size={14} />
+          <span className="changes-line">
+            {!marked && <ChangeMarker kind={kind} />}
+            <ItemName item={item} route={route} label={name} onOpen={onOpenItem} />
+            <span className="changes-what" data-tone={waitingOnOwner(session, item) ? 'ask' : undefined}>{label}</span>
+          </span>
           <Compare row={row} session={session} why={item.why} variant="link" />
+          <time className="changes-time" dateTime={entry.at}>{clockTime(entry.at)}</time>
+          <button type="button" className="changes-seen" disabled={marked} title="Mark seen" aria-label={marked ? `${name} is seen` : `Mark ${name} seen`}
+            onClick={() => markSeen(entry)}><i className="ph ph-check" aria-hidden="true" /></button>
         </li>;
       })}</ul>
     </section>}

@@ -18,7 +18,7 @@ and plugin manifests. It must render `plugin/hooks/installed.js` as an ESM modul
 exporting `Object.freeze({helperPath: ABSOLUTE_INSTALLED_HELPER_PATH,
 appVersion: MATCHING_APP_AND_PLUGIN_VERSION, apiVersion: 1})`. Source checkouts
 export `null`, so they cannot accidentally use a development helper or cached
-plugin-relative executable. App/helper version is currently `0.1.0`; the Mod
+plugin-relative executable. App/helper version is stamped per alpha (`0.1.0-alpha.N`); the Mod
 manifest must match it. The installer owns rendering and version substitution.
 
 `/ariadne-connect` sends actual SDK session ID/cwd through canonical owner commands,
@@ -77,8 +77,15 @@ remembered conversation (`claude --resume`) reconnects automatically; a new one 
 announces itself and stays discoverable through its heartbeat while idle. `/clear`
 and `/resume` (`session.end` with that reason) end the conversation, not the
 process: the Mod reports the old conversation's end, follows the new conversation
-ID to the same Ariadne session and announces it at once (when Claude keeps the
-conversation ID, on the next poll tick). Each reconnect rotates the generation, so
+ID to the same Ariadne session and announces it at once. Claude reports the end
+before `$.session.id()` returns the new ID, so automatic reconnect never binds the
+ended ID until a conversation shows it runs there: the ID changes, a main-thread
+turn starts, or a heartbeat comes 5 s or more after the end (a Claude build that
+keeps the ID across `/clear` reconnects then). `/ariadne-connect` is never held. A
+connect for the ended conversation that may have saved (a reply lost or still
+running at the change) is looked up, never sent again; a saved one gets its
+session-end report, and one the app has not saved 60 s after its send is dropped.
+Each reconnect rotates the generation, so
 the Mod adds a note with the new routing to the conversation with
 `$.session.append` (a meta row Claude reads on its next turn, not a prompt) and
 retries it on the poll tick while the engine has no conversation to take it. If the app refuses the
@@ -105,8 +112,16 @@ a heartbeat with nothing to drain, a poll that finds a message already being
 answered, or an empty report flush. A producer counts from its first outcome until it
 is retired: its loop stops, its binding ends, it qualifies, or the conversation
 resets. A call that ends after its producer retired records nothing. Nothing expires
-with time. A call still open after ten seconds (the helper's eight-second limit plus
-two seconds) counts as a temporary timeout for its producer until it ends. The
+with time. A call still open longer than its producer's helper runs counts as a
+temporary timeout for its producer until it ends: each helper run is killed after
+eight seconds, so a call is hung after eight seconds per run it typically makes in
+turn, plus two. The counts are typical, not maxima: a larger backlog can run more.
+Announce, qualification and claim make one run (ten seconds); a turn callback saves
+two events when its turn starts (18 seconds); a report flush saves up to five events
+(42 seconds); an automatic reconnect drains reports, registers the project, connects
+and waits for the route, eight runs (66 seconds). A hung turn callback shows the turn
+callback's own line, below. A routing note is not part of the reconnect call:
+the reconnect finishes without it, and the poll tick retries the note. The
 current condition is the most important live outcome:
 terminal, installation failure, owner-needed held advice, generic held advice,
 transient failure, then healthy. The line already showing stays while its producer
@@ -121,7 +136,11 @@ spawn codes distinguish these from temporary process failures; raw text is never
 A helper stopped before it wrote anything counts as a temporary timeout.
 
 Transient failures share one retry sentence, except that a missing or inaccessible
-project folder keeps its own words. They and generic held advice speak after
+project folder keeps its own words, and a turn callback that failed (nothing runs it
+again; its unsaved reports are retried by the report producer) says Ariadne could not
+record what just happened, without promising to keep trying. When the app removes a
+binding, the claim producer's removal line is printed once and the producer then
+retires. They and generic held advice speak after
 two minutes of continuous unhealthy outcomes, even when codes change or urgent advice
 intervenes, and are spaced at least two minutes apart. A retry line never replaces
 held, installation or terminal advice until the producer that printed it recovers or

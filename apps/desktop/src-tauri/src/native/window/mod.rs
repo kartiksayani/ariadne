@@ -8,9 +8,9 @@ mod preferences;
 pub(crate) mod quit_note;
 #[cfg(target_os = "macos")]
 pub(crate) mod wake;
-pub use desktop::NativeWindow;
 #[cfg(test)]
 pub(crate) use desktop::{first_show, show_after};
 pub(crate) use desktop::{focus_webview, present};
+pub use desktop::{Fit, NativeWindow};
 #[cfg(test)]
 pub(crate) use preferences::WindowPreferenceWrite;

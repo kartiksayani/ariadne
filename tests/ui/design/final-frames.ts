@@ -2,6 +2,14 @@
 // where the board draws it (part + sid), what the app is put in to match it (an AppFixture), whether the app is
 // compared yet (`pending`), and who is expected to turn that on. Thresholds live in final-thresholds.json.
 // Kept free of app imports: Node (final.spec.mts) and Vite (final-gallery.tsx) read it alike.
+//
+// Owner-asked deviation from the board (owner 2026-10-19: variant B + AA muted/pill): the Map's branch boxes use the stronger "variant B"
+// tints and edges in both themes (tree-boxes.css `--tree-fw-*` / `--tree-fe-*`), a closed row's question text is the text colour at 76%
+// (the board: 64%), and a Map row's status badge text and pill use the `--st-*-ink` tokens. All three reach WCAG AA 4.5:1 on every box tint
+// and on the page; the board's colours do not. The comparison's per-channel tolerance still passes every Map state, so no region or
+// mask was needed; a new state that draws these colours and fails by a few channel steps is this deviation, not a layout fault.
+// The grey preview lines ("Parked for later", "Replaced by") and the hidden strip text are 76%, the Undo/bin strip text 84% and a hidden
+// branch's chip text 86% (the board: 58-66%), for the same 4.5:1.
 import { Q1, Q2, note1, type MarkSet } from './final-world';
 
 /** The three renders of every state: the board's light and dark at 1280 x 800, and its light at 900 x 650. */
@@ -189,8 +197,9 @@ const stateList: readonly FinalState[] = [
   { id: '1.1', part: 'Window', sid: 'b-wait', owner: 'dock', pending: false, title: 'Question waiting', app: { view: { dock: 'open', dockQuestion: 0 } } },
   { id: '1.2', part: 'Window', sid: 'b-sel', owner: 'details', pending: false, title: 'Item selected', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
   { id: '1.3', part: 'Window', sid: 'b-graph', owner: 'details', pending: false, title: 'Graph', app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' },
-    // Neither the Graph nor a folded Details is saved data the fixture can set: the owner's two clicks reach them.
-    act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+    // Neither the Graph nor a folded Details is saved data the fixture can set: the owner's two clicks reach them. Details folds first: the Graph
+    // fits its column once, to the Map's width when it opens (alpha.22 E13), and the board's Graph is drawn beside a folded Details.
+    act: [{ click: 'Fold Details' }, { click: 'Graph' }] } },
   { id: '1.4', part: 'Window', sid: 'b-long', owner: 'shell', pending: false, title: 'Long text', app: { items: { longText: true }, view: { selected: 'a8', details: 'open', dock: 'line', shown: ['a7'] } } },
   // 2. Answering in the dock
   { id: '2.1', part: 'Answering', sid: 'd-opts', owner: 'dock', pending: false, title: 'Three options, one recommended, with a note on the picked one', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 0, note: note1 })] } },
@@ -274,7 +283,7 @@ const marked = (marks: MarkSet, rest: Omit<NonNullable<AppFixture['map']>, 'mark
 const openChanges: Step = { click: '5 changed' };
 const mapStateList: readonly FinalState[] = [
   { id: '1.3m', part: 'Window', sid: 'b-graph', owner: 'graph', pending: false, title: 'Graph: the Map body',
-    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Fold Details' }, { click: 'Graph' }, { scroll: 'top' }] } },
   { id: '3.1m', part: 'Conversation', sid: 'c-details', owner: 'rows', pending: false, title: 'Details beside the Map: the Map body',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: {} } },
   { id: '3.6m', part: 'Conversation', sid: 'c-fold', owner: 'rows', pending: false, title: 'Details folded, dock open: the Map body',
@@ -302,7 +311,7 @@ const mapStateList: readonly FinalState[] = [
   { id: '5.7', part: 'Changes', sid: 'w-item', owner: 'changes', pending: false, title: 'On an item: what changed and why, with older history',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
   { id: '7.2', part: 'Related', sid: 'r-graph', owner: 'graph', pending: false, title: 'In the Graph: related items as dashed lines',
-    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Fold Details' }, { click: 'Graph' }, { scroll: 'top' }] } },
   { id: '8.2', part: 'Find', sid: 'f-filter', owner: 'filter', pending: false, title: 'Filter by status, Waiting on me first',
     app: { view: { selected: null, dock: 'line' }, map: { filter: ['waiting_on_me', 'open'] }, act: [{ click: 'Filter by status' }] } },
   { id: '8.3', part: 'Find', sid: 'f-recent', owner: 'changes', pending: false, title: 'Recent: what I viewed and what changed lately',
@@ -314,7 +323,7 @@ const mapStateList: readonly FinalState[] = [
   { id: '9.2', part: 'Markers', sid: 'm-next', owner: 'band', pending: false, title: 'n, or Next on the topic band, outlines the next unseen item',
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
   { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: false, title: 'On Graph cards: the diamond alone, same shapes',
-    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Fold Details' }, { click: 'Graph' }, { scroll: 'top' }] } },
   // alpha.21 W3 (Details body): the markers in the dock and in Details. Pending until W2's head is merged: the body starts where the head ends, so
   // the regions (the badge row, the change box, the actions row) are set on the integrated frame, not on this branch's.
   { id: '9.7', part: 'Markers', sid: 'm-dock', owner: 'changes', pending: true, title: 'In the answer dock: a question that changed since I last saw it',
@@ -390,7 +399,8 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // 12.2's steps: the head and the first step hold. The second step says where Codex's instruction comes from when no setup receipt is at hand
   // (the board's has a Copy instruction button), so it and the foot below it sit at another height.
   '12.2': [...topBar(BAR), ...box('connection line, head and first step', [0, 40, 1280, 82], [0, 40, 900, 82]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
-  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.3 holds the line without its button: the button says "Connection…" where the board says "Sending…" (alpha.22 E5, asked by the owner).
+  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1060, 56], [0, 40, 700, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
   '12.4': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLine()],
   // 12.6 holds the line's icon and title and its button: the sentence between has no drop time (§3a).
   '12.6': [...topBar(BAR), ...box('connection line title', [0, 40, 260, 56], [0, 40, 260, 56]), ...box('connection line button', [1180, 40, 100, 56], [800, 40, 100, 56]),
@@ -443,6 +453,10 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
  * - D12: the board's "…" menu has "Continue here", which the app does not show, so the rows under it sit 43px lower in the board: 10.12
  *   compares the menu's first row only. D8 and D10 are in the band (one line where the board has two, "· N waiting" on strips): a band
  *   region that differs by the count text alone is reported as such.
+ * - alpha.22 hover bar (owner-asked deviation from the board's "x-hover", "p-hover" and hover-bar states): the board draws the bar over the
+ *   row, left of the markers, on top of the title's end. The app floats it just above the row's top edge, right-aligned (just below the
+ *   first row under the band), so it never covers the title. No state compares it: Map rows are never compared (D1), and the hover-step
+ *   states (10.2, 10.3, 12.9) click its buttons and compare their dialog, toast or strip only. tests/e2e/tree-layout pins the placement.
  * Thresholds: 0.01; 0.02 for the overlays that are mostly text (a line a pixel off moves a few percent of a text box).
  */
 const MAP: Limits = [0.01, 0.01], TEXT: Limits = [0.02, 0.02];
@@ -472,14 +486,18 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
     { name: 'topic band (narrow, counts on the title line)', rect: [0, 40, 900, 62], variants: NARROW, threshold: MAP[1] }, ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
   '5.1': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
   // The What changed popover covers the band's counts line and the first row's left part: the band is compared down to the popover's top edge.
-  // The popover is compared at its head and its "Brief" line (the first 64px): below it the brief's items, the since-you-were-here rows and
-  // the summary are the fixture's own data (the brief's length, the change records: ALPHA20-REPLAN §3a "data, not deviations").
-  '5.2': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head and brief line)', [12, 84, 540, 64], [12, 100, 540, 64], TEXT, underBandEdge),
+  // The What changed popover is compared where it carries structure (alpha.22 E14): the head, the brief line (5.2), and for 5.3 the closed brief
+  // and the "Since you were here" head with its button. Below them the popover is the fixture's own data, so it is not compared: the brief's
+  // groups and texts, the away summary's names and counts (the board draws five lines where the fixture has three, so everything under them sits
+  // higher), and the since cards' names, order and wording (the board's order is its own; the app lists by time). Their structure (status
+  // icon column, bold counts, 28px actions, card tint and dimming, pill, "› Before → after", time and check at the right) is held by the
+  // popover's design tests (design.spec.mts, "What changed popover structure") and the unit tests, not by pixels.
+  '5.2': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head and brief line)', [12, 84, 541, 64], [12, 100, 541, 64], TEXT, underBandEdge),
     ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
-  '5.3': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head and brief line)', [12, 84, 540, 64], [12, 100, 540, 64], TEXT, underBandEdge),
+  '5.3': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head, closed brief, Since you were here head)', [12, 84, 541, 126], [12, 100, 541, 124], TEXT, underBandEdge),
     ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
   '5.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
-  '5.5': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 60], MAP), ...underBand('What changed popover (title)', [12, 84, 130, 40], [12, 100, 130, 40], TEXT, underBandEdge),
+  '5.5': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 60], MAP), ...underBand('What changed popover (head)', [12, 84, 541, 40], [12, 100, 541, 40], TEXT, underBandEdge),
     ...box('first row (right of the popover)', [556, 82, 724, 66], [556, 102, 344, 66], MAP)],
   '5.6': box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP),
   '5.7': [...box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP), wideOnly('first row', [0, 133, 880, 66], 0.01)],

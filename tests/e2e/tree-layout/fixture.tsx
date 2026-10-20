@@ -129,14 +129,28 @@ class TreeLayoutTransport extends AppTransport {
       return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
         data: { kind: 'topic_lifecycle', topic_id: topic.id, topic_revision: topic.revision, archived_at: topic.archived_at } } } as T;
     }
-    return super.invoke<T>(name, args);
+    const result = await super.invoke<T>(name, args);
+    // The session list names the host's latest report for the active binding, as the real list does. The store re-reads it every
+    // poll (2 s) and lets it replace its live presence, so a list that still told the opening report ("connected") would undo a
+    // reported drop within a poll, and a poll already in flight when the drop came would undo it before the spec could look.
+    if (!('command' in request) && request.request.command === 'session_list') {
+      for (const summary of (result as { data: { data: { sessions: { items: { active_binding: { id: string; presence: unknown } | null }[] } } } }).data.data.sessions.items) {
+        const report = summary.active_binding && this.hostReports.get(summary.active_binding.id);
+        if (report) summary.active_binding!.presence = structuredClone(report);
+      }
+    }
+    return result;
   }
+  /** The latest presence report per binding, as the host last sent it (see `agent`). */
+  private readonly hostReports = new Map<string, unknown>();
   /** What the agent writes while the owner reads: the session's next revision, announced as the desktop does. */
   agent(change: string) {
     const session = this.sessions.get(route.session_id)!, items = session.items;
     if (change === 'add-above') items['3.1'] = { ...items['1.1']!, id: '3.1', parent: '3', ordinal: 40, question: 'A new finding above the reading row' };
     if (change === 'add-below') items['40'] = { ...items['18']!, id: '40', ordinal: 40, question: 'A new item at the end' };
     if (change === 'ack-lands') { items['12']!.status = 'done'; items['12']!.ack_to = null; ++items['12']!.revision; }
+    // A result above the reading row arrives with an Ack to give: its row takes the wider Ack slot and may rewrap.
+    if (change === 'ack-gains-above') { Object.assign(items['9']!, { type: 'finding', ack_to: 'done', ask: null }); ++items['9']!.revision; }
     if (change === 'counts') { items['15']!.status = 'in_progress'; ++items['15']!.revision; }
     // The agent renames an item above the reading row to a much longer name: it wraps to more lines.
     if (change === 'grow-above') { items['9']!.question = 'Another item 9, renamed to a much longer name that wraps over several lines in the Map. '.repeat(3); ++items['9']!.revision; }
@@ -146,9 +160,12 @@ class TreeLayoutTransport extends AppTransport {
     const binding = session.bindings[session.active_binding_id!]!;
     if (change === 'agent-stops') { binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; }
     // The host's own report outranks the stored state, so the drop and the return are reported as the host would.
-    const reported = (connection_state: 'connected' | 'reconnecting') => this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation,
-      observation: { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
-        source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never });
+    const reported = (connection_state: 'connected' | 'reconnecting') => {
+      const observation = { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
+        source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never;
+      this.hostReports.set(binding.id, observation);
+      this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation });
+    };
     if (change === 'connection-drops') { binding.connection_state = 'reconnecting'; reported('reconnecting'); return; }
     if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; reported('connected'); }
     if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
@@ -204,7 +221,7 @@ function ActionGridFixture() {
     collapsed: null, delivery: null, badge: 'Open', branch: 0, boxes: [] };
   // The hover bar's six slots in SPEC 6.2's order, then Ack in its own persistent slot.
   const definitions = [
-    { icon: 'ph ph-check', title: 'Ack → Decided', label: 'Ack', persistent: true },
+    { icon: 'ph ph-check', title: 'Ack → In progress', label: '→ In progress', persistent: true },
     { icon: 'ph ph-chat-text', title: 'Reply (r)' }, { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)' },
     { icon: 'ph ph-clock', title: 'Later (z)' }, { icon: 'ph ph-x-circle', title: 'Drop (d)' },
     { icon: 'ph ph-eye-slash', title: 'Hide (h)' }, { icon: 'ph ph-trash', title: 'Remove (⌫)' },
@@ -214,7 +231,7 @@ function ActionGridFixture() {
     remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onSelect: () => setSelected(true), onToggle: () => {}, onHover: () => {} };
   return <>
     {/* 560px is the desktop's minimum centre column, including when both side panels are open. */}
-    <div className="tree-column" style={{ width: 'min(560px, 100%)' }}>
+    <div className="tree-column" style={{ width: 'min(560px, 100%)', containerName: 'tree-map', containerType: 'inline-size' }}>
       <ItemRow {...props} row={row} selected={selected} actions={actions} />
       <ItemRow {...props} row={{ ...row, key: '2', item: immutable({ ...item, id: '2', ordinal: 2 }) }} selected={false} actions={[]} />
     </div>

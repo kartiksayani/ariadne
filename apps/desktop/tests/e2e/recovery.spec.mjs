@@ -72,7 +72,7 @@ async function openPrimary(configuration) {
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Recovery selected a different item');
 }
 
-/** Opens the "Sending to <agent>" dialog from the open session's connection card (its Sending… button). */
+/** Opens the "Connection to <agent>" dialog from the open session's connection card (its Sending… button). */
 const openDispatch = () => openSendingDialog();
 
 // The primary item is still waiting and already has its handled answer, so every owner message here is a reply opened

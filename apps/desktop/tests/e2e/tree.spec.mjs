@@ -470,6 +470,8 @@ async function completeRowLayout(id, item) {
   if (opened) await wait(async () => await browser.execute(id => document.querySelector(`.tree-rows [data-item-id="${id}"]`)?.hasAttribute('data-open'), id), 'Show more did not expand the complete row');
   const layout = await browser.execute(id => {
     const row = document.querySelector(`.tree-rows [data-item-id="${id}"]`);
+    // The hover bar floats against the row (alpha.22), and overhangs it where the pointer rests; it is not text, so leave it out of the measure.
+    const floating = row.querySelector(':scope > [data-side]'); floating?.style.setProperty('display', 'none');
     const bounds = element => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, height: value.height }; };
     const parts = ['.tree-question', '.tree-outcome > .tree-clamp'].map(selector => {
       const element = row.querySelector(selector); if (!element) return null;
@@ -487,7 +489,9 @@ async function completeRowLayout(id, item) {
       return { text: element.textContent, bounds: bounds(element), fragments, containers,
         lineHeight: Number.parseFloat(window.getComputedStyle(element).lineHeight) };
     });
-    return { row: bounds(row), question: parts[0], outcome: parts[1] };
+    const result = { row: bounds(row), question: parts[0], outcome: parts[1] };
+    floating?.style.removeProperty('display');
+    return result;
   }, id);
   for (const [name, text] of [['question', item.question], ['outcome', item.outcome]]) {
     if (text === null) continue;
@@ -515,6 +519,34 @@ async function isolated(configuration, original, journal, demoBytes) {
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBytes);
 }
 
+const treeSessionStatus = () => browser.execute(() => document.querySelector('.tree-column')?.getAttribute('data-session-status') ?? null);
+const revealNotice = () => browser.execute(() => document.querySelector('.pw-note[data-notice-id="tree-reveal-failed"] .pw-note-text')?.textContent ?? null);
+// Click a row and wait for its selection to persist. The app refuses a click while the session store is not ready (the retryable
+// notice 'Ariadne is still loading this session's latest changes'). Wait for ready first; on one refusal, record it, dismiss it and click once more.
+async function selectRow(tree, id, message) {
+  const ready = () => wait(async () => await treeSessionStatus() === 'ready', `The tree was not ready before clicking ${id}`);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await ready();
+    const clickedAt = new Date().toISOString();
+    await (await row(id)).click();
+    let refusal = null;
+    await wait(async () => {
+      if ((await preferences(tree)).view.selected_item_id === id) return true;
+      refusal = await revealNotice();
+      return refusal !== null;
+    }, message);
+    if (refusal === null) return;
+    const sessionStatus = await treeSessionStatus();
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, `tree-reveal-refused-${id}-attempt-${attempt}.json`),
+      JSON.stringify({ id, attempt, notice: refusal, sessionStatus, clickedAt, observedAt: new Date().toISOString() }, null, 2));
+    if (attempt === 2) break;
+    const dismiss = await browser.$('.pw-note[data-notice-id="tree-reveal-failed"] .pw-note-dismiss');
+    if (await dismiss.isExisting()) await dismiss.click();
+    await wait(async () => await revealNotice() === null, 'The refused-reveal notice did not close');
+  }
+  throw new Error(message);
+}
+
 export async function runTreeAcceptance(configuration) {
   try { await treeAcceptance(configuration); }
   catch (error) {
@@ -524,6 +556,7 @@ export async function runTreeAcceptance(configuration) {
     try {
       const observed = await browser.execute(() => ({
         viewport: { width: window.innerWidth, height: window.innerHeight },
+        sessionStatus: document.querySelector('.tree-column')?.getAttribute('data-session-status') ?? null,
         visibilityState: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus(),
         measurement: window.__ariadneTreeMeasurement, filterAction: window.__ariadneTreeFilterAction,
         rows: [...document.querySelectorAll('.tree-rows [role="treeitem"]')].slice(0, 2000)
@@ -551,6 +584,8 @@ export async function runTreeAcceptance(configuration) {
 }
 async function treeAcceptance(configuration) {
   const viewport = await browser.execute(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  // The visible screen: a screen smaller than the minimum lowers it, so the window still fits (CI's screen is 1024×768).
+  const screenArea = await browser.execute(() => ({ width: window.screen.availWidth, height: window.screen.availHeight }));
   const nativeWindow = await browser.execute(async () => {
     try {
       const physical = await window.__TAURI_INTERNALS__.invoke('plugin:window|outer_size', { label: 'main' });
@@ -558,10 +593,10 @@ async function treeAcceptance(configuration) {
       return { ok: true, physical, scaleFactor, logical: { width: physical.width / scaleFactor, height: physical.height / scaleFactor } };
     } catch (error) { return { ok: false, message: String(error) }; }
   });
-  await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-window.json'), JSON.stringify({ viewport, nativeWindow }, null, 2));
+  await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-tree-window.json'), JSON.stringify({ viewport, screenArea, nativeWindow }, null, 2));
   assert.equal(nativeWindow.ok, true, nativeWindow.message);
-  assert.ok(nativeWindow.logical.width >= 1300 && nativeWindow.logical.height >= 760,
-    'Native tree acceptance must use the supported minimum outer-window size');
+  assert.ok(nativeWindow.logical.width >= Math.min(1100, screenArea.width) - 1 && nativeWindow.logical.height >= Math.min(760, screenArea.height) - 1,
+    'Native tree acceptance must use the supported minimum outer-window size, or the visible screen when that is smaller');
   const original = await snapshot(configuration), journal = await admissions(configuration), demoBytes = await readFile(configuration.demo.sessionPath);
   const { tree, publication, initialSession } = await seedTree(configuration);
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-publication.json'), JSON.stringify({ tree, publication, initialSession }, null, 2));
@@ -643,7 +678,7 @@ async function treeAcceptance(configuration) {
   await browser.$('button=Show them').click();
   await wait(async () => (await visibleIds()).includes('1.1'), 'Show them did not reveal the matching item');
   assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Show them must not save a fold');
-  await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
+  await (await search()).waitForEnabled(); await selectRow(tree, '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
   // Home lands on the topic band (no item id); → steps into its first row; ← goes back to the parent (h and l are gone: SPEC 6.1).
   for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '20.99'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
@@ -651,8 +686,7 @@ async function treeAcceptance(configuration) {
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
   await (await search()).waitForEnabled(); await browser.keys('Enter'); await wait(async () => (await preferences(tree)).view.selected_item_id === '1', 'Keyboard Enter did not select through the registered reveal route');
-  await (await search()).waitForEnabled(); await (await row('1.1')).click();
-  await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
+  await (await search()).waitForEnabled(); await selectRow(tree, '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
   // A search it does not match hides nothing and raises no banner; the selection stays.

@@ -124,7 +124,7 @@ describe('the "…" menu (D12)', () => {
   it('greys the bin at count 0 with the reason, and Reply while the agent is away', () => {
     const { calls } = open({ bin: { count: 0, open: vi.fn() }, reply: { run: vi.fn(), unavailable: 'the agent is not running' } });
     const bin = screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Open the bin/ }), reply = screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ });
-    expect(bin.disabled).toBe(true); expect(bin.title).toBe('Nothing in the bin'); expect(bin.textContent).toContain('Nothing in the bin');
+    expect(bin.disabled).toBe(true); expect(bin.title).toBe('Nothing in the bin'); expect(bin.textContent).toContain('Empty'); expect(bin.textContent).not.toContain('Restore or empty');
     expect(reply.disabled).toBe(true); expect(reply.title).toBe('Reply to topic: the agent is not running');
     fireEvent.click(bin); fireEvent.click(reply);
     expect(calls.bin).not.toHaveBeenCalled(); expect(calls.reply).not.toHaveBeenCalled();

@@ -1357,12 +1357,28 @@ describe('session tree filters', () => {
     expect(await screen.findByText(outsideNotice)).toBeTruthy();
     expect(within(row('1.1')).getByText('Outside filter')).toBeTruthy();
     expect(ids()).toEqual(['1', '1.1', '2']);
-    expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('64%');
+    expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('76%');
     fireEvent.click(screen.getByRole('button', { name: 'Hide it again' }));
     expect(calls.resumed).toBe(1);
     await waitFor(() => expect(viewOf(transport).selected_item_id).toBeNull());
     rerender({ reveal: null, selectedId: null });
     await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull()); expect(ids()).toEqual(['2']);
+  });
+  it('ends the outside-filter notice for a reveal the Graph dismissed, keeps drawing the item, and raises it again for a new reveal', async () => {
+    const { transport, store, rerender } = await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['waiting_on_me']; viewOf(transport).expanded_item_ids = [];
+    } });
+    render(<Notices />);
+    const reveal: RevealedItem = { kind: 'item', route: { ...route, item_id: '1.1' }, store, temporaryExpandedItemIds: ['1'] };
+    rerender({ reveal, selectedId: '1.1' });
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
+    rerender({ reveal, selectedId: '1.1', bannerDismissed: true });
+    await waitFor(() => expect(screen.queryByText(outsideNotice)).toBeNull());
+    // Only the notice goes: the item is still drawn, and the saved view is untouched.
+    expect(ids()).toEqual(['1', '1.1', '2']);
+    expect(viewOf(transport).selected_item_id).toBeNull();
+    rerender({ reveal: { ...reveal }, selectedId: '1.1', bannerDismissed: false });
+    expect(await screen.findByText(outsideNotice)).toBeTruthy();
   });
   it('holds the chips while a preference write is unconfirmed', async () => {
     const { transport } = await mount();
@@ -2426,11 +2442,12 @@ describe('item details in the tree', () => {
 
   it('floats the shortcut icons over the row so the text never changes width on hover', async () => {
     await mount();
-    const body = row('4').querySelector('.tree-body')!, before = row('4').innerHTML;
-    expect(row('4').querySelector('.tree-end > .tree-actions')).not.toBeNull();
+    const body = row('4').querySelector('.tree-body')!, same = () => row('4').innerHTML.replace(/ data-side="\w+"| style="(?:(?:top|right): [^;"]*;? ?)+"/g, ''), before = same();
+    expect(row('4').querySelector(':scope > .tree-actions')).not.toBeNull();
+    expect(row('4').querySelector('.tree-end .tree-actions')).toBeNull();
     fireEvent.mouseEnter(row('4'));
-    expect(row('4').innerHTML).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body);
-    // The hover bar is absolute inside the end cluster (it takes no room) and only fades in; it is never display:none,
+    expect(same()).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body); // only the side (and the top or right edge) the bar floats at may change
+    // The hover bar is absolute against the row, above or below it (it takes no room) and only fades in; it is never display:none,
     // so showing it lays nothing out again. The cluster's slots keep fixed widths (alpha.20 C4).
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-actions\b/.test(selector!));

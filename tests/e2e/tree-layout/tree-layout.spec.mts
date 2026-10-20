@@ -318,6 +318,83 @@ test('folds a long preview to three lines, never rewraps on hover and never scro
   } finally { await server.close(); }
 });
 
+test('floats the hover bar above the row, or below the first row under the band, never over the title, and keeps it reachable', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await openTree(page, `http://127.0.0.1:${address.port}`);
+    const scroller = page.locator('.tree-scroll');
+    // Where the row's title text is drawn (every line box) and its text column, and the bar, as rectangles.
+    const geometry = (row: Locator) => row.evaluate(element => {
+      const range = document.createRange(); range.selectNodeContents(element.querySelector('.tree-question')!);
+      const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+      return { row: box(element.getBoundingClientRect()), bar: box(element.querySelector('.tree-actions')!.getBoundingClientRect()),
+        text: [...range.getClientRects(), element.querySelector('.tree-body')!.getBoundingClientRect()].map(box), side: element.querySelector<HTMLElement>('.tree-actions')!.dataset.side };
+    });
+    const overlaps = (a: { left: number; right: number; top: number; bottom: number }, b: typeof a) =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const rows = page.locator('.tree-item');
+    // The bar never covers the end cluster (Ack, status pill, related count, marker) of the row it floats over: those controls stay
+    // reachable, so moving up to click one cannot land on this row's Remove or Hide. The point at each slot's centre belongs to that row.
+    const clusterUncovered = (row: Locator, side: 'previous' | 'next') => row.evaluate((element, which) => {
+      const neighbour = which === 'previous' ? element.previousElementSibling : element.nextElementSibling;
+      if (!neighbour?.matches('.tree-item')) return null;
+      const bar = element.querySelector('.tree-actions')!.getBoundingClientRect();
+      const slots = [...neighbour.querySelectorAll('.tree-end-slot')].map(slot => slot.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
+      const covered = slots.filter(rect => {
+        const hit = document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+        return !hit || hit.closest('.tree-actions') !== null || !neighbour.contains(hit);
+      }).length;
+      const clusterLeft = Math.min(...[element, neighbour].map(row => row.querySelector('.tree-end')!.getBoundingClientRect().left));
+      return { slots: slots.length, covered, barRight: bar.right, clusterLeft };
+    }, side);
+    // A row in the middle of the page: the bar is above its top edge and clear of its title.
+    const middle = rows.filter({ has: page.locator('.tree-actions') }).nth(2);
+    await middle.evaluate(element => element.scrollIntoView({ block: 'center' }));
+    await page.mouse.move(0, 0);
+    const scrollTop = await scroller.evaluate(element => element.scrollTop), before = (await middle.boundingBox())!;
+    await middle.hover();
+    await expect(middle.locator('.tree-actions')).toHaveCSS('opacity', '1');
+    const mid = await geometry(middle);
+    for (const text of mid.text) expect(overlaps(mid.bar, text), 'the bar covers the title').toBe(false);
+    expect(mid.side).toBe('above');
+    expect(mid.bar.bottom).toBeLessThanOrEqual(mid.row.top + 6);
+    expect(mid.bar.top).toBeLessThan(mid.row.top);
+    expect(mid.bar.right).toBeLessThanOrEqual(mid.row.right);
+    // Showing the bar moves nothing, and the pointer reaches it without the row losing its hover.
+    expect(await scroller.evaluate(element => element.scrollTop)).toBe(scrollTop);
+    expect(await middle.boundingBox()).toEqual(before);
+    await page.mouse.move((mid.bar.left + mid.bar.right) / 2, (mid.bar.top + mid.bar.bottom) / 2, { steps: 4 });
+    await expect(middle.locator('.tree-actions')).toHaveCSS('opacity', '1');
+    await expect(middle).toHaveCSS('z-index', '2');
+    const above = await clusterUncovered(middle, 'previous');
+    expect(above, 'a row above the middle row').not.toBeNull();
+    expect(above!.slots).toBeGreaterThan(0); expect(above!.covered, 'the bar covers the end cluster of the row above').toBe(0);
+    expect(above!.barRight).toBeLessThanOrEqual(above!.clusterLeft + 0.5);
+    // The first row under the band has nothing above it: the bar floats below the row, clear of the title.
+    await scroller.evaluate(element => { element.scrollTop = 0; });
+    const first = rows.first();
+    await page.mouse.move(0, 0); await first.hover();
+    await expect(first.locator('.tree-actions')).toHaveCSS('opacity', '1');
+    const top = await geometry(first);
+    for (const text of top.text) expect(overlaps(top.bar, text), 'the bar covers the title').toBe(false);
+    expect(top.side).toBe('below');
+    expect(top.bar.top).toBeGreaterThanOrEqual(top.row.bottom - 6);
+    const below = await clusterUncovered(first, 'next');
+    expect(below, 'a row below the first row').not.toBeNull();
+    expect(below!.slots).toBeGreaterThan(0); expect(below!.covered, 'the bar covers the end cluster of the row below').toBe(0);
+    expect(below!.barRight).toBeLessThanOrEqual(below!.clusterLeft + 0.5);
+    // Scrolled so the row sits just under the sticky band, it also floats below.
+    await first.evaluate(element => element.scrollIntoView({ block: 'start' }));
+    await scroller.evaluate(element => { element.scrollTop += 4; });
+    await page.mouse.move(0, 0); await first.hover();
+    expect((await geometry(first)).side).toBe('below');
+  } finally { await server.close(); }
+});
+
 test('gives the title the row beside a fixed end cluster with all actions and keeps hover width stable', async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
@@ -332,14 +409,16 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     await page.evaluate(async () => { await document.fonts.ready; });
     const row = page.locator('.tree-item[data-item-id="1"]'), title = row.locator('.tree-question');
     const bounds = (await row.boundingBox())!, text = (await title.boundingBox())!;
-    // The end cluster's slots are fixed (alpha.20 C4), so the title takes the rest: about half the 560px minimum column,
-    // and never any of the cluster's room.
+    // The end cluster's slots are fixed (alpha.20 C4), so the title takes the rest, and never any of the cluster's room. The Ack slot is
+    // as wide as its longest label ("✓ → In progress", the worst case this fixture draws; owner 2026-10-20: visible Ack target), so the
+    // title keeps about a third of the 560px minimum column (it kept about half before the label).
     const heading = (await row.locator('.tree-heading').boundingBox())!, end = (await row.locator('.tree-end').boundingBox())!;
-    expect(heading.width / bounds.width).toBeGreaterThanOrEqual(0.45);
+    expect(heading.width / bounds.width).toBeGreaterThanOrEqual(0.33);
     expect(heading.x + heading.width).toBeLessThanOrEqual(end.x);
     const actions = row.locator('.tree-action');
     // Six hover slots (D4) and Ack in its own.
     await expect(actions).toHaveCount(7);
+    await expect(row.locator('.tree-action-ack .tree-action-label')).toHaveText('→ In progress');
     await row.hover();
     expect((await title.boundingBox())!.width).toBe(text.width);
     expect((await title.boundingBox())!.height).toBe(text.height);
@@ -348,24 +427,37 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
       await expect(action).toBeVisible();
       const box = (await action.boundingBox())!;
       const inBar = await action.evaluate(element => !!element.closest('.tree-actions'));
-      // The six hover slots are 26 x 24; Ack, in its own slot, is 22 x 20.
-      expect(box.width).toBe(inBar ? 26 : 22); expect(box.height).toBe(inBar ? 24 : 20);
+      // The six hover slots are 26 x 24; Ack, in its own slot, is 20 high and as wide as its label (owner 2026-10-20: visible Ack target),
+      // inside its fixed slot.
+      if (inBar) expect(box.width).toBe(26); else expect(box.width).toBeLessThanOrEqual(await action.evaluate(element => element.parentElement!.getBoundingClientRect().width));
+      expect(box.height).toBe(inBar ? 24 : 20);
       if (inBar) lines.add(box.y);
       const name = (await action.getAttribute('aria-label'))!;
       await action.click(); await expect(page.getByLabel('Last action')).toHaveText(name);
     }
-    // The hover bar is one floating line of six slots, left of the cluster; Ack keeps its own slot in the cluster.
+    // The hover bar is one floating line of six slots; Ack keeps its own slot in the cluster. It floats against the row,
+    // right-aligned with it and clear of the title (this row is the first on the page, so it floats below).
     expect(lines.size).toBe(1);
     await expect(row.locator('.tree-actions .tree-action')).toHaveCount(6);
     const bar = (await row.locator('.tree-actions').boundingBox())!;
-    expect(bar.x + bar.width).toBeLessThanOrEqual(end.x);
+    expect(bar.x + bar.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+    expect(bar.y).toBeGreaterThanOrEqual(bounds.y + bounds.height - 6);
     await row.locator('.tree-icon').click(); await page.mouse.move(0, 0);
     expect((await title.boundingBox())!.width).toBe(text.width);
     const noActions = page.locator('.tree-item[data-item-id="2"]');
     await expect(noActions.locator('.tree-actions')).toHaveCount(0);
-    // Every slot keeps its width filled or empty: a row without actions or Ack has the same cluster.
-    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBe((await row.locator('.tree-end').boundingBox())!.width);
+    // Every slot keeps its width filled or empty: a row without actions or Ack has the same cluster, except that only a row with an Ack to
+    // give has the wide Ack slot (owner 2026-10-20: visible Ack target); a row without one keeps 22px.
+    const wide = (await row.locator('.tree-ack-slot').boundingBox())!.width;
+    expect(wide).toBeGreaterThan(22);
+    expect((await noActions.locator('.tree-ack-slot').boundingBox())!.width).toBe(22);
+    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBeCloseTo((await row.locator('.tree-end').boundingBox())!.width - (wide - 22), 1);
     await page.setViewportSize({ width: 320, height: 700 });
+    // A Map under 560px gives the label up (the slot goes back to 22px) so the row does not overflow; the name and tooltip stay.
+    await expect(row.locator('.tree-action-label')).toBeHidden();
+    expect((await row.locator('.tree-ack-slot').boundingBox())!.width).toBe(22);
+    // The button itself goes back to the 22px icon too, never wider than its slot.
+    expect((await row.locator('.tree-action-ack').boundingBox())!.width).toBe(22);
     for (const item of [row, noActions]) {
       expect(await item.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil((await item.boundingBox())!.width));
     }

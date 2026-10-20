@@ -11,6 +11,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// The build's own version: the app, the helper, the plugin manifest and the installed descriptor all carry it.
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn id(value: &str) -> UuidV4 {
     UuidV4::new(value).unwrap()
 }
@@ -82,26 +85,48 @@ struct Fixture {
 impl Fixture {
     fn new(version: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let installed = root.path().join("versions/0.1.0/plugin");
+        let installed = root
+            .path()
+            .join("versions")
+            .join(APP_VERSION)
+            .join("plugin");
         let loaded = root.path().join("sdk-loaded/plugin");
         let project = root.path().join("project");
         fs::create_dir_all(&project).unwrap();
+        let manifest = format!(r#"{{"name":"ariadne","version":"{APP_VERSION}"}}"#);
+        let placeholder_descriptor = format!("export default Object.freeze({{helperPath:'/installed/helper',appVersion:'{APP_VERSION}',apiVersion:1}});");
         for dir in [&installed, &loaded] {
-            for (name,bytes) in [
-                (".claude-plugin/plugin.json",r#"{"name":"ariadne","version":"0.1.0"}"#),
-                ("hooks/hooks.json","{}"),("hooks/register.js","// register"),("hooks/contracts.js","// contracts"),
-                ("hooks/setup.js","// setup"),("hooks/claims.js","// claims"),("hooks/discovery.js","// discovery"),("hooks/pr-comments.js","// PR comments"),
-                ("hooks/installed.js","export default Object.freeze({helperPath:'/installed/helper',appVersion:'0.1.0',apiVersion:1});"),
-                ("skills/ariadne/SKILL.md","# Structured Ariadne context"),
-                ("skills/ariadne/inputs.md","# Fixture"),("skills/ariadne/errors.md","# Fixture"),
-                ("skills/ariadne/reconnect.md","# Fixture"),("skills/ariadne/report.md","# Fixture"),
-                ("skills/ariadne/review.md","# Fixture"),("skills/ariadne/checklist.md","# Fixture"),
-                ("skills/ariadne/follow-up.md","# Fixture"),("skills/ariadne/pr-comments.md","# Fixture"),
-            ] { let path = dir.join(name); fs::create_dir_all(path.parent().unwrap()).unwrap(); fs::write(path,bytes).unwrap(); }
+            for (name, bytes) in [
+                (".claude-plugin/plugin.json", manifest.as_str()),
+                ("hooks/hooks.json", "{}"),
+                ("hooks/register.js", "// register"),
+                ("hooks/contracts.js", "// contracts"),
+                ("hooks/setup.js", "// setup"),
+                ("hooks/claims.js", "// claims"),
+                ("hooks/discovery.js", "// discovery"),
+                ("hooks/pr-comments.js", "// PR comments"),
+                ("hooks/installed.js", placeholder_descriptor.as_str()),
+                ("skills/ariadne/SKILL.md", "# Structured Ariadne context"),
+                ("skills/ariadne/inputs.md", "# Fixture"),
+                ("skills/ariadne/errors.md", "# Fixture"),
+                ("skills/ariadne/reconnect.md", "# Fixture"),
+                ("skills/ariadne/report.md", "# Fixture"),
+                ("skills/ariadne/review.md", "# Fixture"),
+                ("skills/ariadne/checklist.md", "# Fixture"),
+                ("skills/ariadne/follow-up.md", "# Fixture"),
+                ("skills/ariadne/pr-comments.md", "# Fixture"),
+            ] {
+                let path = dir.join(name);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, bytes).unwrap();
+            }
         }
         let helper = root.path().join("ariadne");
-        executable_file(&helper, "#!/bin/sh\nprintf 'ariadne 0.1.0\\n'\n");
-        let descriptor = json!({"helperPath":helper,"appVersion":"0.1.0","apiVersion":1});
+        executable_file(
+            &helper,
+            &format!("#!/bin/sh\nprintf 'ariadne {APP_VERSION}\\n'\n"),
+        );
+        let descriptor = json!({"helperPath":helper,"appVersion":APP_VERSION,"apiVersion":1});
         for dir in [&installed, &loaded] {
             fs::write(
                 dir.join("hooks/installed.js"),
@@ -114,7 +139,7 @@ impl Fixture {
                 installed_plugin: installed,
                 helper,
                 project_root: project,
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
             },
             version: version.into(),
             _root: root,
@@ -127,7 +152,7 @@ impl Fixture {
             plugin_name: "ariadne".into(),
             plugin_root: self.loaded.clone(),
             helper_path: self.options.helper.clone(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
             api_version: 1,
             engine_version: self.version.clone(),
             external_session_id: "original-host-session".into(),
@@ -186,7 +211,7 @@ fn clearing_retained_evidence_during_qualification_emits_unknown_without_renewin
     executable_file(
         &fixture.options.helper,
         &format!(
-            "#!/bin/sh\nif [ -S {socket} ]; then ARIADNE_OBSERVATION_BARRIER={socket} {test} --exact observation_qualification_child_process >/dev/null || exit 4; fi\nprintf 'ariadne 0.1.0\\n'\n",
+            "#!/bin/sh\nif [ -S {socket} ]; then ARIADNE_OBSERVATION_BARRIER={socket} {test} --exact observation_qualification_child_process >/dev/null || exit 4; fi\nprintf 'ariadne {APP_VERSION}\\n'\n",
             socket = shell_path(&path),
             test = shell_path(&std::env::current_exe().unwrap()),
         ),
@@ -561,7 +586,7 @@ fn version_child_termination_distinguishes_interruptions_from_installation_failu
         let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
         executable_file(
             &fixture.options.helper,
-            &format!("#!/bin/sh\nprintf 'ariadne 0.1.0\\n'\n{termination}\n"),
+            &format!("#!/bin/sh\nprintf 'ariadne {APP_VERSION}\\n'\n{termination}\n"),
         );
         let error = fixture
             .options
@@ -1097,7 +1122,7 @@ fn native_helper_version_and_resource_size_are_checked_without_truncation() {
     );
     executable_file(
         &fixture.options.helper,
-        "#!/bin/sh\nprintf 'ariadne 0.1.0\\n'\n",
+        &format!("#!/bin/sh\nprintf 'ariadne {APP_VERSION}\\n'\n"),
     );
     fs::write(
         fixture.loaded.join("hooks/claims.js"),

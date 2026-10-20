@@ -102,6 +102,16 @@ jobs:
             node node_modules/playwright/cli.js install chromium
             npm run test:design
           fi
+      - name: Check the previous release still reads this build's data
+        # Release scope only (it includes store-format Rust changes), and once per push: the native stage.
+        if: matrix.stage == 'native' && contains(steps.scope.outputs.scope, 'application') && contains(steps.scope.outputs.scope, 'release=true')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cargo build --locked -p ariadne-cli
+          python3 scripts/check-previous-release.py --new "$CARGO_TARGET_DIR/debug/ariadne"
       - name: Preserve native and coverage evidence
         if: always() && (contains(steps.scope.outputs.scope, 'application') || matrix.stage == 'static')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

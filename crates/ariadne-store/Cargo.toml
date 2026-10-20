@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Fault-injection hooks for other crates' tests; enable only from dev-dependencies.
+test-support = []
+
 [dependencies]
 ariadne-domain = { path = "../ariadne-domain" }
 serde.workspace = true

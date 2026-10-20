@@ -27,7 +27,11 @@ by eye also missed the drift between the app and the frames.
   Phosphor regular and fill icons, as before.
 - **The handoff's numbers.** Rows are 48/38/1fr/30. Columns are `300px |
   minmax(560px,1fr) | [400px detail] | [240px rail]`. The target is 1600×960 and the
-  window minimum is 1300×760.
+  window minimum is 1100×760 (lowered from 1300 in alpha.22; the four-column
+  design that needed 1300 is gone). On a screen smaller than that, the window fits the
+  visible work area instead: its live minimum is the smaller of the configured
+  minimum and the work area less the title bar, and the first launch and the
+  wake and scale-change checks keep it on screen.
 - **One keymap.** `ui/keys.ts` implements the README keyboard table, and every view
   reads it.
 - **One agent connection.** `ui/shared/connection.ts` maps a binding and its presence

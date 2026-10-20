@@ -1,54 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
-import { BACKGROUND_RETRY, conversationHealth, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { BACKGROUND_RETRY, TURN_FAILURE, conversationHealth, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
+import { balanced, resetLedgers } from './ledger.js';
 
 // Fixed cases for the liveness rule in the README: a producer counts from its
 // first outcome until it is retired, each call records one outcome, and a call
-// still open after ten seconds counts as a temporary timeout until it ends.
+// still open after its producer's helper runs (ten seconds for one) counts as a
+// temporary timeout until it ends.
 //
-// Every conversation health the plugin builds is wrapped here, so the calls
-// each producer opens are counted from the outside against the outcomes they
-// settle with.
-const {ledgers,counted} = vi.hoisted(() => {
-  const ledgers = [];
-  function counted(health) {
-    const ledger = {opened:{},settled:{},twice:0};
-    ledgers.push(ledger);
-    const wrapped = {...health,
-      call($, producer) {
-        const settle = health.call($,producer);
-        if ($.background === false) return settle;
-        ledger.opened[producer] = (ledger.opened[producer] ?? 0) + 1;
-        let done = false;
-        return outcome => {
-          if (done) ledger.twice += 1;
-          else ledger.settled[producer] = (ledger.settled[producer] ?? 0) + 1;
-          done = true;
-          return settle(outcome);
-        };
-      },
-      record($, producer, outcome) {return wrapped.call($,producer)(outcome);},
-    };
-    return wrapped;
-  }
-  return {ledgers,counted};
-});
+// Every conversation health the plugin builds is wrapped here (ledger.js), so
+// the calls each producer opens are counted from the outside against the
+// outcomes they settle with.
 vi.mock('../../../integrations/claude/plugin/hooks/contracts.js',async importOriginal => {
-  const actual = await importOriginal();
-  return {...actual,conversationHealth:(...args) => counted(actual.conversationHealth(...args))};
+  const actual = await importOriginal(), {trackedHealth} = await import('./ledger.js');
+  return {...actual,conversationHealth:(...args) => trackedHealth(actual.conversationHealth(...args))};
 });
-// Every call settled exactly once.
-async function balanced() {
-  await vi.waitFor(() => {
-    for (const ledger of ledgers) {
-      expect(ledger.twice).toBe(0);
-      expect(ledger.settled).toEqual(ledger.opened);
-    }
-  });
-  ledgers.length = 0;
-}
 const MINUTE = 60000;
 const PAUSED = plainFailure('invalid_transition',{reason:'owner_paused'});
 const GONE = 'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.';
@@ -63,7 +31,7 @@ function callbacks() {
   return hooks;
 }
 const remembered = () => new Map([[`binding:${binding.external_session_id}`,{project_id:ids.project,session_id:ids.session,saved_at:'2026-01-01T00:00:00.000Z'}]]);
-afterEach(() => {vi.restoreAllMocks();ledgers.length = 0;});
+afterEach(() => {vi.restoreAllMocks();resetLedgers();});
 
 describe('liveness: calls that have nothing to report still record an outcome',() => {
   // Blocking 1: a heartbeat with nothing to drain is an automatic-reconnect call.
@@ -159,33 +127,37 @@ describe('liveness: calls that have nothing to report still record an outcome',(
 });
 
 describe('liveness: a hung call caps out',() => {
-  // The routing note of an automatic reconnect never settles: that reconnect
-  // call stays open, and after ten seconds it counts as a temporary timeout.
-  it('a reconnect whose routing note never settles prints the retry line once after the grace, and recovers when it settles',async () => {
-    let time = 0, down = false;
+  // The routing note of an automatic reconnect never settles. The reconnect
+  // never waits for its note: it is connected at once, stays healthy, holds
+  // no owner command, and the tick never sends a second note while the first
+  // is out.
+  it('a reconnect whose routing note never settles is connected at once, prints no retry line, holds no owner command, and is sent once',async () => {
+    let time = 0, down = false, appends = 0;
     vi.spyOn(Date,'now').mockImplementation(() => time);
     const note = deferred(), entered = deferred(), lines = [];
-    const h = host({store:remembered(),append:() => {entered.resolve();return note.promise;},
+    const h = host({store:remembered(),append:() => {appends += 1;entered.resolve();return note.promise;},
       handler:argv => down && argv[2] === 'claim' ? failure('host_unreachable') : undefined});
     const log = h.$.ui.log;
     h.$.ui.log = text => {lines.push({at:time,text});log(text);};
     const hooks = callbacks();
     await hooks.get('session.start')(h.$,{},next);
     await entered.promise;
+    await new Promise(resolve => setTimeout(resolve,0));
+    // The reconnect call settled healthy with its note still out.
+    await balanced();
+    const reconnected = ['Ariadne: this conversation is connected to its Ariadne session again.'];
+    expect(lines.map(line => line.text)).toEqual(reconnected);
+    expect((await hooks.get('ariadne-connect')(h.$,{args:''})).text).toContain('This conversation is connected to Ariadne.');
+    const sent = appends;
     const beat = h.timers().find(timer => timer.ms === 30000), tick = h.timer();
     for (time = 1000; time <= 4 * MINUTE; time += 1000) {
       await tick.callback();
       if (time % 30000 === 0) await beat.callback();
     }
-    expect(lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
-    // Ten seconds to count as hung, then the two-minute grace, then one tick.
-    expect(lines[0].at).toBeGreaterThanOrEqual(10000 + 2 * MINUTE);
-    expect(lines[0].at).toBeLessThanOrEqual(10000 + 2 * MINUTE + 1000);
+    expect(appends).toBe(sent);
+    expect(lines.map(line => line.text)).toEqual(reconnected);
     note.resolve({uuid:'late-row'});
-    await vi.waitFor(() => expect(h.logs).toContain('Ariadne: this conversation is connected to its Ariadne session again.'));
-    const reconnected = lines.map(line => line.text);
-    expect(reconnected).toEqual([BACKGROUND_RETRY,'Ariadne: this conversation is connected to its Ariadne session again.']);
-    // The reconnect settled healthy, so a later outage gets its own full grace.
+    // A healthy connection, so a later outage gets its own full grace.
     down = true;
     const outage = time + 1000;
     for (time = outage; time < outage + 2 * MINUTE; time += 1000) await tick.callback();
@@ -196,18 +168,29 @@ describe('liveness: a hung call caps out',() => {
     await hooks.get('session.end')(h.$,{},next);
     await balanced();
   });
-  it('a hung call counts as a timeout from ten seconds until it settles, and a call settled after its producer retired records nothing',async () => {
+  it('a hung call counts as a timeout once it outlasts its producer\u2019s helper runs, until it settles, and a call settled after its producer retired records nothing',async () => {
     let time = 0;
     const lines = [], $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
     const health = conversationHealth(() => time);
-    const hung = health.call($,'auto');
+    // One helper run: ten seconds. A report flush (up to five saves): 42 s. An automatic reconnect (up to eight runs): 66 s.
+    const hungs = {announce:health.call($,'announce'),reports:health.call($,'reports'),auto:health.call($,'auto')};
     for (time = 1000; time <= 10000; time += 1000) health.record($,'claim',{kind:'ok'});
     time = 10000;expect(health.current()).toEqual({kind:'ok'});
     time = 10001;health.record($,'claim',{kind:'ok'});
+    expect(health.current()).toMatchObject({kind:'transient',code:'timeout',producer:'announce'});
+    // The slow producers are not hung yet; settling the single-run call leaves them waiting.
+    hungs.announce({kind:'ok'});
+    time = 42000;health.record($,'claim',{kind:'ok'});expect(health.current()).toEqual({kind:'ok'});
+    time = 42001;health.record($,'claim',{kind:'ok'});
+    expect(health.current()).toMatchObject({kind:'transient',code:'timeout',producer:'reports'});
+    hungs.reports({kind:'ok'});
+    time = 66000;health.record($,'claim',{kind:'ok'});expect(health.current()).toEqual({kind:'ok'});
+    time = 66001;health.record($,'claim',{kind:'ok'});
     expect(health.current()).toMatchObject({kind:'transient',code:'timeout',producer:'auto'});
+    const hung = hungs.auto;
     // The outage began when the hang was first seen, so the grace runs from then.
-    for (time = 11000; time <= 131000; time += 1000) health.record($,'claim',{kind:'ok'});
-    expect(lines).toEqual([{at:131000,text:BACKGROUND_RETRY}]);
+    for (time = 67000; time <= 187000; time += 1000) health.record($,'claim',{kind:'ok'});
+    expect(lines).toEqual([{at:187000,text:BACKGROUND_RETRY}]);
     hung({kind:'ok'});
     expect(health.current()).toEqual({kind:'ok'});
     // Retiring a producer closes its open calls: their late outcomes record nothing.
@@ -221,6 +204,21 @@ describe('liveness: a hung call caps out',() => {
     time += 24 * 60 * MINUTE;health.record($,'claim',{kind:'ok'});
     expect(health.current()).toMatchObject({kind:'held',producer:'helper'});
     health.retire($,'helper');
+    expect(health.current()).toEqual({kind:'ok'});
+    await balanced();
+  });
+  // A turn callback is not run again: hung, it shows the turn callback's own line, never the promise to keep trying.
+  it('a hung turn callback counts after its two helper runs and shows the turn callback’s line, not the retry line',async () => {
+    let time = 0;
+    const lines = [], $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
+    const health = conversationHealth(() => time);
+    const hung = health.call($,'helper');
+    time = 18000;health.record($,'claim',{kind:'ok'});expect(health.current()).toEqual({kind:'ok'});
+    time = 18001;health.record($,'claim',{kind:'ok'});
+    expect(health.current()).toMatchObject({kind:'transient',code:'timeout',producer:'helper',text:TURN_FAILURE});
+    for (time = 19000; time <= 139000; time += 1000) health.record($,'claim',{kind:'ok'});
+    expect(lines).toEqual([{at:139000,text:TURN_FAILURE}]);
+    hung({kind:'ok'});
     expect(health.current()).toEqual({kind:'ok'});
     await balanced();
   });
