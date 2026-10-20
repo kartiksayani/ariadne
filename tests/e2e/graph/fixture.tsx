@@ -49,17 +49,17 @@ window.__graphEvidence = { mountMs: [], updateMs: [], saved: [] };
 
 function Fixture() {
   const [view, setView] = useState(initial), [detail, setDetail] = useState<string | null>(null);
-  const [reveal, setReveal] = useState<RevealedItem | null>(null), [outsideReveals, setOutsideReveals] = useState(0);
+  const [reveal, setReveal] = useState<RevealedItem | null>(null), [asks, setAsks] = useState(0);
   return <>
     <button type="button" onClick={() => setView(previous => ({ ...previous, selected_item_id: '15.50' }))}>Select off-screen item</button>
     {/* A link, waiting card or Tree selection elsewhere: the navigation's reveal, which the Graph centres. */}
-    <button type="button" onClick={() => { void routes.revealItem({ ...route, item_id: '15.50' }).then(result => { setReveal(result); setOutsideReveals(count => count + 1); }); }}>Reveal off-screen item</button>
+    <button type="button" onClick={() => { setAsks(count => count + 1); void routes.revealItem({ ...route, item_id: '15.50' }).then(result => { setReveal(result); }); }}>Reveal off-screen item</button>
     {detail && <p role="status">Detail {detail}</p>}
     <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
       <Profiler id="graph-view" onRender={(_id, phase, duration) => {
         window.__graphEvidence[phase === 'mount' ? 'mountMs' : 'updateMs'].push(duration);
       }}>
-        <GraphView store={store} routes={routes} view={view} later={later} reveal={reveal} outsideReveals={outsideReveals}
+        <GraphView store={store} routes={routes} view={view} later={later} reveal={reveal} revealAsks={asks}
           saveView={async next => { window.__graphEvidence.saved.push(next); setView(next); return true; }}
           onReveal={(result, openDetail) => { if (openDetail && result.kind === 'item') setDetail(result.route.item_id); }} />
       </Profiler>

@@ -369,6 +369,31 @@ describe('composed map reveal scrolling', () => {
     expect(view().selected_item_id).toBe('8');
   });
 
+  // The jump asked for last wins: a jump asked for BEFORE a Graph click keeps no claim on it by publishing after it.
+  it.each(['the click answers after the jump publishes', 'the click answers before the jump publishes'] as const)('keeps a Graph click made after a Details jump was asked, even though the jump publishes after it: %s', async order => {
+    const transport = new HeldReveals(), session = transport.sessions.get(route.session_id)!;
+    session.items['4']!.related = ['1.1', '8'];
+    await setup(transport); await openSession();
+    await pick('4');
+    await click(control('Graph'));
+    const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
+    // The jump's lookup finishes at once; only its save waits.
+    transport.holdSelectionWrite('1.1');
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Open` }));
+    transport.hold('8');
+    await click(document.querySelector('[role="treeitem"][data-item-id="8"]')!);
+    if (order === 'the click answers after the jump publishes') {
+      await act(async () => { transport.release('write:1.1'); });
+      await act(async () => { transport.release('8'); });
+    } else {
+      await act(async () => { transport.release('8'); });
+      await act(async () => { transport.release('write:1.1'); });
+    }
+    await waitFor(() => selected('8'));
+    await waitFor(() => expect(document.querySelector('.graph-node[aria-selected="true"]')?.getAttribute('data-item-id')).toBe('8'));
+    expect(view().selected_item_id).toBe('8');
+  });
+
 
   it.each(['search over a collapsed ancestor', 'status', 'search matching nothing', 'collapsed ancestor'] as const)('reveals an undrawn Graph selection through its registered route after %s, preserving the saved view', async cause => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {

@@ -1060,7 +1060,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
 describe('session tree filters', () => {
   it('preserves graph folds and both status edits when the composed writers contend', async () => {
     const value = await mount(), { transport, navigation, store } = value;
-    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} outsideReveals={0} onReveal={() => {}} /> });
+    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} onReveal={() => {}} /> });
     // ← folds the selected node (the Graph has no fold button), so select item 1 first and let that write finish.
     const parent = await waitFor(() => document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!);
     fireEvent.click(parent);

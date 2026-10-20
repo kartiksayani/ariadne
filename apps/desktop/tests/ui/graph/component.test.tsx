@@ -20,7 +20,7 @@ const opened: OpenSessions[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 interface CompositionProps {
-  reveal?: RevealedItem | null; /** How many reveals came from outside the Graph (App's counter); its own selection coming back does not count. */ outside?: number; hidden?: string[]; selection?: string; filters?: Partial<SessionPreferences['filters']>;
+  reveal?: RevealedItem | null; /** How many reveals were asked for from outside the Graph (the navigation's ask count); its own selection coming back does not count. */ outside?: number; hidden?: string[]; selection?: string; filters?: Partial<SessionPreferences['filters']>;
   expanded?: string[]; markers?: ReadonlyMap<string, ChangeMarker>; search?: MapSearch; onCommit?: () => void; onClearFilters?: () => void;
   onDismissBanner?: () => void; covered?: boolean;
 }
@@ -47,7 +47,7 @@ async function setup(session: Session = graphSession(), view = preferences()) {
     useLayoutEffect(() => { onCommit?.(); });
     const graph = <GraphView store={store} routes={routes} view={immutable({ ...current, ...(hidden ? { hidden_item_ids: hidden } : {}),
       ...(selection ? { selected_item_id: selection } : {}), ...(filters ? { filters: { ...current.filters, ...filters } } : {}),
-      ...(expanded ? { expanded_item_ids: expanded } : {}) })} later={new Set()} reveal={reveal} outsideReveals={outside} markers={markers} onClearFilters={onClearFilters} onDismissBanner={onDismissBanner} covered={covered}
+      ...(expanded ? { expanded_item_ids: expanded } : {}) })} later={new Set()} reveal={reveal} revealAsks={outside} markers={markers} onClearFilters={onClearFilters} onDismissBanner={onDismissBanner} covered={covered}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
     return <MapSearchContext.Provider value={search ?? NO_SEARCH}>{graph}</MapSearchContext.Provider>;

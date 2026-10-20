@@ -96,7 +96,7 @@ function Fixture() {
     <div style={{ display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column' }}>
       {bar && <div role="search" aria-label="Filter items" style={{ flex: 'none', height: 40, borderBottom: '1px solid var(--color-divider)' }} />}
       <MapSearchContext.Provider value={search}>
-        <GraphView store={store} routes={routes} view={view} later={later} reveal={null} outsideReveals={0}
+        <GraphView store={store} routes={routes} view={view} later={later} reveal={null}
           saveView={async next => { setView(next); return true; }} onReveal={() => {}} />
       </MapSearchContext.Provider>
     </div>

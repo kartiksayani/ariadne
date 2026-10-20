@@ -36,14 +36,9 @@ export interface GraphViewProps {
   /** The navigation's current reveal (a link, waiting card or tree selection). */
   readonly reveal: RevealedItem | null;
   /**
-   * Counts the reveals that came from outside the Graph (a link, the dock, a native route): it changes only when one arrives, never
-   * when a reveal is dismissed or when the Graph's own selection comes back as `reveal`. An answer to a click is dropped only
-   * when this changed since the click.
-   */
-  readonly outsideReveals: number;
-  /**
-   * Counts the reveals asked for from outside the Graph (NavigationState.revealAsks), moved when each is asked for, not when it
-   * publishes. An answer to a click, or to `.`, is dropped when this changed since it was asked: the jump asked for last wins.
+   * Counts the reveals asked for from outside the Graph (NavigationState.revealAsks: a link, the dock, a native route), moved when
+   * each is asked for, not when it publishes. An answer to a click, or to `.`, is dropped when this changed since it was asked: the
+   * jump asked for last wins. A jump asked for before the click keeps no claim on it by publishing after it.
    */
   readonly revealAsks?: number;
   /** New and Changed markers by item id (ui/tree/model.ts `mapChanges`): a diamond alone on the node (SPEC 9.9). */
@@ -150,13 +145,13 @@ const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [to
 const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
 const NO_LOCAL: readonly LocalChip[] = [];
 
-export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, outsideReveals, revealAsks = 0, markers, preferencesBusy = false, saveView, onReveal, onClearFilters, onDismissBanner, covered = false }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, revealAsks = 0, markers, preferencesBusy = false, saveView, onReveal, onClearFilters, onDismissBanner, covered = false }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
   const peek = usePeek(), search = useMapSearch();
-  const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: number } | null>(null);
-  const [localSelection, setLocalSelection] = useState<{ id: string; external: number } | null>(null);
+  const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; asked: number } | null>(null);
+  const [localSelection, setLocalSelection] = useState<{ id: string; asked: number } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
   const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -177,7 +172,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
-  const offered = localReveal && localReveal.external === outsideReveals ? localReveal.result : reveal;
+  const offered = localReveal && localReveal.asked === revealAsks ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
   const itemReveal = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal : null;
   const shown = useMemo(() => applyChange(applyChange(view, inflight), pending), [view, inflight, pending]);
@@ -186,15 +181,15 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   // An outside reveal wins immediately over an older selection whose preference write is still pending. The owner's own selection
   // keeps winning over the reveal that was current when they made it, while its write runs and once it is saved: that reveal
   // is older, and its own (slower) reveal can land after the write (a ← then must act on the node they selected).
-  const optimisticSelection = localSelection && localSelection.external === outsideReveals
+  const optimisticSelection = localSelection && localSelection.asked === revealAsks
     && (pending?.selected || inflight?.selected || view.selected_item_id === localSelection.id) ? localSelection.id : null;
   const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
   const graph = useMemo(() => session && column !== null ? sessionGraph({ session, view: shown, later, local, selectedId, column,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
   [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: outsideReveals, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: outsideReveals, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner };
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner };
 
   // Related lines show for the selected node and the one under the pointer only (SPEC 1.3). They are drawn over the
   // canvas from the laid-out positions, so hovering never rebuilds the 2,000-node model.
@@ -353,18 +348,19 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     // so it is held at its pre-commit position instead of the old selection.
     const box = scroller.current, current = latest.current.graph, element = nodeElement(id);
     if (box && current?.nodes.has(id) && element) held.current = anchorOn(element, box, current);
-    setLocalSelection({ id, external: latest.current.external });
+    setLocalSelection({ id, asked: latest.current.asked });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
     setScrollTarget({ id, center: false });
-    const call = ++request.current, external = latest.current.external, asked = latest.current.asked;
+    const call = ++request.current, asked = latest.current.asked;
     // A jump asked for from outside since this click (even one still waiting to publish) is the newer one: this answer is dropped.
-    const stale = () => !mounted.current || call !== request.current || external !== latest.current.external || asked !== latest.current.asked;
+    // One asked before the click is older, however late it publishes.
+    const stale = () => !mounted.current || call !== request.current || asked !== latest.current.asked;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
       if (stale() || !result) return;
       ownReveal.current = result;
-      setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
+      setLocalReveal({ result, asked }); latest.current.onReveal(result, options.openDetail);
     }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold, peek]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
@@ -388,8 +384,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       if (covered || !id || !current) return false;
       peek?.closeAll();
       if (current.nodes.has(id)) { setScrollTarget({ id, center: false, focus: true }); return true; }
-      const call = ++request.current, external = latest.current.external, asked = latest.current.asked;
-      const stale = () => !mounted.current || call !== request.current || external !== latest.current.external || asked !== latest.current.asked;
+      const call = ++request.current, asked = latest.current.asked;
+      const stale = () => !mounted.current || call !== request.current || asked !== latest.current.asked;
       void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
         if (stale() || !result) return;
         latest.current.onReveal(result, true);
@@ -457,20 +453,18 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   // Consume every request against this commit's DOM, even when its target is absent; a later change never revives one.
   const opened = useRef<SessionStore | null>(null);
   const previousReveal = useRef<RevealedItem | null | undefined>(undefined);
-  const previousOutside = useRef(outsideReveals);
   useLayoutEffect(() => {
     restore();
     let target = scrollTarget;
     if (scrollTarget) setScrollTarget(null);
-    const outside = previousOutside.current !== outsideReveals;
-    previousOutside.current = outsideReveals;
     if (previousReveal.current !== reveal) {
       previousReveal.current = reveal;
       const echo = reveal !== null && reveal === ownReveal.current;
       ownReveal.current = null;
-      // The Graph's own selection coming back, or a reveal from outside, ends what the Graph held for its click. A reveal that was
-      // only dismissed does not: the owner's click, its write and its answer are still in flight.
-      if (echo || outside) { setLocalReveal(null); setLocalSelection(null); }
+      // The Graph's own selection coming back ends what the Graph held for its click. A reveal that was only dismissed does not: the
+      // owner's click, its write and its answer are still in flight. A jump asked for since the click needs no clearing: the held
+      // state is stamped with the ask count and stops applying the moment it moves.
+      if (echo) { setLocalReveal(null); setLocalSelection(null); }
       if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true };
     }
     const initial = !!graph && opened.current !== store;
