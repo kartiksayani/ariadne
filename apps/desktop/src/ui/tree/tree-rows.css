@@ -167,7 +167,8 @@
     --tree-end-ack: 22px;
   }
 
-  .tree-action.tree-action-ack[data-labelled] {
+  /* One class more than the wide rule below, which comes later in the file. */
+  .tree-end .tree-action.tree-action-ack[data-labelled] {
     justify-content: center;
     width: 22px;
     padding: 0;
@@ -326,7 +327,7 @@
 }
 
 /* Ack is 20 high (D22), outside the hover bar, and names its target after the ✓: "✓ → Done" (owner 2026-10-20: visible Ack
-   target). Its slot is as wide as the longest label on every row, so a label landing or changing never rewraps the row. */
+   target). Rows with an Ack share one slot as wide as the longest label, so their columns line up; other rows keep 22px. */
 .tree-action.tree-action-ack {
   width: 22px;
   height: 20px;
