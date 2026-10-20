@@ -8,7 +8,7 @@ import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { PeekProvider, usePeek, type PeekProviderProps } from '../../../src/ui/peek/Peek';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
-import { ItemRefSession, PEEK_OPEN_MS } from '../../../src/ui/peek/context';
+import { ItemRefSession, PEEK_CLOSE_MS, PEEK_OPEN_MS } from '../../../src/ui/peek/context';
 import { ItemReference, ItemRefs, Markdown } from '../../../src/ui/shared/MarkdownText';
 import { peekPosition } from '../../../src/ui/peek/position';
 import { peekNames } from '../../../src/ui/peek/names';
@@ -202,6 +202,26 @@ describe('name chips and item peek', () => {
     // A card opened by click is not closed by a passing pointer either.
     fireEvent.click(chip()); fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(1000));
     expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  // Gaps under PEEK_CLOSE_MS are the real cases (A's close grace is still pending when B is entered); the last two are controls.
+  it.each([0, 100, PEEK_CLOSE_MS - 1, PEEK_CLOSE_MS, PEEK_CLOSE_MS + 140])('moving straight from one name to the next opens each own card after the delay (%i ms between)', async gap => {
+    // The pointer leaves A at t0; A's close grace (PEEK_CLOSE_MS) must not cancel the open already pending for B.
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value), other = () => screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` });
+    const named = (id: string) => screen.queryByRole('dialog', { name: `Peek: ${value.source.items[id]!.question}` });
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
+    expect(named('2')).toBeTruthy();
+    fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(gap));
+    fireEvent.mouseEnter(other()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS - 1));
+    fireEvent.mouseMove(other());
+    act(() => vi.advanceTimersByTime(1));
+    expect(named('8')).toBeTruthy();
+    expect(named('2')).toBeNull();
+    // and back again: the card of the name the pointer rests on, each time
+    fireEvent.mouseLeave(other()); act(() => vi.advanceTimersByTime(gap));
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
+    expect(named('2')).toBeTruthy();
   });
 
   it('a passing pointer never replaces a card the owner opened; a click does', async () => {

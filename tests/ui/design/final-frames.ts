@@ -445,6 +445,10 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
  * - D12: the board's "…" menu has "Continue here", which the app does not show, so the rows under it sit 43px lower in the board: 10.12
  *   compares the menu's first row only. D8 and D10 are in the band (one line where the board has two, "· N waiting" on strips): a band
  *   region that differs by the count text alone is reported as such.
+ * - alpha.22 hover bar (owner-asked deviation from the board's "x-hover", "p-hover" and hover-bar states): the board draws the bar over the
+ *   row, left of the markers, on top of the title's end. The app floats it just above the row's top edge, right-aligned (just below the
+ *   first row under the band), so it never covers the title. No state compares it: Map rows are never compared (D1), and the hover-step
+ *   states (10.2, 10.3, 12.9) click its buttons and compare their dialog, toast or strip only. tests/e2e/tree-layout pins the placement.
  * Thresholds: 0.01; 0.02 for the overlays that are mostly text (a line a pixel off moves a few percent of a text box).
  */
 const MAP: Limits = [0.01, 0.01], TEXT: Limits = [0.02, 0.02];

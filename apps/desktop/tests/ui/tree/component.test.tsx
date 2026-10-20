@@ -2442,11 +2442,12 @@ describe('item details in the tree', () => {
 
   it('floats the shortcut icons over the row so the text never changes width on hover', async () => {
     await mount();
-    const body = row('4').querySelector('.tree-body')!, before = row('4').innerHTML;
-    expect(row('4').querySelector('.tree-end > .tree-actions')).not.toBeNull();
+    const body = row('4').querySelector('.tree-body')!, same = () => row('4').innerHTML.replace(/ data-side="\w+"| style="(?:(?:top|right): [^;"]*;? ?)+"/g, ''), before = same();
+    expect(row('4').querySelector(':scope > .tree-actions')).not.toBeNull();
+    expect(row('4').querySelector('.tree-end .tree-actions')).toBeNull();
     fireEvent.mouseEnter(row('4'));
-    expect(row('4').innerHTML).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body);
-    // The hover bar is absolute inside the end cluster (it takes no room) and only fades in; it is never display:none,
+    expect(same()).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body); // only the side (and the top or right edge) the bar floats at may change
+    // The hover bar is absolute against the row, above or below it (it takes no room) and only fades in; it is never display:none,
     // so showing it lays nothing out again. The cluster's slots keep fixed widths (alpha.20 C4).
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-actions\b/.test(selector!));
