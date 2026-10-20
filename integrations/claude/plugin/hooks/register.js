@@ -262,9 +262,32 @@ async function retire(state, h) {
   state.announcementScope = null;
   state.note = null;
   const handed = state.owner?.forget(h,true) ?? null;
-  state.retired.push(...old);
+  const stopping = stopRetired(state,h,old);
   if (handed) state.retired.push(retiredRequest(state,handed));
-  for (const loop of old) await loop.stop(h,true);
+  await stopping;
+}
+// Queues loops on `retired` and stops them one by one. Each one is `stopping`
+// until its stop() has finished: stop queues the session-end report only after
+// a claim in flight settles, so a drain meanwhile would find the loop empty and
+// remove it. drainPass waits for a stopping loop instead.
+async function stopRetired(state, h, list) {
+  const gates = list.map(loop => {
+    let open;
+    const stopped = new Promise(resolve => {
+      open = () => { if (state.stopping.get(loop) === stopped) state.stopping.delete(loop); resolve(); };
+    });
+    state.stopping.set(loop,stopped);
+    return {loop,open};
+  });
+  state.retired.push(...list);
+  try {
+    for (const {loop,open} of gates) {
+      try { await loop.stop(h,true); } finally { open(); }
+    }
+  } finally {
+    // A stop that threw leaves the rest unstopped; no drain may wait on them.
+    for (const {open} of gates) open();
+  }
 }
 function scopeKey(binding) {
   return `${binding.binding_id}:${binding.generation}`;
@@ -277,8 +300,7 @@ async function endSaved(state, h, binding) {
   if (state.endedScopes.has(key)) return null;
   state.endedScopes.add(key);
   const loop = createLoop(state,binding);
-  state.retired.push(loop);
-  await loop.stop(h,true);
+  await stopRetired(state,h,[loop]);
   return loop;
 }
 // A drain result: nothing failed, but a retired connect request may still commit.
@@ -316,7 +338,8 @@ function retiredRequest(state, handed) {
 // One drain runs at a time. A caller that finds one running waits for it and
 // takes its result, unless something was retired after it looked (or `again`
 // asks for a pass of its own): then it drains once more. A drain removes only
-// the entries it finished, so a report retired while it waited stays queued.
+// the entries it finished, so a report retired while it waited stays queued;
+// a loop still stopping is finished only once its stop() and a drain after it are.
 async function drainLoops(state, h, again = false) {
   while (state.draining) {
     const running = state.draining, result = await running.done;
@@ -335,6 +358,9 @@ async function drainPass(state, h, seen) {
   // Live: an entry retired while this pass waits is drained by it too.
   for (const loop of state.retired) {
     seen.add(loop);
+    // Its session-end report is queued once its stop() finishes (stopRetired).
+    const stopping = state.stopping.get(loop);
+    if (stopping) await stopping;
     const error = await loop.drain(h);
     if (error === WAITING) waiting = true;
     else if (error) failed = error;
@@ -599,8 +625,7 @@ async function fence(state, h, binding) {
   const key = scopeKey(binding);
   if (state.endedScopes.has(key)) return;
   state.endedScopes.add(key);
-  state.retired.push(pending.loop);
-  await pending.loop.stop(h,true);
+  await stopRetired(state,h,[pending.loop]);
 }
 async function connectTransition(state, $, requestedSessionId) {
   // Read the conversation ID again as the tick does (transition's own read
@@ -763,6 +788,9 @@ function registerModule(descriptor, on, publish, step = null) {
     // New routing the model has not been told yet (see routingNote).
     note: null,
     retired: [],
+    // Retired loops whose stop() has not finished, each to a promise that
+    // resolves when it has (see stopRetired).
+    stopping: new Map(),
     // The drain of `retired` running now, {seen, done} (see drainLoops).
     draining: null,
     following: null,

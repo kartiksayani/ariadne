@@ -37,11 +37,11 @@ function appModel() {
     // app.late() commits it afterwards. lookupFails: replay-only lookups fail.
     // onLookup: runs after each lookup answers.
     gate:null,commitLater:false,late:null,lookupFails:false,onLookup:null,
-    // projectGate/lookupGate/statusGate/reportGate/announceGate: a deferred the next such call
+    // projectGate/lookupGate/statusGate/reportGate/announceGate/claimGate: a deferred the next such call
     // waits on (marked reached when it does). lookupReply: replaces what lookups
     // answer. reportFails: reports answer host_unreachable. removed: the Ariadne
     // session was deleted (connect refuses it; a lookup fails with io_error).
-    projectGate:null,lookupGate:null,statusGate:null,reportGate:null,announceGate:null,lookupReply:null,reportFails:false,removed:false,
+    projectGate:null,lookupGate:null,statusGate:null,reportGate:null,announceGate:null,claimGate:null,lookupReply:null,reportFails:false,removed:false,
     // What $.session.id() returns, and the conversation Claude is really running.
     claude:{id:OLD,real:OLD}};
   app.binding = () => bindings.get(app.active);
@@ -160,7 +160,7 @@ function appModel() {
       return success({id,generation,adapter_id:'claude_code_mod',external_session_id:binding.external,dispatch_state:'enabled',
         owner_paused:false,pause_reason:null,connection_state:binding.state,presence:null});
     }
-    if (verb === 'claim') { app.claims.push(flag('--generation')); return routed(flag('--binding'),flag('--generation')) ?? success(null); }
+    if (verb === 'claim') { await gated('claimGate'); app.claims.push(flag('--generation')); return routed(flag('--binding'),flag('--generation')) ?? success(null); }
     if (verb === 'report') {
       await gated('reportGate');
       if (app.reportFails) return failure('host_unreachable');
@@ -956,6 +956,39 @@ describe('connects and drains that overlap', () => {
     expect(connectsFor(app,NEW)).toHaveLength(0);
     expect(connectsFor(app,THIRD)).toHaveLength(1);
     expect(app.binding()).toMatchObject({external:THIRD,state:'connected'});
+  });
+
+  it('/clear waiting in stop() for a claim in flight while a heartbeat drains, then the end report fails once: the loop stays retired, its report is sent, the new id connects', async () => {
+    const app = appModel(), plugin = instance(app,new Map());
+    await plugin.start();
+    expect((await plugin.command('ariadne-connect',app.session)).text).toContain(SUCCESS);
+    const old = {...app.binding()};
+    // A tick's claim is in flight.
+    const claim = deferred();
+    app.claimGate = claim;
+    const ticking = plugin.tick();
+    await vi.waitFor(() => expect(claim.reached).toBe(true));
+    // /clear retires the loop; its stop() waits for that claim.
+    app.claude.real = NEW;
+    app.reportFails = true;
+    const ending = plugin.end('clear');
+    await sleep(20);
+    // The heartbeat drain runs while the retired loop has no report queued yet.
+    const beating = plugin.beat();
+    await sleep(50);
+    claim.resolve();
+    await ending;
+    await beating;
+    await ticking;
+    expect(endReports(app,old)).toHaveLength(0);
+    // The app recovers and Claude switches the id.
+    app.reportFails = false;
+    app.claude.id = NEW;
+    await settled(plugin,2);
+    expect(endReports(app,old)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(connectsFor(app,NEW)).toHaveLength(1);
+    expect(plugin.logs).toContain(RECONNECTED);
   });
 });
 
