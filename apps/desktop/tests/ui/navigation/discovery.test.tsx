@@ -19,7 +19,7 @@ const root = projects.items[0].canonical_root;
 const candidate = (id = 'discovered-thread', endpoint = '/tmp/daemon.sock'): DesktopDiscoveryCandidate => ({
   adapter_id: 'codex', endpoint: { kind: 'unix_socket', path: endpoint }, external_session_id: id,
   cwd: root, title: 'Discovered conversation', host_version: 'fixture', observed_at: demo.updated_at,
-  freshness: 'fresh', compatibility: 'unknown', availability: 'unknown', loaded: true, binding_id: null, session: null,
+  freshness: 'fresh', compatibility: 'unknown', availability: 'unknown', loaded: true, plugin_mismatch: false, binding_id: null, session: null,
 });
 const lifetimes: { store: NavigationStore; controller: DiscoveryController }[] = [];
 afterEach(() => { cleanup(); lifetimes.splice(0).forEach(({ store, controller }) => { controller.dispose(); store.stop(); }); });

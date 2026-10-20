@@ -5,7 +5,7 @@ import type { DesktopDiscoveryCandidate, DesktopDiscoverySnapshot } from '../../
 
 export const candidate = (id = 'thread'): DesktopDiscoveryCandidate => ({ adapter_id: 'codex', endpoint: { kind: 'unix_socket', path: '/tmp/codex.sock' },
   external_session_id: id, cwd: '/tmp/project', title: 'Existing conversation', host_version: 'fixture', observed_at: '2026-10-01T00:00:00.000Z',
-  freshness: 'fresh', compatibility: 'unknown', availability: 'unknown', loaded: true, binding_id: null, session: null });
+  freshness: 'fresh', compatibility: 'unknown', availability: 'unknown', loaded: true, plugin_mismatch: false, binding_id: null, session: null });
 const snapshot = (): DesktopDiscoverySnapshot => ({ candidates: [candidate()], error: null });
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -97,6 +97,7 @@ describe('desktop transport projection', () => {
       { candidates: Array.from({ length: 256 }, (_, i) => ({ ...candidate(String(i)), title: '界'.repeat(1365) })), error: null },
       { candidates: [{ ...candidate(), cwd: '' }], error: null },
       { candidates: [{ ...candidate(), loaded: undefined as unknown as boolean }], error: null },
+      { candidates: [{ ...candidate(), plugin_mismatch: undefined as unknown as boolean }], error: null },
     ];
     for (const value of invalid) await expect(service(async () => value).service.discovery()).rejects.toEqual(new ServiceFailure('invalid_response'));
   });

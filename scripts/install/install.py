@@ -324,15 +324,17 @@ def place_app(home, final, state):
             discard(apps_fd, old)
 
 
-def remove_app_copy(home, known):
-    """Uninstall the app copy when its bytes are proven ours; otherwise leave it and say so."""
+def remove_app_copy(home, known, whole=True):
+    """Uninstall the app copy when its bytes are proven ours; otherwise leave it and say so. `whole` is False when
+    only one version of several is removed: the copy then belongs to the version that is current, not necessarily to
+    this one, so a copy that does not match is left without a word."""
     path = home / APP_PATH
     if not exists(path) or path.is_symlink():
         return
     if app_state(home, known) == "copy":
         with anchored_directory(home / "Applications") as apps_fd:
             shutil.rmtree("Ariadne.app", dir_fd=apps_fd)
-    elif any(item.get("owned_app") for item in known):
+    elif whole and any(item.get("owned_app") for item in known):
         print(f"{path} was edited after install, so it was left in place. Delete it yourself if you no longer want it.",
               flush=True)
 
@@ -420,20 +422,19 @@ def foreign_inside(package, receipt):
 
 
 def blocked_versions(root, home, versions_fd, final):
-    """Version folders that replacing would have to remove but that hold foreign or changed files.
-    An unverifiable receipt blocks only the version being replaced; uninstall leaves the others alone."""
+    """The version folder that replacing would remove, when it holds foreign or changed files or its
+    receipt can't be verified. Replacing never touches any other version, so those are not checked."""
     blocked = []
     for name in sorted(os.listdir(versions_fd)):
-        if name.startswith("."):
-            continue
         package = root / "versions" / name
+        if package != final:
+            continue
         try:
             receipt = descriptor(package, home, partial=True)
             if foreign_inside(package, receipt):
                 blocked.append(package)
         except (InstallError, OSError, ValueError):
-            if package == final:
-                blocked.append(package)
+            blocked.append(package)
     return blocked
 
 
@@ -710,9 +711,9 @@ def install(home, artifacts, facts, resource_loader=resources):
             require(not binary.is_symlink() and binary.is_file() and os.access(binary, os.X_OK), f"Missing executable: {binary}")
             require(run([binary, "--version"], capture=True).strip() == f"{name} {version}", "App/helper versions differ.")
         bundle = resource_loader(artifacts / "ariadne", final / "bin/ariadne")
-        # 2. What is installed now. A pointer whose version folder is gone counts as no install.
-        selected = current(root, home, partial=True)
-        before = selected if selected and selected[1] else None
+        # 2. What is installed now. A pointer whose version folder is gone counts as no install. Installing a
+        # different version removes nothing of the old one, so edits or missing files in its folder do not block.
+        current(root, home, partial=True)
         require(not exists(root / ".current-next"), "Unexpected pointer staging path.")
         known = receipts(root, home, versions_fd)
         state, owned_links, notes = external_plan(home, root, known, plist.get("CFBundleIdentifier"))
@@ -720,17 +721,15 @@ def install(home, artifacts, facts, resource_loader=resources):
             blocked = blocked_versions(root, home, versions_fd, final)
             if blocked:
                 raise InstallError(stop_sentence(blocked))
-            others = sorted(item["version"] for item in known if item["version"] != version)
-            extra = f", and removing the other installed versions {', '.join(others)} with it" if others else ""
-            print(f"Replacing the Ariadne {version} already installed{extra} (your projects and history are kept).",
+            # Only this version is replaced. Other installed versions stay: a Claude session that is already
+            # running keeps the absolute helper path of the plugin it loaded, through any number of upgrades.
+            print(f"Replacing the Ariadne {version} already installed (your projects and history are kept).",
                   flush=True)
-            for path in remove_installed(home, root, home_fd, root_fd, versions_fd):
+            for path in remove_installed(home, root, home_fd, root_fd, versions_fd, only=version):
                 print(f"Retained edited, foreign or unverifiable path: {path}")
             require(not exists(final), stop_sentence([final]))
-            before = None
-            state, owned_links, notes = external_plan(home, root, [], None)
-        elif before:
-            require(inventory(before[0]) == before[1]["owned_files"], "Installed package contains edits or foreign files; preserve it and inspect manually.")
+            remaining = receipts(root, home, versions_fd)
+            state, owned_links, notes = external_plan(home, root, remaining, None)
         for note in notes:
             print(note, flush=True)
         stage = root / "versions" / f".stage-{uuid.uuid4()}"
@@ -885,27 +884,32 @@ def uninstall(home, announce=True):
     return retained
 
 
-def remove_installed(home, root, home_fd, root_fd, versions_fd):
-    """Remove everything Ariadne owns, under the lock the caller holds. Returns the paths it kept."""
+def remove_installed(home, root, home_fd, root_fd, versions_fd, only=None):
+    """Remove everything Ariadne owns, under the lock the caller holds. Returns the paths it kept.
+    With `only` (a version), remove just that version's package: the other versions stay, and so do the
+    links they share, which point at `current`."""
     retained = []
     selected = current(root, home, partial=True)
     packages = []
     # Validate every receipt before removing anything; unknown versions are retained.
     with contextlib.ExitStack() as anchors:
         for name in sorted(os.listdir(versions_fd)):
+            if only is not None and name != only:
+                continue
             child = root / "versions" / name
             try:
                 package_fd = anchors.enter_context(anchored_directory(name, parent_fd=versions_fd))
                 packages.append((child, descriptor(child, home, partial=True), package_fd))
             except (InstallError, OSError, ValueError):
                 retained.append(str(child))
-        _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained)
+        others = only is not None and any(name != only and not name.startswith(".") for name in os.listdir(versions_fd))
+        _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained, keep_links=others)
     return retained
 
 
-def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained):
+def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, selected, retained, keep_links=False):
     try:
-        remove_app_copy(home, [receipt for _, receipt, _ in packages])
+        remove_app_copy(home, [receipt for _, receipt, _ in packages], whole=not keep_links)
     except (InstallError, OSError):
         retained.append(str(home / APP_PATH))
     for package, receipt, package_fd in packages:
@@ -919,6 +923,8 @@ def _uninstall_anchored(home, root, home_fd, root_fd, versions_fd, packages, sel
                 retained.append(str(package / name))
         for name, target in receipt["owned_links"].items():
             path = home / name
+            if keep_links:
+                break  # other versions still use these links
             if name == APP_PATH and not path.is_symlink():
                 continue  # a real app copy is settled by remove_app_copy
             if exists(path):

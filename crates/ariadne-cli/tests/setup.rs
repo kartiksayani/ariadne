@@ -12,7 +12,10 @@ fn private(path: &Path) {
 fn put(path: &Path, bytes: &[u8]) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut parent = path.parent().unwrap();
-    while parent.file_name().is_some_and(|name| name != "0.1.0") {
+    while parent
+        .file_name()
+        .is_some_and(|name| name != resources::VERSION)
+    {
         private(parent);
         parent = parent.parent().unwrap();
     }
@@ -20,7 +23,7 @@ fn put(path: &Path, bytes: &[u8]) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
 }
 fn version(root: &Path) -> std::path::PathBuf {
-    let path = root.join("0.1.0");
+    let path = root.join(resources::VERSION);
     fs::create_dir(&path).unwrap();
     private(&path);
     path
@@ -153,10 +156,13 @@ fn malformed_receipt_and_replaced_owned_symlink_survive_uninstall() {
 
 #[test]
 fn packaged_inventory_renders_only_static_immutable_helper_identity() {
-    let helper = Path::new("/private/profile with spaces/versions/0.1.0/bin/ariadne");
+    let helper = Path::new("/private/profile with spaces/versions/")
+        .join(resources::VERSION)
+        .join("bin/ariadne");
+    let helper = helper.as_path();
     let files = resources::bundle(helper);
     let descriptor = std::str::from_utf8(&files["claude-mod/plugin/hooks/installed.js"]).unwrap();
-    assert_eq!(descriptor, "export default Object.freeze({helperPath:\"/private/profile with spaces/versions/0.1.0/bin/ariadne\",appVersion:\"0.1.0\",apiVersion:1});\n");
+    assert_eq!(descriptor, format!("export default Object.freeze({{helperPath:\"/private/profile with spaces/versions/{v}/bin/ariadne\",appVersion:\"{v}\",apiVersion:1}});\n", v = resources::VERSION));
     let manifest: serde_json::Value =
         serde_json::from_slice(&files["claude-mod/plugin/.claude-plugin/plugin.json"]).unwrap();
     assert_eq!(manifest["version"], resources::VERSION);

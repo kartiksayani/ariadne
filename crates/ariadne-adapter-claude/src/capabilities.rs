@@ -16,8 +16,8 @@ pub(crate) fn capabilities(qualified_app_version: &str) -> Capabilities {
         turn_correlation: supported("Actual SDK callbacks verify first-line marker and exact complete payload digest"),
         turn_completion: supported("Captured main-turn callbacks through existing bridge report, not native history"),
         domain_cli: Capability {
-            supported: qualified_app_version == "0.1.0",
-            conditions: vec!["Installed 0.1.0 helper command support after native version/resource qualification; each operation still requires current Core authority and dispatch admission".into()],
+            supported: qualified_app_version == env!("CARGO_PKG_VERSION"),
+            conditions: vec![format!("Installed {} helper command support after native version/resource qualification; each operation still requires current Core authority and dispatch admission", env!("CARGO_PKG_VERSION"))],
         },
         domain_mcp: unsupported("Production MCP transport remains a separate acceptance join"),
         history_reconcile: unsupported("No supported Claude host history read; persisted unresolved attempts require later canonical reports/recovery"),

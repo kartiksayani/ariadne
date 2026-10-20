@@ -18,7 +18,7 @@ and plugin manifests. It must render `plugin/hooks/installed.js` as an ESM modul
 exporting `Object.freeze({helperPath: ABSOLUTE_INSTALLED_HELPER_PATH,
 appVersion: MATCHING_APP_AND_PLUGIN_VERSION, apiVersion: 1})`. Source checkouts
 export `null`, so they cannot accidentally use a development helper or cached
-plugin-relative executable. App/helper version is currently `0.1.0`; the Mod
+plugin-relative executable. App/helper version is stamped per alpha (`0.1.0-alpha.N`); the Mod
 manifest must match it. The installer owns rendering and version substitution.
 
 `/ariadne-connect` sends actual SDK session ID/cwd through canonical owner commands,

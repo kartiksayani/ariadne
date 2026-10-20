@@ -75,6 +75,8 @@ export interface ConnectionView {
   readonly unreadableLine?: number;
   /** "Claude Code" */
   readonly agent?: string;
+  /** Set when this session's Claude conversation announced itself but its Ariadne plugin doesn't match the app. Says so under the states where the agent isn't live (none, off, reconnect). */
+  readonly pluginMismatch?: boolean;
   /** Answers on their way and replies queued behind them (Live card). */
   readonly sending?: { readonly onItsWay: number; readonly queued: number };
 }

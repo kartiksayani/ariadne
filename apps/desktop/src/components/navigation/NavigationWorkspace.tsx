@@ -417,7 +417,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   const barActions = barSession ? actions.forSession(barSession) : null;
   return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}>
     <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onFolded={onDetailsFolded} onSave={width => saveLayout({ detail_width: width })}>
-    <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null}
+    <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null} discovery={discovery}
       unsaved={lineShown && unsavedWrite ? { retry: () => { void store.retryMutation(); } } : null}
       setup={setup?.data.kind === 'binding_connect' ? { sessionId: setup.session_id, instruction: setup.data.setup_instruction } : null} />}
     main={center}

@@ -87,7 +87,11 @@ impl Fixture {
         for (name, body) in [
             (
                 ".claude-plugin/plugin.json",
-                "{\"name\":\"ariadne\",\"version\":\"0.1.0\"}",
+                concat!(
+                    "{\"name\":\"ariadne\",\"version\":\"",
+                    env!("CARGO_PKG_VERSION"),
+                    "\"}"
+                ),
             ),
             ("hooks/hooks.json", "{}"),
             ("hooks/register.js", "// fixture"),
@@ -112,7 +116,7 @@ impl Fixture {
             fs::write(file, body).unwrap();
         }
         let helper = base.join("ariadne");
-        fs::write(&helper, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne 0.1.0'\n").unwrap();
+        fs::write(&helper, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\nprintf '%s\\n' 'ariadne {}'\n", env!("CARGO_PKG_VERSION"))).unwrap();
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
         Self {
             _home: home,
@@ -132,7 +136,7 @@ impl Fixture {
                 helper: self.helper.clone(),
                 installed_plugin: self.plugin.clone(),
                 project_root: self.root.clone(),
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
             }),
         }
     }
@@ -148,7 +152,7 @@ impl Fixture {
             },
             descriptor: ModDescriptor {
                 helper_path: self.helper.to_str().unwrap().into(),
-                app_version: "0.1.0".into(),
+                app_version: env!("CARGO_PKG_VERSION").into(),
                 api_version: 1,
             },
             binding_scope: scope,
@@ -550,8 +554,8 @@ fn admitted_connect_drains_before_wake_and_quit_wins_without_losing_the_receipt(
     fs::write(
         &fixture.helper,
         format!(
-            "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nprintf 'ariadne 0.1.0\\n'\n",
-            began.display(), release.display()
+            "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 3\n: > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nprintf 'ariadne {version}\\n'\n",
+            began.display(), release.display(), version = env!("CARGO_PKG_VERSION")
         ),
     )
     .unwrap();

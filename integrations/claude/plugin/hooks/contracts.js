@@ -208,7 +208,7 @@ export function conversationHealth(now = () => Date.now()) {
 // text is never shown; one fixed helper message, a missing project folder, is
 // recognised to pick its own fixed sentence.
 const GENERIC_FAILURE = 'Ariadne ran into a problem and could not record this. Open the Ariadne app to see what happened; if it keeps happening, update Ariadne.';
-const MISMATCH_FAILURE = "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version.";
+const MISMATCH_FAILURE = "Ariadne and its Claude plugin don't match, so this was not recorded. Run /reload-plugins, then /ariadne-connect. If it still doesn't match, update Ariadne.";
 const UNREADABLE_FAILURE = "Ariadne's reply was cut off or unreadable, so this was not recorded. Open Ariadne and try again; if it keeps happening, update Ariadne.";
 const TIMEOUT_FAILURE = 'Ariadne took too long to answer. Open Ariadne, then try again.';
 const GONE_FAILURE ="This conversation's link to its Ariadne session is out of date or was removed. Run /ariadne-connect to connect it again.";

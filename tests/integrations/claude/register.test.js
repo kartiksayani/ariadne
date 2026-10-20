@@ -616,7 +616,7 @@ describe('conversation changes, relaunch and removal', () => {
       vi.setSystemTime(at);await beat.callback();
       await hooks.get('ariadne-status')(h.$);
     }
-    expect(h.logs.slice(before)).toEqual([code === 'store_busy' ? BACKGROUND_RETRY : "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version."]);
+    expect(h.logs.slice(before)).toEqual([code === 'store_busy' ? BACKGROUND_RETRY : "Ariadne and its Claude plugin don't match, so this was not recorded. Run /reload-plugins, then /ariadne-connect. If it still doesn't match, update Ariadne."]);
     expect(h.calls.filter(call => call.argv[2] === 'report').length).toBeGreaterThan(10);
     expect(h.calls.filter(call => call.argv[2] === 'connect')).toHaveLength(1);
   });

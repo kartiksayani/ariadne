@@ -20,6 +20,8 @@ pub struct DesktopDiscoveryCandidate {
     pub compatibility: Compatibility,
     pub availability: Availability,
     pub loaded: bool,
+    // The Claude plugin that announced this conversation is not the app's version (display only; grants nothing).
+    pub plugin_mismatch: bool,
     pub binding_id: Option<UuidV4>,
     pub session: Option<SessionRef>,
 }

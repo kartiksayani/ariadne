@@ -16,13 +16,14 @@ import { useSessionLifecycleFor } from '../../ui/shared/SessionLifecycleOwner';
 import { connectionKind, readAt } from '../../ui/shared/connection';
 import { agentName, clock } from '../../ui/shell/model';
 import { agentProduct } from '../../state/navigation/switcher';
+import { usePluginMismatch, type DiscoveryController } from '../../data/discovery';
 
 /**
  * Where the session's agent stands, in the words the top bar, card and line share. `unsaved` is set while Ariadne isn't
  * sure the owner's last change was saved (SPEC 12.9): over a live session it is the state itself, over any other it adds
  * its own line under that state's line.
  */
-export function connectionView(state: SessionState, unsaved?: { readonly at?: number } | null): ConnectionView {
+export function connectionView(state: SessionState, unsaved?: { readonly at?: number } | null, pluginMismatch = false): ConnectionView {
   const session = state.snapshot?.session;
   const kind = connectionKind(state);
   // Every read is stamped when first seen (even while all is well), so a later failed read can name the last good one.
@@ -44,7 +45,7 @@ export function connectionView(state: SessionState, unsaved?: { readonly at?: nu
     ...kind === 'stale' && readTime !== null ? { lastGoodAt: clock(readTime) } : {},
     ...kind === 'live' ? { sending: { onItsWay, queued } } : {} };
   const closed = kind === 'closed' ? { closedAt: session.closed_at ? clock(Date.parse(session.closed_at)) : undefined, ...session.archived_at != null ? { archived: true } : {} } : {};
-  const view = { ...base, ...closed, ...corrupt };
+  const view = { ...base, ...closed, ...corrupt, ...pluginMismatch ? { pluginMismatch: true } : {} };
   if (!unsaved) return view;
   const at = unsaved.at ? { unsavedAt: clock(unsaved.at) } : {};
   return kind === 'live' ? { ...view, kind: 'unsaved', ...at } : { ...view, unsavedToo: true, ...at };
@@ -60,6 +61,8 @@ interface SessionBarProps {
   readonly setup?: { readonly sessionId: string; readonly instruction: string } | null;
   /** The workspace's own saved write whose outcome is unknown (the navigation store's pending operation), and the way to check it again. */
   readonly unsaved?: { readonly retry: () => void } | null;
+  /** Where the top bar looks for a Claude plugin that doesn't match the app, while the session's agent isn't live. */
+  readonly discovery?: DiscoveryController;
 }
 
 const idleSubscribe = () => () => {};
@@ -72,7 +75,7 @@ const copied = async (text: string) => { try { await copyText(text); return true
  * One bar stays mounted across session changes, so a control that has focus (the switcher button, the theme button)
  * keeps it; only the per-session state (the card open, the Sending dialog) starts again.
  */
-export function WorkspaceTopBar({ bar, store: given, controllers, line, setup, unsaved }: SessionBarProps & { readonly store: SessionStore | null }) {
+export function WorkspaceTopBar({ bar, store: given, controllers, line, setup, unsaved, discovery }: SessionBarProps & { readonly store: SessionStore | null }) {
   const store = bar.variant === 'first-run' ? null : given;
   const actions = useMemo(() => store ? controllers.forSession(store) : null, [controllers, store]);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -93,9 +96,12 @@ export function WorkspaceTopBar({ bar, store: given, controllers, line, setup, u
   const flagged = saveUnsure || !!unsaved;
   const [unsavedSince, setUnsavedSince] = useState<number | null>(null);
   useEffect(() => { setUnsavedSince(since => flagged ? since ?? Date.now() : null); }, [flagged]);
+  // A Claude plugin that doesn't match the app can't connect, so the agent looks "not running" or "reconnecting": look for the reason then.
+  const kind = state ? connectionKind(state) : null;
+  const pluginMismatch = usePluginMismatch(discovery, state?.snapshot?.session?.id, kind === 'off' || kind === 'reconnect');
   // The same children in the same places either way, so the bar itself is never remounted.
   if (!store || !state || !actions) return <><TopBar {...bar} />{null}{null}{null}</>;
-  const session = state.snapshot?.session, view = connectionView(state, flagged ? { at: unsavedSince ?? undefined } : null);
+  const session = state.snapshot?.session, view = connectionView(state, flagged ? { at: unsavedSince ?? undefined } : null, pluginMismatch);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   // Try again for an unsaved change calls whichever save is pending, each its own way (SPEC 12.9).
   const checkSaved = () => { if (lifecycle.pending) lifecycle.reconcile(); unsaved?.retry(); };

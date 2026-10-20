@@ -203,6 +203,7 @@ async fn run(
                                 availability: Availability::Unknown,
                                 binding: None,
                                 loaded: true,
+                                plugin_mismatch: false,
                                 announcement: None,
                                 received: Instant::now(),
                             });

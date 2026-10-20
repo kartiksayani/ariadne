@@ -131,11 +131,11 @@ fn executable_announcement_is_unbound_and_checks_exact_native_identity_ack() {
         host_version: "2.1.287".into(),
         plugin: LoadedPlugin {
             name: "ariadne".into(),
-            root: "/installed/0.1.0".into(),
+            root: format!("/installed/{}", env!("CARGO_PKG_VERSION")),
         },
         descriptor: ModDescriptor {
             helper_path: "/Applications/Ariadne/helper".into(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
             api_version: 1,
         },
         binding_scope: None,

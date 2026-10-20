@@ -43,6 +43,9 @@
     "observed_at": {
       "$ref": "#/$defs/UtcMillis"
     },
+    "plugin_mismatch": {
+      "type": "boolean"
+    },
     "session": {
       "anyOf": [
         {
@@ -73,6 +76,7 @@
     "compatibility",
     "availability",
     "loaded",
+    "plugin_mismatch",
     "binding_id",
     "session"
   ],

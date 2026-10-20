@@ -882,7 +882,7 @@ fn binding_connect_bootstrap_preserves_canonical_request_and_receipt_without_dis
         },
         descriptor: ModDescriptor {
             helper_path: "/Applications/Ariadne/helper".into(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
             api_version: 1,
         },
         binding_scope: None,
