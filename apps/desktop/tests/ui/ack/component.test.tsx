@@ -75,14 +75,14 @@ async function mount(transport = new AckTransport()) {
 
 describe('local acknowledgement', () => {
   it.each([
-    { status: 'open', target: 'open', hint: 'Ack → keeps it open' },
-    { status: 'open', target: 'in_progress', hint: 'Ack → In progress' },
-    { status: 'open', target: 'done', hint: 'Ack → Done' },
-    { status: 'in_progress', target: 'open', hint: 'Ack → Open' },
-    { status: 'in_progress', target: 'in_progress', hint: 'Ack → keeps it in progress' },
-    { status: 'in_progress', target: 'done', hint: 'Ack → Done' },
+    { status: 'open', target: 'open', hint: 'Ack → keeps it open', short: '→ Open' },
+    { status: 'open', target: 'in_progress', hint: 'Ack → In progress', short: '→ In progress' },
+    { status: 'open', target: 'done', hint: 'Ack → Done', short: '→ Done' },
+    { status: 'in_progress', target: 'open', hint: 'Ack → Open', short: '→ Open' },
+    { status: 'in_progress', target: 'in_progress', hint: 'Ack → keeps it in progress', short: '→ In progress' },
+    { status: 'in_progress', target: 'done', hint: 'Ack → Done', short: '→ Done' },
   ] as const)(
-    'shows the real $status status with the $target Ack hint in tree, detail and graph', async ({ status, target, hint }) => {
+    'shows the real $status status with the $target Ack hint in tree, detail and graph', async ({ status, target, hint, short }) => {
       const transport = new AckTransport(), item = transport.sessions.get(route.session_id)!.items['1.1']!;
       item.status = status; item.ack_to = target;
       item.outcome = 'Retry limits are recorded.'; item.why = 'The limits have an explicit owner.';
@@ -92,14 +92,16 @@ describe('local acknowledgement', () => {
       expect(row().querySelector('.tree-end-badge .status-badge')?.textContent).toBe(label);
       // The row names the target on its Ack button only; its old "Ack → …" body line rewrapped the row (alpha.20 C4).
       expect(within(row()).getByRole('button', { name: hint }).title).toBe(hint);
+      // owner 2026-10-20: visible Ack target. The row's button says where it leads, short, after the ✓; the full hint stays in its name.
+      expect(within(row()).getByRole('button', { name: hint }).textContent).toBe(short);
       expect(within(row()).queryByText(hint)).toBeNull();
       expect(row().querySelector<HTMLElement>('.tree-outcome i')?.style.color).toBe(`var(--st-${colour})`);
       fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(detail().querySelector('.detail-badge')?.textContent).toBe(label);
       expect(detail().querySelector<HTMLElement>('.detail-badge .status-badge')?.style.color).toBe(`var(--st-${colour})`);
-      // Details says "Ack" and keeps the target in the button's name and tooltip (SPEC 5.3 item 5).
+      // Details names the target on the button itself, as its name and tooltip do (owner 2026-10-20: visible Ack target).
       expect(within(detail()).getByRole('button', { name: hint }).title).toBe(hint);
-      expect(within(detail()).getByRole('button', { name: hint }).textContent).toBe('Ack');
+      expect(within(detail()).getByRole('button', { name: hint }).textContent).toBe(hint);
       expect(detail().querySelector<HTMLElement>('.detail-outcome .detail-label')?.style.color).toBe(`var(--st-${colour})`);
       fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
@@ -246,7 +248,8 @@ describe('local acknowledgement', () => {
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {
     await mount();
     const button = within(row()).getByRole('button', { name: 'Ack → Done' });
-    expect(button.textContent).toBe(''); expect(button.title).toBe('Ack → Done');
+    expect(button.textContent).toBe('→ Done'); expect(button.title).toBe('Ack → Done');
+    expect(button.querySelector('i.ph-check')).not.toBeNull();
     expect(button.closest('.tree-ack-slot')).not.toBeNull();
     expect(button.closest('.tree-actions')).toBeNull();
     expect(button.classList.contains('tree-action-ack')).toBe(true);

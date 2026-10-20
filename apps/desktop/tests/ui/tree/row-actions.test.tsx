@@ -38,6 +38,31 @@ describe('compact row actions', () => {
     expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
   });
 
+  // owner 2026-10-20: visible Ack target. Only the Ack names where it leads; the hover bar's buttons stay icons.
+  it.each(['→ Done', '→ Decided', '→ Dropped', '→ Open', '→ In progress'])('shows "%s" after the Ack check and keeps the hover bar icon-only', label => {
+    const props = itemProps([{ title: `Ack ${label}`, label, icon: 'ph ph-check', persistent: true, run: vi.fn() }, { title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const { container } = render(<ItemRow {...props} />);
+    const ack = within(container.querySelector('.tree-ack-slot') as HTMLElement).getByRole('button', { name: `Ack ${label}` });
+    expect(ack.textContent).toBe(label);
+    expect(ack.firstElementChild?.className).toContain('ph-check');
+    expect(ack.querySelector('.tree-action-label')?.textContent).toBe(label);
+    expect(within(container.querySelector('.tree-actions') as HTMLElement).getByRole('button', { name: 'Reply (r)' }).textContent).toBe('');
+    expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
+  });
+
+  it('keeps the 22px Ack slot on a row with no Ack, and the wide one through the 6 s hold', () => {
+    const bare = render(<ItemRow {...itemProps([])} />);
+    expect(bare.container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(false);
+    bare.unmount();
+    const props = itemProps([{ title: 'Ack → Done', label: '→ Done', icon: 'ph ph-check', persistent: true, run: vi.fn() }]);
+    const { container, rerender } = render(<ItemRow {...props} />);
+    expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
+    // Held: the button is replaced by "Acked · Undo", and the cluster stays as wide so the row does not rewrap until the Ack is saved.
+    rerender(<ItemRow {...props} acked onUndoAck={vi.fn()} />);
+    expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
+    expect(container.querySelector('.tree-acked')).not.toBeNull();
+  });
+
   it('draws a held Ack over the area left of the Ack slot, hides the Ack button, and Undo cancels it', () => {
     const undo = vi.fn(), ack = vi.fn(), props = itemProps([{ title: 'Ack → Done', icon: 'ph ph-check', persistent: true, run: ack }]);
     const { container, rerender } = render(<ItemRow {...props} />);

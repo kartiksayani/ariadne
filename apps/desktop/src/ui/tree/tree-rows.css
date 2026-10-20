@@ -158,9 +158,22 @@
   text-underline-offset: 3px;
 }
 
-/* Narrow Map (D5): the marker slot is 16px and the New / Changed pill gives way to its diamond. */
+/* Narrow Map (D5): the marker slot is 16px and the New / Changed pill gives way to its diamond. The Ack gives its label up in the
+   same way: it goes back to a 22px icon (its name and tooltip still say where it leads), so the row does not overflow. */
 @container tree-map (max-width: 559px) {
-  .tree-end { --tree-end-marker: 16px; }
+  .tree-end,
+  .tree-end.tree-end-labelled {
+    --tree-end-marker: 16px;
+    --tree-end-ack: 22px;
+  }
+
+  .tree-action.tree-action-ack[data-labelled] {
+    justify-content: center;
+    width: 22px;
+    padding: 0;
+  }
+
+  .tree-action-label { display: none; }
 
   .tree-end-marker .change-marker[data-form="pill"] {
     height: auto;
@@ -312,10 +325,21 @@
   white-space: nowrap;
 }
 
-/* Ack is 22 x 20 (D22), outside the hover bar. */
+/* Ack is 20 high (D22), outside the hover bar, and names its target after the ✓: "✓ → Done" (owner 2026-10-20: visible Ack
+   target). Its slot is as wide as the longest label on every row, so a label landing or changing never rewraps the row. */
 .tree-action.tree-action-ack {
   width: 22px;
   height: 20px;
+}
+
+.tree-action.tree-action-ack[data-labelled] {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: auto;
+  padding: 0 5px 0 4px;
+  font-size: calc(11px * var(--text-scale));
+  white-space: nowrap;
 }
 
 /* A held single Ack (D11): drawn over the cluster's area left of the Ack slot, so the row never rewraps. */

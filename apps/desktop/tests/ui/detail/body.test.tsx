@@ -6,6 +6,7 @@ import type { SessionSeen } from '../../../src/generated/core';
 import type { ItemChangeRecord } from '../../../src/generated/domain/models';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { ActionsRow } from '../../../src/ui/detail/ActionsRow';
+import { ackTargetText, ackTitle } from '../../../src/ui/shared/ack';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import type { ItemActionView } from '../../../src/ui/detail/itemActions';
 import { clockTime } from '../../../src/ui/changes/clock';
@@ -113,6 +114,30 @@ describe('the Ack button in the actions row', () => {
     const button = screen.getByRole('button', { name: 'Ack → Done' });
     expect(button.getAttribute('title')).toBe(title);
     expect((button as HTMLButtonElement).disabled).toBe(disabled);
+  });
+});
+
+// owner 2026-10-20: visible Ack target. Details names where an Ack takes the item on the button itself.
+describe('the Ack button names its target', () => {
+  it.each([
+    ['open', 'done', 'Done'], ['open', 'decided', 'Decided'], ['open', 'dropped', 'Dropped'], ['open', 'in_progress', 'In progress'],
+    ['in_progress', 'open', 'Open'], ['open', 'open', 'keeps it open'], ['in_progress', 'in_progress', 'keeps it in progress'],
+  ] as const)('a %s item acked to %s reads "✓ Ack → %s"', (status, target, text) => {
+    expect(ackTargetText(target, status)).toBe(text);
+    expect(ackTitle(target, status)).toBe(`Ack → ${text}`);
+    render(<ActionsRow actions={[]} ack={{ title: ackTitle(target, status), held: false, disabled: false, onAck: vi.fn(), onUndo: vi.fn() }} statusLabel="Open" />);
+    const button = screen.getByRole('button', { name: `Ack → ${text}` });
+    expect(button.textContent).toBe(`Ack → ${text}`);
+    expect(button.querySelector('i.ph-check')).not.toBeNull();
+  });
+  it('keeps the held state and a greyed reason as before', () => {
+    const props = { title: 'Ack → Done', disabled: false, onAck: vi.fn(), onUndo: vi.fn() };
+    const view = render(<ActionsRow actions={[]} ack={{ ...props, held: true }} statusLabel="Open" />);
+    expect(screen.getByRole('button', { name: 'Undo Ack' }).textContent).toBe('Acked · Undo');
+    view.rerender(<ActionsRow actions={[]} ack={{ ...props, held: false, disabled: true }} statusLabel="Open" />);
+    const grey = screen.getByRole('button', { name: 'Ack → Done' }) as HTMLButtonElement;
+    expect(grey.title).toBe('A change is being saved');
+    expect(grey.disabled).toBe(true);
   });
 });
 

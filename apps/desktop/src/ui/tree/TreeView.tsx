@@ -28,7 +28,7 @@ import { Keycap } from '../parts/parts';
 import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
-import { ackHoldFor, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
+import { ackHoldFor, ackRowLabel, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
 import { STATUS } from '../shared/status';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type BandSlots, type TopicAction } from './TopicRow';
@@ -1194,7 +1194,7 @@ export function TreeView(props: TreeViewProps) {
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
     const ackTo = row.ack;
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), persistent: true, disabled: viewBusy || actionState.writing || !!actionState.pending || ackHeld.has(item.id), run: () => { runAck(item.id); } });
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), label: ackRowLabel(ackTo), persistent: true, disabled: viewBusy || actionState.writing || !!actionState.pending || ackHeld.has(item.id), run: () => { runAck(item.id); } });
     const act = (intent: RowIntent) => () => {
       ++request.current; centered.current = true; settled.current = true; setAnchor(null);
       scrollRequested.current = null;
