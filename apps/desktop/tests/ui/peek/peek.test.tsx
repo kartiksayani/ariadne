@@ -8,7 +8,7 @@ import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { PeekProvider, usePeek, type PeekProviderProps } from '../../../src/ui/peek/Peek';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
-import { ItemRefSession } from '../../../src/ui/peek/context';
+import { ItemRefSession, PEEK_OPEN_MS } from '../../../src/ui/peek/context';
 import { ItemReference, ItemRefs, Markdown } from '../../../src/ui/shared/MarkdownText';
 import { peekPosition } from '../../../src/ui/peek/position';
 import { peekNames } from '../../../src/ui/peek/names';
@@ -157,17 +157,17 @@ describe('name chips and item peek', () => {
     expect(document.activeElement).toBe(outside);
   });
 
-  it('opens after 350 ms of a resting pointer, with no Recent visit, and cancels on an early leave or blur', async () => {
+  it('opens after PEEK_OPEN_MS (1000 ms) of a resting pointer, with no Recent visit, and cancels on an early leave or blur', async () => {
     const value = await setup(); vi.useFakeTimers();
     const { chip, visit } = mount(value);
-    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(349));
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS - 1));
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(500));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseEnter(chip()); fireEvent.blur(window); act(() => vi.advanceTimersByTime(500));
+    fireEvent.mouseEnter(chip()); fireEvent.blur(window); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
     expect(screen.queryByRole('dialog')).toBeNull();
     // Moving over the same name does not restart the wait.
-    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(200));
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS - 150));
     fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(150));
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(document.activeElement).toBe(document.body);
@@ -177,7 +177,7 @@ describe('name chips and item peek', () => {
   it('closes 260 ms after the pointer leaves, unless the pointer reaches the card or the owner uses it', async () => {
     const value = await setup(); vi.useFakeTimers();
     const { chip } = mount(value);
-    const hover = () => { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); return screen.getByRole('dialog'); };
+    const hover = () => { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS)); return screen.getByRole('dialog'); };
     hover(); fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(259));
     expect(screen.getByRole('dialog')).toBeTruthy();
     act(() => vi.advanceTimersByTime(1));
@@ -275,13 +275,13 @@ describe('name chips and item peek', () => {
     const { chip } = mount(value);
     const unrelated = document.createElement('div'); document.body.append(unrelated);
     try {
-      fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+      fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
       const card = screen.getByRole('dialog');
       fireEvent.scroll(card); fireEvent.scroll(unrelated);
       expect(screen.getByRole('dialog')).toBe(card);
       fireEvent.scroll(chip().parentElement!);
       expect(screen.queryByRole('dialog')).toBeNull();
-      fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+      fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
       fireEvent.scroll(document);
       expect(screen.queryByRole('dialog')).toBeNull();
     } finally { unrelated.remove(); }
@@ -326,22 +326,22 @@ describe('name chips and item peek', () => {
     fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(200));
     fireEvent.mouseDown(row); fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(1000));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
     expect(screen.getByRole('dialog')).toBeTruthy();
   });
 
   it('a resting pointer reopens a card a scroll closed, but not one the owner dismissed with Escape', async () => {
     const value = await setup(); vi.useFakeTimers();
     const { chip } = mount(value);
-    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
     fireEvent.scroll(chip().parentElement!);
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(350));
+    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
     expect(screen.getByRole('dialog')).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(1000));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS));
     expect(screen.getByRole('dialog')).toBeTruthy();
   });
 
@@ -366,7 +366,7 @@ describe('name chips and item peek', () => {
     const marks = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
     const { chip } = mount(value, { navigation });
     vi.useFakeTimers();
-    if (how === 'click') fireEvent.click(chip()); else { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); }
+    if (how === 'click') fireEvent.click(chip()); else { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS)); }
     const card = screen.getByRole('dialog');
     const pill = () => within(card).queryByTestId('change-marker');
     expect(pill()?.getAttribute('aria-label')).toBe('Changed');
@@ -386,7 +386,7 @@ describe('name chips and item peek', () => {
     const value = await setup(); vi.useFakeTimers(); const { chip } = mount(value), editorKeys = vi.fn();
     render(<input aria-label="Outside editor" onKeyDown={editorKeys} />);
     const editor = screen.getByRole('textbox', { name: 'Outside editor' }); editor.focus();
-    const hover = () => { fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); };
+    const hover = () => { fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS)); };
     hover(); expect(document.activeElement).toBe(editor);
     fireEvent.keyDown(editor, { key: 'Escape' });
     expect(editorKeys).toHaveBeenCalledTimes(1); expect(editorKeys.mock.calls[0][0].defaultPrevented).toBe(false);
@@ -436,7 +436,7 @@ describe('name chips and item peek', () => {
     </PeekProvider>;
     const { rerender } = render(tree(1));
     const chip = screen.getByRole('button');
-    fireEvent.mouseEnter(chip); act(() => vi.advanceTimersByTime(200));
+    fireEvent.mouseEnter(chip); act(() => vi.advanceTimersByTime(PEEK_OPEN_MS - 150));
     rerender(tree(2)); act(() => vi.advanceTimersByTime(150));
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(visited).not.toHaveBeenCalled();

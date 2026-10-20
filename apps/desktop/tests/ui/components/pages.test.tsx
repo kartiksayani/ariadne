@@ -101,11 +101,11 @@ describe('Projects page', () => {
 
 const group = (id: string, name: string, sessions: PageSession<string>[], empty?: SessionGroupData<string>['empty']): SessionGroupData<string> => ({ id, name, path: `~/code/${name}`, sessions, empty });
 function sessionsPage(patch: Partial<SessionsListProps<string>> = {}) {
-  const handlers = { onOpen: vi.fn(), onRename: vi.fn(), onClose: vi.fn(), onArchive: vi.fn() };
+  const handlers = { onOpen: vi.fn(), onRename: vi.fn(), onClose: vi.fn(), onArchive: vi.fn(), onCopyId: vi.fn(() => Promise.resolve(true)) };
   const onChange = vi.fn();
   render(<SessionsList narrow={false} back={{ label: 'cache PR review', onBack: vi.fn() }} title="All sessions" sub="3 sessions in 2 projects"
     tabs={{ value: 'all', counts: { open: 2, closed: 1, all: 3 }, onChange }}
-    groups={[group('sdk', 'notes-sdk', [session('cache PR review', { current: true, waiting: 2, status: 'Live · iTerm window 1' }), session('docs pass', { run: 'closed', status: 'Closed yesterday 18:05' })]),
+    groups={[group('sdk', 'notes-sdk', [session('cache PR review', { id: 'sess-cache', current: true, waiting: 2, status: 'Live · iTerm window 1' }), session('docs pass', { id: 'sess-docs', run: 'closed', status: 'Closed yesterday 18:05' })]),
       group('api', 'notes-api', [session('schema review', { agent: 'Codex', status: 'Not running · 1 queued', run: 'off' })])]}
     {...handlers} {...patch} />);
   return { ...handlers, onChange };
@@ -144,7 +144,7 @@ describe('All sessions page', () => {
     expect(screen.queryByRole('group', { name: 'Show' })).toBeNull();
   });
 
-  it('each row renames, closes and archives; a closed row keeps Close greyed, and no row copies an ID or reopens', () => {
+  it('each row renames, closes and archives; a closed row keeps Close greyed, and no row reopens', () => {
     const h = sessionsPage();
     fireEvent.click(screen.getByRole('button', { name: 'Rename cache PR review' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close cache PR review' }));
@@ -152,13 +152,41 @@ describe('All sessions page', () => {
     expect(h.onRename).toHaveBeenCalledWith(expect.objectContaining({ name: 'cache PR review' }));
     expect(h.onClose).toHaveBeenCalledWith(expect.objectContaining({ name: 'cache PR review' }));
     expect(h.onArchive).toHaveBeenCalledWith(expect.objectContaining({ name: 'cache PR review' }));
-    // SPEC 14.2: Copy ID and Reopen are the connection card's, not the row's.
-    expect(screen.queryByRole('button', { name: /^Copy the ID of/ })).toBeNull();
+    // SPEC 14.2: Reopen is the connection card's, not the row's.
     expect(screen.queryByRole('button', { name: /^Reopen / })).toBeNull();
     const closed = screen.getByRole('button', { name: 'Close docs pass' }) as HTMLButtonElement;
     expect(closed.disabled).toBe(true); expect(closed.title).toBe('Already closed');
     fireEvent.click(closed);
     expect(h.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Copy session ID hands the row to onCopyId, says Copied, and works on a closed row', async () => {
+    const h = sessionsPage();
+    const live = screen.getByRole<HTMLButtonElement>('button', { name: 'Copy session ID of cache PR review' });
+    expect(live.title).toBe('Copy session ID');
+    expect(live.querySelector('i')?.className).toBe('ph ph-copy');
+    await act(async () => { fireEvent.click(live); });
+    expect(h.onCopyId).toHaveBeenCalledTimes(1);
+    expect(h.onCopyId).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'sess-cache' }));
+    expect(live.title).toBe('Copied');
+    expect(live.querySelector('i')?.className).toBe('ph ph-check');
+    const closed = screen.getByRole<HTMLButtonElement>('button', { name: 'Copy session ID of docs pass' });
+    expect(closed.disabled).toBe(false);
+    await act(async () => { fireEvent.click(closed); });
+    expect(h.onCopyId).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'sess-docs', run: 'closed' }));
+  });
+
+  it('a failed copy says so; a row with no session ID has Copy session ID off and says why', async () => {
+    const onCopyId = vi.fn(() => Promise.resolve(false));
+    sessionsPage({ onCopyId });
+    const failing = screen.getByRole<HTMLButtonElement>('button', { name: 'Copy session ID of cache PR review' });
+    await act(async () => { fireEvent.click(failing); });
+    expect(failing.title).toBe('Couldn’t copy');
+    const none = screen.getByRole<HTMLButtonElement>('button', { name: 'Copy session ID of schema review' });
+    expect(none.disabled).toBe(true);
+    expect(none.title).toBe('This session has no ID yet');
+    fireEvent.click(none);
+    expect(onCopyId).toHaveBeenCalledTimes(1);
   });
 
   it('opens a session from its name', () => {
