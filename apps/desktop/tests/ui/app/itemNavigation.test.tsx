@@ -295,7 +295,81 @@ describe('composed item navigation', () => {
   });
 });
 
+/** A transport whose `reveal_item` answers wait until the test lets them go, so replies can land in either order. */
+class HeldReveals extends AppTransport {
+  private readonly gates = new Map<string, { gate: Promise<void>; release: () => void }>();
+  hold(id: string) {
+    let release!: () => void;
+    this.gates.set(id, { gate: new Promise<void>(resolve => { release = resolve; }), release });
+  }
+  release(id: string) { this.gates.get(id)!.release(); }
+  /** The write that saves `id` as the selection waits too: a jump asked for meanwhile queues behind it, as it does behind a slow save. */
+  holdSelectionWrite(id: string) { this.hold(`write:${id}`); }
+  override async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
+    const request = args.request;
+    if (!('command' in request) && request.request.command === 'reveal_item') await this.gates.get(request.request.params.item_id)?.gate;
+    if ('command' in request && request.command.command === 'preferences_patch') {
+      for (const entry of request.command.params.entries) {
+        if (entry.kind === 'set_session_view' && entry.preferences.selected_item_id) await this.gates.get(`write:${entry.preferences.selected_item_id}`)?.gate;
+      }
+    }
+    return super.invoke<T>(name, args);
+  }
+}
+
 describe('composed map reveal scrolling', () => {
+  // The owner's last jump wins: a late answer to a Graph click must not beat a link clicked after it, even though that link
+  // has not published its reveal yet (finding: the outside-reveal count moved at publish, not at the ask).
+  // Back and Forward cannot be asked while a save is pending (they are off), so they never queue behind the click's save.
+  it.each(['a Details link', 'the dock', 'a native route'] as const)('drops a late answer to a Graph click when %s was asked for after it', async way => {
+    const transport = new HeldReveals(), session = transport.sessions.get(route.session_id)!;
+    session.items['4']!.related = ['1.1', '8'];
+    await setup(transport); await openSession();
+    await pick('4');
+    await click(control('Graph'));
+    const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
+    const target = way === 'a Details link' ? '1.1' : way === 'the dock' ? '2' : '8';
+    // The click's save is slow, so the jump asked for next waits behind it and has published nothing when the click's answer lands.
+    transport.hold('5'); transport.holdSelectionWrite('5');
+    await click(document.querySelector('[role="treeitem"][data-item-id="5"]')!);
+    await waitFor(() => expect(document.querySelector('.graph-node[aria-selected="true"]')?.getAttribute('data-item-id')).toBe('5'));
+    // The click's answer is still on its way; now the owner jumps elsewhere.
+    if (way === 'a Details link') await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Open` }));
+    else if (way === 'the dock') await fromDock();
+    else await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '8' }); });
+    // The click's answer lands first, then the jump's.
+    await act(async () => { transport.release('5'); });
+    await act(async () => { transport.release('write:5'); });
+    await waitFor(() => selected(target));
+    await waitFor(() => expect(view().selected_item_id).toBe(target));
+  });
+
+  it('does not drop a Graph click made after another jump published and before its reveal finished', async () => {
+    const transport = new HeldReveals(), session = transport.sessions.get(route.session_id)!;
+    session.items['4']!.related = ['1.1', '8'];
+    transport.preferences.sessions[0]!.selected_item_id = '4';
+    await setup(transport); await openSession();
+    await click(control('Graph'));
+    const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
+    // Hold the end of the link's reveal: its reveal is published, but the App has not finished with it.
+    let finish!: () => void;
+    const finishing = new Promise<void>(resolve => { finish = resolve; });
+    const completion = NavigationStore.prototype.getNavigationCompletion;
+    vi.spyOn(NavigationStore.prototype, 'getNavigationCompletion').mockImplementation(function (this: NavigationStore, request: number) {
+      return completion.call(this, request).then(async saved => { await finishing; return saved; });
+    });
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Open` }));
+    await waitFor(() => selected('1.1'));
+    // The link published. A Graph click now is the newest jump and has to land, however the link's reveal ends.
+    transport.hold('8');
+    await click(document.querySelector('[role="treeitem"][data-item-id="8"]')!);
+    await act(async () => { finish(); });
+    await act(async () => { transport.release('8'); });
+    await waitFor(() => selected('8'));
+    expect(view().selected_item_id).toBe('8');
+  });
+
+
   it.each(['search over a collapsed ancestor', 'status', 'search matching nothing', 'collapsed ancestor'] as const)('reveals an undrawn Graph selection through its registered route after %s, preserving the saved view', async cause => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = this.closest<HTMLElement>('.graph-scroll');
@@ -362,6 +436,42 @@ describe('composed map reveal scrolling', () => {
       await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.selected_item_id).toBeNull());
       expect(document.querySelector('[data-detail-item-id="1.1"]')).toBeNull();
     }
+  });
+
+  // P11.12 through the App: `.` on a selection folded out of the Graph reveals it through its route and opens Details on it.
+  it('goes back to a selection folded out of the Graph with `.`: reveals it and opens Details, composed through the App (P11.12)', async () => {
+    const transport = new AppTransport();
+    await setup(transport); await openSession(); await pick('1.1');
+    await keyDown(treeRow('1'), 'ArrowLeft');
+    await click(control('Graph'));
+    await closeDetailsWith(click);
+    const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');
+    expect(target()).toBeNull();
+    expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
+    const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    act(() => screen.getByTestId('graph-scroll').focus());
+    await keyDown(document.body, '.');
+    await waitFor(() => selected('1.1'));
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item').slice(before)).toEqual([
+      expect.objectContaining({ session: route, request: { command: 'reveal_item', params: { item_id: '1.1' } } }),
+    ]);
+    expect(target()).not.toBeNull();
+    expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.selected_item_id).toBe('1.1');
+  });
+
+  // P11.12 through the App: with the bigger view of an item over the Map, `.` is left to the views below, and nothing is revealed.
+  it('leaves `.` to the views below while the Map is covered by the bigger view, composed through the App (P11.12)', async () => {
+    const transport = new AppTransport();
+    await setup(transport); await openSession(); await pick('4');
+    await click(control('Graph'));
+    await click(screen.getByRole('button', { name: 'Read in a bigger view' }));
+    await screen.findByRole('region', { name: 'Item conversation' });
+    const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    const focused = document.activeElement;
+    await keyDown(document.body, '.');
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item').length).toBe(before);
+    expect(screen.getByRole('region', { name: 'Item conversation' })).toBeTruthy();
+    expect(document.activeElement).toBe(focused);
   });
 
   it('keeps the Graph’s scroll and focus through a plain click, composed through the App (P11.13)', async () => {

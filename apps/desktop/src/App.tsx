@@ -172,8 +172,9 @@ function Workspace({ application }: { application: Application }) {
   const [detailsFolded, setDetailsFolded] = useState(readFolded);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
-  // Counts the reveals that come from outside the Map (a link, the dock, a native route): the Graph drops the answer to its own
-  // click only when this changed. The Map's own selection (`selected`) and a dismissed reveal never change it.
+  // Counts the reveals that come from outside the Map (a link, the dock, a native route), when each publishes: it ends what the
+  // Graph held for its own click. The Map's own selection (`selected`) and a dismissed reveal never change it. The Graph drops the
+  // late answer to its click by NavigationState.revealAsks, which moves when such a reveal is asked for.
   const [outsideReveals, setOutsideReveals] = useState({ count: 0, seen: state.reveal });
   if (outsideReveals.seen !== state.reveal) setOutsideReveals({ count: outsideReveals.count + (state.reveal ? 1 : 0), seen: state.reveal });
   // "Resume filtered view", a filter change or a fold drops the tree's temporary reveal.
@@ -335,7 +336,6 @@ function Workspace({ application }: { application: Application }) {
     if (!result) return null;
     recordViewed(result);
     setLocalReveal(result);
-    setOutsideReveals(previous => ({ ...previous, count: previous.count + 1 }));
     // "Go to" in the peek selects and scrolls to the row; only the opening paths open Details.
     if (openDetail) { detailTarget.showItem(); detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
     // Continuations use this exact admitted request, including queued reveals.

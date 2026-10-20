@@ -50,6 +50,6 @@ export function NavigationGraph({ navigation, store, reveal, outsideReveals, onR
     }
   };
   return <GraphView store={store} routes={navigation.routes} view={view} later={later} local={local} reveal={reveal === undefined ? state.reveal : reveal}
-    outsideReveals={outsideReveals} markers={markers} preferencesBusy={state.writing || state.pendingOperationId !== null}
+    outsideReveals={outsideReveals} revealAsks={state.revealAsks} markers={markers} preferencesBusy={state.writing || state.pendingOperationId !== null}
     saveView={saveView} onReveal={onReveal} onClearFilters={onClearFilters} onDismissBanner={onDismissBanner} covered={covered} />;
 }

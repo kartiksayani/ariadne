@@ -41,6 +41,11 @@ export interface GraphViewProps {
    * when this changed since the click.
    */
   readonly outsideReveals: number;
+  /**
+   * Counts the reveals asked for from outside the Graph (NavigationState.revealAsks), moved when each is asked for, not when it
+   * publishes. An answer to a click, or to `.`, is dropped when this changed since it was asked: the jump asked for last wins.
+   */
+  readonly revealAsks?: number;
   /** New and Changed markers by item id (ui/tree/model.ts `mapChanges`): a diamond alone on the node (SPEC 9.9). */
   readonly markers?: ReadonlyMap<string, MarkerKind>;
   readonly preferencesBusy?: boolean;
@@ -145,7 +150,7 @@ const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [to
 const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
 const NO_LOCAL: readonly LocalChip[] = [];
 
-export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, outsideReveals, markers, preferencesBusy = false, saveView, onReveal, onClearFilters, onDismissBanner, covered = false }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, outsideReveals, revealAsks = 0, markers, preferencesBusy = false, saveView, onReveal, onClearFilters, onDismissBanner, covered = false }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
@@ -188,8 +193,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
   [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: outsideReveals, dockInset, folds: filterFolds.items, onDismissBanner });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: outsideReveals, dockInset, folds: filterFolds.items, onDismissBanner };
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: outsideReveals, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: outsideReveals, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner };
 
   // Related lines show for the selected node and the one under the pointer only (SPEC 1.3). They are drawn over the
   // canvas from the laid-out positions, so hovering never rebuilds the 2,000-node model.
@@ -353,12 +358,14 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
     setScrollTarget({ id, center: false });
-    const call = ++request.current, external = latest.current.external;
+    const call = ++request.current, external = latest.current.external, asked = latest.current.asked;
+    // A jump asked for from outside since this click (even one still waiting to publish) is the newer one: this answer is dropped.
+    const stale = () => !mounted.current || call !== request.current || external !== latest.current.external || asked !== latest.current.asked;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
-      if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
+      if (stale() || !result) return;
       ownReveal.current = result;
       setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
-    }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
+    }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold, peek]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
@@ -381,11 +388,12 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       if (covered || !id || !current) return false;
       peek?.closeAll();
       if (current.nodes.has(id)) { setScrollTarget({ id, center: false, focus: true }); return true; }
-      const call = ++request.current, external = latest.current.external;
+      const call = ++request.current, external = latest.current.external, asked = latest.current.asked;
+      const stale = () => !mounted.current || call !== request.current || external !== latest.current.external || asked !== latest.current.asked;
       void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
-        if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
+        if (stale() || !result) return;
         latest.current.onReveal(result, true);
-      }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
+      }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
       return true;
     },
   });

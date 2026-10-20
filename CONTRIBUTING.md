@@ -37,8 +37,10 @@ for the commands, coverage exclusions and release-sensitive paths.
 Tests find elements by role, label, text or `data-testid`, never by CSS class. The
 `ariadne/no-class-selectors` lint rule (`scripts/eslint/`) enforces it on test files that are not in
 `scripts/eslint/class-selector-baseline.json`. That list is frozen and may only shrink: when you convert
-the last class selector in a listed file, delete the file from the list (a unit test fails on a stale entry).
-Never add a file to it.
+the last class selector in a listed file, delete the file from the list (a unit test fails on a stale entry and
+on a list longer than when it was frozen). Never add a file to it. The rule reads string literals (lookups,
+`page.click('.x')`-style calls, Testing Library `{ selector }`, `getElementsByClassName`); a selector held in a
+variable is not checked, so keep selectors literal.
 
 Application changes require meaningful tests, Clippy, >=80% weighted Rust+TS/JS
 executable-line coverage including untested handwritten logic, and native WebView

@@ -1,10 +1,24 @@
 // Test-only rule: finds elements by role, label, text or data-testid, never by CSS class.
-// It reports a class selector (".name") passed to a DOM or Playwright lookup call.
+// It reports a class selector (".name") written as a string literal (or a template literal) in these forms:
+//   - a DOM or Playwright lookup call: querySelector, querySelectorAll, closest, matches, locator, frameLocator, $, $$, $eval, ...
+//   - a Playwright page method that takes a selector first: page.click('.x'), page.fill('.x', ...), page.hover('.x'), ...
+//   - a Testing Library options object: getByText('a', { selector: '.x' })
+//   - getElementsByClassName('x'), whose argument is a class name, not a selector
+// A selector held in a variable or built by a call is not read (the rule reads literals only); keep selectors literal.
 
 const LOOKUPS = new Set([
-  'locator', 'querySelector', 'querySelectorAll', 'closest', 'matches',
+  'locator', 'frameLocator', 'querySelector', 'querySelectorAll', 'closest', 'matches',
   'waitForSelector', '$', '$$', '$eval', '$$eval',
 ]);
+
+// Methods of a Playwright page or frame whose first argument is a selector.
+const PAGE_METHODS = new Set([
+  'click', 'dblclick', 'fill', 'hover', 'check', 'uncheck', 'press', 'type', 'focus', 'blur', 'tap',
+  'textContent', 'innerText', 'innerHTML', 'inputValue', 'getAttribute', 'isVisible', 'isHidden', 'isEnabled',
+  'isDisabled', 'isChecked', 'isEditable', 'selectOption', 'setInputFiles', 'dragAndDrop', 'dispatchEvent',
+]);
+// `page.click(...)`, `frame.fill(...)`, `popup.hover(...)`, `mainPage.type(...)`; not `keyboard.type('a.b')` or `userEvent.click(el)`.
+const PAGE_OBJECT = /^(page|frame|popup|[a-z][A-Za-z0-9]*(Page|Frame))$/;
 
 // Playwright engines whose text is not CSS ("text=a.b", "xpath=//a[@class]", "role=button").
 const NON_CSS = /^\s*(text|xpath|role|id|data-testid|internal:[a-z-]+)\s*=/i;
@@ -34,6 +48,25 @@ function calleeName(callee) {
   return null;
 }
 
+function pageMethod(callee) {
+  return callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier'
+    && PAGE_METHODS.has(callee.property.name) && callee.object.type === 'Identifier' && PAGE_OBJECT.test(callee.object.name);
+}
+
+// `{ selector: '.x' }` in any argument: Testing Library's `getByText(text, { selector })` and its siblings.
+function optionSelectors(args) {
+  const found = [];
+  for (const arg of args) {
+    if (arg.type !== 'ObjectExpression') continue;
+    for (const property of arg.properties) {
+      if (property.type !== 'Property' || property.computed) continue;
+      const key = property.key.type === 'Identifier' ? property.key.name : property.key.type === 'Literal' ? property.key.value : null;
+      if (key === 'selector') found.push(property.value);
+    }
+  }
+  return found;
+}
+
 export const noClassSelectors = {
   meta: {
     type: 'problem',
@@ -43,13 +76,21 @@ export const noClassSelectors = {
     },
   },
   create(context) {
+    const report = (node, text) => context.report({ node, messageId: 'classSelector',
+      data: { selector: text.length > 40 ? `${text.slice(0, 37)}...` : text } });
     return {
       CallExpression(node) {
         const name = calleeName(node.callee);
-        if (!name || !LOOKUPS.has(name)) return;
-        const text = selectorText(node.arguments[0]);
-        if (text !== null && hasClassSelector(text)) {
-          context.report({ node: node.arguments[0], messageId: 'classSelector', data: { selector: text.length > 40 ? `${text.slice(0, 37)}...` : text } });
+        if (name === 'getElementsByClassName') {
+          const text = selectorText(node.arguments[0]);
+          if (text !== null) report(node.arguments[0], text);
+        } else if (name && (LOOKUPS.has(name) || pageMethod(node.callee))) {
+          const text = selectorText(node.arguments[0]);
+          if (text !== null && hasClassSelector(text)) report(node.arguments[0], text);
+        }
+        for (const value of optionSelectors(node.arguments)) {
+          const text = selectorText(value);
+          if (text !== null && hasClassSelector(text)) report(value, text);
         }
       },
     };
