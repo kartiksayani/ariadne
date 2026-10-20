@@ -283,8 +283,13 @@ for (const theme of ['dark', 'light'] as const) {
     expect(check.x + check.width).toBeLessThanOrEqual(whole.x + whole.width);
     // "› Before → after" sits under the name column; opening it tints the card and draws a Before / After grid.
     const toggle = card.getByRole('button', { name: 'Before → after', exact: true });
-    const toggleBox = await box(toggle);
-    expect(toggleBox.y).toBeGreaterThanOrEqual(name.y + name.height - 1);
+    // Measured in one call: the popover can still settle between two separate reads on a slow runner.
+    const stacked = await card.evaluate(element => {
+      const nameRect = [...element.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Retry schedule')!.getBoundingClientRect();
+      const toggleRect = [...element.querySelectorAll('button')].find(button => button.textContent?.includes('Before → after'))!.getBoundingClientRect();
+      return { nameBottom: nameRect.bottom, toggleTop: toggleRect.top };
+    });
+    expect(stacked.toggleTop).toBeGreaterThanOrEqual(stacked.nameBottom - 1);
     await expect(card).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await toggle.click();
     await expect(card).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
