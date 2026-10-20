@@ -108,7 +108,7 @@ export function ChangesOpener({ session, topicId, seen, navigation, onOpenItem }
       <header className="changes-head">
         <i className="ph ph-list" aria-hidden="true" />
         <h2>What changed</h2>
-        {since && <span className="change-muted">since you looked at {since}</span>}
+        {since && <span className="change-muted">{long ? `since ${weekdayName(summary.baseline!)} ${since}` : `since you looked at ${since}`}</span>}
         <button type="button" className="btn btn-ghost changes-close" aria-label="Close" title="Close ( esc )" onClick={() => close(true)}><i className="ph ph-x" aria-hidden="true" /></button>
       </header>
       <ChangesPopover session={session} topicId={topicId} route={route} navigation={navigation} data={data} undoToken={undoToken}

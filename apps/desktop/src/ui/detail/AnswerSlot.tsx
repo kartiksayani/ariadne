@@ -37,6 +37,8 @@ export interface AnswerSlotProps {
   readonly head?: boolean;
   /** Why the detail model blocks answering (closed session, reconnecting), if it does. */
   readonly blocked?: string | null;
+  /** The item (or its topic) is in its removal window: Retry, Try sending again and Check delivery wait for Undo. Not part of `blocked`, which the uncertain bars ignore. */
+  readonly removing?: boolean;
   readonly focusRequest?: OwnerFocusRequest;
   readonly onFocusRequestConsumed?: (token: number) => void;
   /** Esc in the control: leave it and return focus to the workspace. */
@@ -49,11 +51,12 @@ export interface AnswerSlotProps {
   readonly marked?: boolean;
 }
 
+const removingNote = 'Being removed · Undo first';
 const barButton = (label: string, icon: string, onClick: () => void, options: { primary?: boolean; disabled?: boolean; title?: string } = {}) =>
   <button type="button" key={label} className="answer-bar-button" data-primary={options.primary || undefined} disabled={options.disabled} title={options.title}
     onClick={event => { event.stopPropagation(); onClick(); }}><i className={icon} aria-hidden="true" />{label}</button>;
 
-export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, head = false, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
+export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, head = false, blocked, removing = false, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
   const mark = marked ? itemId : undefined;
   const root = useRef<HTMLDivElement>(null), handled = useRef<number | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<string | null>(null);
@@ -145,14 +148,14 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
   const busy = entry.saving || state.preferenceUncertain;
   const bar: AnswerBar | null = entry.uncertain && !entry.rejected
     ? { icon: 'ph-fill ph-question', tone: 'accent', text: 'Ariadne isn’t sure this was sent. Check before sending again; your words are kept.', narrow: 'Not sure it was sent. Words kept.',
-      actions: <>{copy}{barButton('Check delivery', 'ph ph-arrows-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy })}</> }
+      actions: <>{copy}{barButton('Check delivery', 'ph ph-arrows-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy || removing, title: removing ? removingNote : undefined })}</> }
     : entry.uncertain
       ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
         actions: <>{copy}{barButton('Edit and send again', 'ph ph-pencil-simple', submit.prepareRevised, { disabled: ended || busy })}
-          {barButton('Try sending again', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: ended || busy, title: 'Send the same answer again, once' })}</> }
+          {barButton('Try sending again', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: ended || busy || removing, title: removing ? removingNote : 'Send the same answer again, once' })}</> }
       : entry.error
         ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
-          actions: <>{copy}{barButton('Retry', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy || !!submit.blocked || submit.changed, title: 'Send again ( ↵ )' })}</> }
+          actions: <>{copy}{barButton('Retry', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy || !!submit.blocked || submit.changed || removing, title: removing ? removingNote : 'Send again ( ↵ )' })}</> }
         : null;
   // Words the agent already had (a refill after "Stop waiting") go again only after the same "Send again?" as the message's
   // own Send again. Its clicks and keys stay off the cards and the Map; a held ↵ that repeats onto it confirms nothing.

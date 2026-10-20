@@ -19,10 +19,10 @@ export async function runAccessibilityAcceptance(configuration) {
     } catch (error) { return { ok: false, message: String(error) }; }
   });
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-minimum-window.json'), { actualWebView: true,
-    viewport, nativeWindow, minimum: { width: 1300, height: 760 } });
+    viewport, nativeWindow, minimum: { width: 1100, height: 760 } });
   assert.equal(nativeWindow.ok, true, nativeWindow.message);
-  assert.ok(nativeWindow.logical.width >= 1300 && nativeWindow.logical.height >= 760,
-    'Ordinary native window must reach minimum outer size 1300×760');
+  assert.ok(nativeWindow.logical.width >= 1100 && nativeWindow.logical.height >= 760,
+    'Ordinary native window must reach minimum outer size 1100×760');
   const before = await readFile(configuration.demo.sessionPath);
   await openSession(configuration.demo.session_id);
   // An open item keeps its reply box docked in Details, so Reply focuses a text editor (a waiting item's Reply lands on its

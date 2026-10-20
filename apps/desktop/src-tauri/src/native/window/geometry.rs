@@ -34,11 +34,130 @@ pub struct MinimumSize {
     pub height: f64,
 }
 
+/// The work area a frame belongs to: its own monitor when that still exists,
+/// else the one it overlaps most. The native caller orders the primary monitor
+/// first; ties preserve that order.
+pub fn select_area<'a>(frame: &WindowGeometry, areas: &'a [WorkArea]) -> Option<&'a WorkArea> {
+    let first = areas.first()?;
+    Some(
+        areas
+            .iter()
+            .find(|area| frame.monitor_id.as_ref() == Some(&area.monitor_id))
+            .unwrap_or_else(|| {
+                areas.iter().fold(first, |best, candidate| {
+                    if overlap(frame, candidate) > overlap(frame, best) {
+                        candidate
+                    } else {
+                        best
+                    }
+                })
+            }),
+    )
+}
+
+/// The content minimum the window can really keep on `area`: the configured
+/// minimum, but never more than the work area leaves after the window chrome
+/// (title bar). Used for `set_min_size`; add `chrome` back for the whole-frame
+/// minimum that `clamp_geometry` takes.
+pub fn live_content_minimum(
+    configured: MinimumSize,
+    area: &WorkArea,
+    chrome: MinimumSize,
+) -> MinimumSize {
+    MinimumSize {
+        width: configured.width.min((area.width - chrome.width).max(0.0)),
+        height: configured
+            .height
+            .min((area.height - chrome.height).max(0.0)),
+    }
+}
+
+/// Slack for physical-to-logical rounding when comparing a frame to a work area.
+const FIT_TOLERANCE: f64 = 1.0;
+/// How much of the title bar's width must stay on a screen to grab it.
+const REACHABLE_TITLE_WIDTH: f64 = 100.0;
+
+/// Whether a window the owner has not asked to move still needs fitting: its
+/// frame is larger than its work area, or its title bar cannot be grabbed (less
+/// than 100 pt of its width, or not its full height, inside any monitor's work
+/// area). A window dragged partly off-screen but still reachable is left alone.
+/// Invalid evidence never asks for a fit.
+pub fn needs_fit(frame: &WindowGeometry, areas: &[WorkArea], title_height: f64) -> bool {
+    if !valid_rectangle(frame.x, frame.y, frame.width, frame.height)
+        || !title_height.is_finite()
+        || title_height < 0.0
+        || areas
+            .iter()
+            .any(|area| !valid_rectangle(area.x, area.y, area.width, area.height))
+    {
+        return false;
+    }
+    let Some(area) = select_area(frame, areas) else {
+        return false;
+    };
+    if frame.width > area.width + FIT_TOLERANCE || frame.height > area.height + FIT_TOLERANCE {
+        return true;
+    }
+    let reachable = areas.iter().any(|area| {
+        let shown = ((frame.x + frame.width).min(area.x + area.width) - frame.x.max(area.x))
+            .min(frame.width);
+        shown >= REACHABLE_TITLE_WIDTH.min(frame.width) - FIT_TOLERANCE
+            && frame.y >= area.y - FIT_TOLERANCE
+            && frame.y + title_height <= area.y + area.height + FIT_TOLERANCE
+    });
+    !reachable
+}
+
+/// What to do with a window frame on the current screens: the live content
+/// minimum to set, and the fitted frame (None leaves the window where it is).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FitPlan {
+    pub content_minimum: MinimumSize,
+    pub frame: Option<WindowGeometry>,
+}
+
+/// Plans a fit. `only_if_needed` is the wake and scale-change mode: a frame
+/// that is on screen and reachable gets the live minimum but is never moved.
+pub fn plan_fit(
+    frame: &WindowGeometry,
+    areas: &[WorkArea],
+    chrome: MinimumSize,
+    configured: MinimumSize,
+    only_if_needed: bool,
+) -> Result<FitPlan, CoreError> {
+    let area = select_area(frame, areas).ok_or_else(|| {
+        CoreError::new(
+            CoreErrorCode::IoError,
+            "No native monitor work area is available.",
+            "Keep the existing window position and reconcile displays after wake.",
+        )
+    })?;
+    let content_minimum = live_content_minimum(configured, area, chrome);
+    let minimum = MinimumSize {
+        width: content_minimum.width + chrome.width,
+        height: content_minimum.height + chrome.height,
+    };
+    // A frame below the live minimum is grown from its origin by macOS once the
+    // minimum is set, which can push it off the screen: fit it instead.
+    let below_minimum = frame.width + FIT_TOLERANCE < minimum.width
+        || frame.height + FIT_TOLERANCE < minimum.height;
+    if only_if_needed && !below_minimum && !needs_fit(frame, areas, chrome.height) {
+        return Ok(FitPlan {
+            content_minimum,
+            frame: None,
+        });
+    }
+    Ok(FitPlan {
+        content_minimum,
+        frame: Some(clamp_geometry(frame, areas, minimum)?),
+    })
+}
+
 /// Keep the whole saved window reachable after monitor removal or resize.
-/// The native caller orders the primary monitor first; ties preserve that order.
 /// A saved size below `minimum` (one saved while minimized or mid-transition)
 /// grows to it: macOS applies a restored size even under the window's minimum.
-/// A work area smaller than `minimum` pins the window to its top-left corner.
+/// `minimum` is capped at the work area, so the window never outgrows its
+/// screen; callers pass the live minimum (`live_content_minimum` plus chrome).
 pub fn clamp_geometry(
     saved: &WindowGeometry,
     areas: &[WorkArea],
@@ -58,27 +177,21 @@ pub fn clamp_geometry(
             "Read the current native monitor work areas before restoring the window.",
         ));
     }
-    let first = areas.first().ok_or_else(|| {
+    let area = select_area(saved, areas).ok_or_else(|| {
         CoreError::new(
             CoreErrorCode::IoError,
             "No native monitor work area is available.",
             "Keep the existing window position and reconcile displays after wake.",
         )
     })?;
-    let area = areas
-        .iter()
-        .find(|area| saved.monitor_id.as_ref() == Some(&area.monitor_id))
-        .unwrap_or_else(|| {
-            areas.iter().fold(first, |best, candidate| {
-                if overlap(saved, candidate) > overlap(saved, best) {
-                    candidate
-                } else {
-                    best
-                }
-            })
-        });
-    let width = saved.width.min(area.width).max(minimum.width);
-    let height = saved.height.min(area.height).max(minimum.height);
+    let width = saved
+        .width
+        .min(area.width)
+        .max(minimum.width.min(area.width));
+    let height = saved
+        .height
+        .min(area.height)
+        .max(minimum.height.min(area.height));
     // `f64::clamp` panics when the window outgrows the area (min > max).
     let place = |saved: f64, start: f64, span: f64, size: f64| {
         if size >= span {

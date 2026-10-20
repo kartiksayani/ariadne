@@ -502,7 +502,8 @@ function Workspace({ application }: { application: Application }) {
     const topic = target.kind === 'topic' ? session.topics[target.topic_id] : null;
     setAsking({ review, family: topic ? 'checking' : null });
     if (topic) {
-      // E34: a continued topic can't be removed here. Archived sessions are read now, with a 5 s limit; unknown counts as family.
+      // E34: a continued topic can't be removed here. Archived sessions are read now, with a 5 s limit, and a waiting reader that is
+      // still catching up is waited for, 20 s at most in all (queue.ts); unknown counts as family.
       void removals.family(topic, session).then(family => {
         setAsking(current => current?.review === review ? { review, family } : current);
       });

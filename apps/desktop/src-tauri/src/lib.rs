@@ -249,7 +249,7 @@ fn reconcile_after_wake<R: tauri::Runtime>(
         }
         // Display restoration is independent of dispatch readiness.
         app.state::<native::window::NativeWindow>()
-            .reconcile(app.clone(), true);
+            .reconcile(app.clone(), native::window::Fit::IfNeeded);
         waking.store(false, Ordering::Release);
     });
 }
@@ -354,7 +354,7 @@ fn run_native(
                 tauri::WindowEvent::ScaleFactorChanged { .. } => {
                     window
                         .state::<native::window::NativeWindow>()
-                        .reconcile(window.app_handle().clone(), true);
+                        .reconcile(window.app_handle().clone(), native::window::Fit::IfNeeded);
                 }
                 tauri::WindowEvent::Focused(true) if !window_quitting.load(Ordering::Acquire) => {
                     // Activation (Cmd+Tab, Dock, a click on the title bar)
