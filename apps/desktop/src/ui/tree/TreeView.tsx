@@ -10,9 +10,10 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
-import type { ItemRoute, SessionPreferences } from '../../generated/core';
+import type { ItemRoute } from '../../generated/core';
 import type { SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
+import { useViewEdits, viewEditsFor, type ViewChange, type ViewSubject } from '../../state/navigation/viewEdits';
 import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
 import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
@@ -40,7 +41,8 @@ import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { Banner } from './Banner';
 import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
-import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
+import { useArchiveBridge } from './archiveBridge';
+import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ConnectionLineShown } from '../shared/connection';
 import { UnreadableMap } from './UnreadableMap';
@@ -146,16 +148,10 @@ export function TreeView(props: TreeViewProps) {
   const hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, route, hidden), [raw, route, hidden]);
   const savedView = preferences?.sessions.find(value => value.session.project_id === route.project_id && value.session.session_id === route.session_id) ?? null;
-  type Edit = { change: (next: SessionPreferences) => void; done: (saved: boolean) => void };
-  const [pendingEdits, setPendingEdits] = useState<readonly Edit[]>([]);
-  const [writingEdits, setWritingEdits] = useState<readonly Edit[]>([]);
-  const writingBase = useRef(savedView);
-  const view = useMemo(() => {
-    if (!savedView || (!pendingEdits.length && !writingEdits.length)) return savedView;
-    const next = structuredClone(savedView) as SessionPreferences;
-    [...(savedView === writingBase.current ? writingEdits : []), ...pendingEdits].forEach(edit => edit.change(next));
-    return next;
-  }, [savedView, pendingEdits, writingEdits]);
+  // The session's effective view (E12): the saved view plus its queued and in-flight edits, kept per session outside the Map,
+  // so a Map drawn again before a write settles shows what the owner chose.
+  const edits = viewEditsFor(navigation), editsVersion = useViewEdits(edits, route);
+  const view = useMemo(() => edits.view(route, savedView), [edits, route, savedView, editsVersion]);
   // The graph has its own optimistic node edits; both mounted views use its saved
   // status scope while the tree's filter queue waits for persistence.
   // The composed graph reads saved statuses; both views must share the same fold scope during writes.
@@ -245,8 +241,13 @@ export function TreeView(props: TreeViewProps) {
   const filter = useMemo(() => scope ? filterOf(scope) : null, [scope]);
   // E29: a strip stands where removed (in the Undo window), agent-removed (in the bin) and just-archived rows were.
   const removals = useContext(RemovalContext);
-  const places = useMemo(() => raw ? placeStrips(raw, route, hidden, archivedMode ? null : lifecycle.archived, archivedMode) : [],
-    [raw, route, hidden, lifecycle.archived, archivedMode]);
+  // The owner's archive receipt lands with the session read that drops the topic, a render before the lifecycle keeps its
+  // Undo (E12). Its strip stands from that render on, so the topic and its strip change places in one commit and the hold
+  // hands the reading row to the strip, not to a row above. Once the lifecycle has kept it, that receipt bridges no more; a
+  // receipt from before this visit to the session (a switch back, a return from a page) never bridges.
+  const archivedTopic = useArchiveBridge(actionState, lifecycle.archived, raw, `${route.project_id}/${route.session_id}`);
+  const places = useMemo(() => raw ? placeStrips(raw, route, hidden, archivedMode ? null : archivedTopic, archivedMode) : [],
+    [raw, route, hidden, archivedTopic, archivedMode]);
   const onPlace = (row: StripRow) => {
     const place = row.place;
     if (!place) return;
@@ -370,31 +371,16 @@ export function TreeView(props: TreeViewProps) {
   };
 
   // ------------------------------------------------------------ writes
-  const saveView = (change: (next: SessionPreferences) => void) => {
+  /**
+   * Every owner view change. It queues in the session's edits store, which writes it once no other preferences write is
+   * unsettled, rebased on the saved view then, after any edit queued before it. An unconfirmed Recent write is automatic and
+   * the owner never waits on it; any other unconfirmed write is the owner's own and still refuses.
+   */
+  const saveView = (change: ViewChange, subject?: ViewSubject) => {
     const snapshot = navigation.getSnapshot();
-    // An unconfirmed Recent write is automatic and the owner never waits on it: the edit queues and the flush effect
-    // saves it once that write settles. Any other unconfirmed write is the owner's own and still refuses.
     if (!latest.current.view || snapshot.pendingOperationId !== null && !snapshot.writing && !navigation.isRecentPending()) return Promise.resolve(false);
-    return new Promise<boolean>(done => { setPendingEdits(previous => [...previous, { change, done }]); });
+    return edits.queue(route, change, subject);
   };
-  useEffect(() => {
-    if (!pendingEdits.length || writingEdits.length || viewBusy || !savedView || !preferences) return;
-    const edits = pendingEdits, next = structuredClone(savedView) as SessionPreferences;
-    edits.forEach(edit => edit.change(next));
-    writingBase.current = savedView;
-    setPendingEdits([]); setWritingEdits(edits);
-    void navigation.saveSessionView(next, preferences.revision).then(saved => {
-      if (!saved && mounted.current && navigation.getSnapshot().writing) {
-        // Another preference writer won admission. Rebase these unsubmitted
-        // edits on its saved view once navigation is idle.
-        setPendingEdits(previous => [...edits, ...previous]);
-        return;
-      }
-      edits.forEach(edit => edit.done(saved));
-      if (!saved && mounted.current) noticeStore.push({ id: 'tree-view-save-failed', icon: 'ph ph-warning-circle',
-        text: 'The view preference could not be saved. Try again.' });
-    }).finally(() => { if (mounted.current) setWritingEdits([]); });
-  }, [pendingEdits, writingEdits, viewBusy, savedView, preferences, navigation]);
   const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string, fromRow = true, opening = false) => {
     if (fromRow && viewBusy && !navigation.isRecentPending()) return false;
@@ -449,7 +435,7 @@ export function TreeView(props: TreeViewProps) {
       if (result.kind === 'item') void saveView(next => {
         next.selected_item_id = id;
         if (!opening && !fromRow && focusedBranch && !focusedBranch.has(id)) delete next.focused_item_id;
-      });
+      }, { itemId: id });
     }).catch((error: unknown) => {
       if (opening || !mounted.current || call !== request.current) return;
       focusRequested.current = null;
@@ -475,7 +461,7 @@ export function TreeView(props: TreeViewProps) {
         if (!next.expanded_item_ids.includes(id)) next.expanded_item_ids.push(id);
         next.collapsed_topic_ids = next.collapsed_topic_ids?.filter(topic => topic !== session.items[id]!.topic_id);
       }
-    });
+    }, id ? { itemId: id } : undefined);
     if (id) focusRow(id);
   };
   // Deliberate navigation can leave Focus; ordinary saved selection is independent of it.
@@ -504,23 +490,28 @@ export function TreeView(props: TreeViewProps) {
       const expanded = new Set(next.expanded_item_ids);
       if (row.expanded) expanded.delete(id); else expanded.add(id);
       next.expanded_item_ids = [...expanded];
-    });
+    }, { itemId: id });
   };
   const toggleTopic = (id: string) => {
     setNextRevealId(null);
     const expanded = latest.current.rows.find(row => row.kind === 'topic' && row.key === id)?.expanded ?? !closedTopics.has(id);
     if (expanded) { onDismissReveal(); unshow('topics', id); }
     if (model?.filtering) filterFolds.setFold('topics', id, expanded);
-    const next = new Set(closedTopics);
-    if (expanded) next.add(id); else next.delete(id);
-    const kept = [...next].slice(-FOLDS_KEPT);
-    void saveView(saved => { saved.collapsed_topic_ids = kept; });
+    // Folds this one topic (or opens it) on whatever saved view is current when it is written: queued, it rebases.
+    void saveView(saved => {
+      const next = new Set(saved.collapsed_topic_ids ?? []);
+      if (expanded) next.add(id); else next.delete(id);
+      saved.collapsed_topic_ids = [...next].slice(-FOLDS_KEPT);
+    }, { topicId: id });
   };
   const setChip = (chip: Chip) => {
     setNextRevealId(null);
     onDismissReveal();
-    if (isLocalChip(chip)) localChips.set(toggleLocalChip(localChips.chips, chip));
-    else void saveView(next => { next.filters.statuses = toggleSavedChip(next.filters.statuses, chip); });
+    if (isLocalChip(chip)) { localChips.set(toggleLocalChip(localChips.chips, chip)); return; }
+    // The chip's whole target is taken now, from the view the owner sees: a saved view that already carries this edit
+    // (a refresh before its receipt) takes it again unchanged, never flipped back or filtered again.
+    const edit = savedChipEdit(latest.current.view?.filters.statuses ?? [], chip);
+    void saveView(next => { next.filters.statuses = edit(next.filters.statuses); });
   };
   // Clear empties everything that makes the filter active (the saved statuses, the local chips, the saved owners and
   // hide-later, which have no chip) so the row never offers a Clear that leaves the filter on. Search and the archive stay.
@@ -822,6 +813,8 @@ export function TreeView(props: TreeViewProps) {
     readonly offset: number; readonly y: number;
     /** The scroller's window top and scroll position then, and how far the scroller has carried the row down in the window (`carried`). */
     readonly boxTop: number; readonly scrollTop: number; readonly carried: number;
+    /** The scroller's own height then: a taller window clamps at the end too, and that move is the window's. */
+    readonly height: number;
     /** Where the row above it, clipped by the band, starts below the reading edge (negative); Infinity when none is clipped. */
     readonly lead: number;
     /** The session and rows then, and the offsets of the item rows on screen: a reading row that goes hands the hold on. */
@@ -861,10 +854,12 @@ export function TreeView(props: TreeViewProps) {
    * Where the rows no longer reach that far down, the bottom spacer grows to keep the scroll extent. Returns the carry it applied,
    * which is the one `remembering` records: a survivor's offset can differ from the gone row's.
    */
-  const restoreHeld = (box: HTMLDivElement, before: Held, offset: number, element: HTMLElement): number => {
+  const restoreHeld = (box: HTMLDivElement, before: Held, offset: number, element: HTMLElement, windowPlace = false): number => {
     const carry = carried(box, before, offset);
     for (let pass = 0; pass < 3; pass++) {
-      const delta = element.getBoundingClientRect().top - readingTop() - offset + box.getBoundingClientRect().top - before.boxTop - carry;
+      // A whole topic's strip stands between topics, under no band of its own: it takes the row's window place instead.
+      const delta = windowPlace ? element.getBoundingClientRect().top - before.y - carry
+        : element.getBoundingClientRect().top - readingTop() - offset + box.getBoundingClientRect().top - before.boxTop - carry;
       if (Math.abs(delta) < 1) break;
       const short = box.scrollTop + delta + box.clientHeight - scrollEnd(box);
       if (short > 0 && box.clientHeight > 0) setSpacer(box, spacer.current + short);
@@ -897,13 +892,15 @@ export function TreeView(props: TreeViewProps) {
    * The held row, or when it went (filtered out, hidden or removed), the nearest surviving row below it, else above it.
    * A row the owner folded away under its topic or a parent is the owner's own move: nothing is held, as before D24.
    */
-  const heldRow = (before: Held): { readonly element: HTMLElement; readonly offset: number } | null => {
+  const heldRow = (before: Held): { readonly element: HTMLElement; readonly offset: number; readonly windowPlace?: boolean } | null => {
     const element = elements.current.get(before.key);
     if (element) return { element, offset: before.offset };
     const { rows: now, session: current } = latest.current, item = current?.items[before.key];
     // A removed or archived row hands the hold to the strip now in its place (E29); at commit, to the nearest survivor.
     const anchor = current?.id === before.sessionId ? stripAnchorFor(now, before.key) : null, strip = anchor ? elements.current.get(anchor) : undefined;
-    if (strip) return { element: strip, offset: before.offset };
+    // The band the row was read under went with its topic: a whole topic's strip keeps the row's window place (E12).
+    const wholeTopic = !!anchor && now.some(row => row.key === anchor && row.kind === 'strip' && !!row.place && !row.place.itemId);
+    if (strip) return { element: strip, offset: before.offset, windowPlace: wholeTopic };
     if (!current || current.id !== before.sessionId) return null;
     // A strip that went on Undo hands the hold back to the row whose place it kept.
     const gone = before.rows.find(row => row.key === before.key);
@@ -931,6 +928,10 @@ export function TreeView(props: TreeViewProps) {
     // The width change is `holding`'s (it keeps the row below the topic bar the row ends under), and it remembers after.
     if (previousWidth.current !== null && previousWidth.current !== box.getBoundingClientRect().width) { holding(); return; }
     const before = held.current, element = before ? elements.current.get(before.key) : undefined;
+    // Rows that shrink at the Map's end with no render (a text-size step) clamp the scroll position, and that scroll event
+    // also comes before the resize observers: the move is the browser's, so `holding` puts the row back first (E12). A
+    // scroller grown taller (the window) clamps as well; that one stands, as before.
+    if (!inHolding.current && clampedAtEnd(box, before) && box.clientHeight === before?.height) { holding(); return; }
     // An observer, layout effect or delayed programmatic scroll event can arrive between
     // reflows. With no owner scroll, restore the held row's window place before adopting the new layout.
     if (before && element && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
@@ -995,8 +996,16 @@ export function TreeView(props: TreeViewProps) {
     // (negative) counts for the carry too, so the band never covers more of it than before.
     const lead = !revealed && !selectedShown && firstTop !== undefined && firstTop < top - READING_EDGE_CLEARANCE && holdKey !== key ? firstTop - top : Infinity;
     held.current = holdKey && holdRect ? { key: holdKey, offset: revealed?.offset ?? holdRect.top - top, y: holdRect.top,
-      boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, carried: carry, lead, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
+      boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, carried: carry, lead, height: box.clientHeight, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
   };
+  /** True while `holding` remembers what it restored: that call never hands back to `holding`. */
+  const inHolding = useRef(false);
+  /**
+   * The scroller sits at its end above where the hold left it: rows shrank at the end and the browser clamped the scroll
+   * position. That is no move of the owner's. (A scroller with no layout yet, zero high, has no end to clamp to.)
+   */
+  const clampedAtEnd = (box: HTMLDivElement, before: Held | null) => !!before && box.clientHeight > 0
+    && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
   const layoutState = useRef({ selectedId, reveal, detailOpen });
   const releaseReveal = () => {
     if (!revealedAnchor.current) return;
@@ -1020,7 +1029,7 @@ export function TreeView(props: TreeViewProps) {
       held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0,
         // The carry stays while the scroller has not moved: closing Details re-places the row, not the band.
         carried: scroller.current?.scrollTop === target.scrollTop ? held.current?.carried ?? 0 : 0, lead: Infinity,
-        scrollTop: target.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets: new Map() };
+        scrollTop: target.scrollTop, height: scroller.current?.clientHeight ?? 0, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets: new Map() };
     }
     if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen) {
       settled.current = true; setAnchor(null);
@@ -1028,14 +1037,14 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, before = held.current;
     // A different scroll position means the view was moved on purpose (a scroll, a reveal, the keyboard), and the opening
     // placement holds its own row until the owner steers. A shrink at the bottom clamps the scroll position: that is no move.
-    // (A scroller with no layout yet, zero high, has no end to clamp to.)
-    const clamped = !!box && !!before && box.clientHeight > 0 && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
+    const clamped = !!box && clampedAtEnd(box, before);
     const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
-    const restored = box && before && back ? restoreHeld(box, before, back.offset, back.element) : undefined;
+    const restored = box && before && back ? restoreHeld(box, before, back.offset, back.element, back.windowPlace) : undefined;
     // A clamp that left the held row in place needed no correction, yet the scroller moved: that move is the browser's, not
     // the owner's, so a pinned reveal must not end on it (`remembering` ends the pin on any move the hold did not make).
     if (box && clamped && back) ownScroll.current = box.scrollTop;
-    remembering(restored);
+    inHolding.current = true;
+    try { remembering(restored); } finally { inHolding.current = false; }
   };
   useLayoutEffect(holding);
   const hasRows = rows.length > 0 && !graph;

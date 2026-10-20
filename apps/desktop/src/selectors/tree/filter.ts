@@ -48,12 +48,26 @@ export function pickedChips(scope: Pick<FilterScope, 'view' | 'local'>): readonl
 /** Pick or drop one saved chip without changing the saved shape. Dropping the last chip saves no filter. A legacy `dropped`
  * rides along with the chips but never stays alone: it has no chip, so alone it would filter with nothing to clear. */
 export function toggleSavedChip(statuses: readonly ItemStatus[], chip: Chip): ItemStatus[] {
+  return setSavedChip(statuses, chip, !savedChips(statuses).includes(chip));
+}
+
+/** Pick (`on`) or drop one saved chip, whatever it was: applying it again to statuses that already have it changes nothing. */
+export function setSavedChip(statuses: readonly ItemStatus[], chip: Chip, on: boolean): ItemStatus[] {
   const status = SAVED[chip];
   if (!status) return [...statuses];
   const next = new Set(hasStatusFilter(statuses) ? statuses : []);
-  if (next.has(status)) next.delete(status); else next.add(status);
+  if (on) next.add(status); else next.delete(status);
   const ordered = FILTER_STATUSES.filter(value => next.has(value));
   return ordered.length === FILTER_STATUSES.length || ordered.every(value => value === 'dropped') ? [] : ordered;
+}
+
+/** One chip pick or drop, fixed now from the statuses the owner sees (`seen`). Applied to statuses that already are its result it
+ * changes nothing; otherwise it picks or drops the chip on whatever is saved then, so edits made together still compose.
+ * `setSavedChip` alone is not enough: a legacy set of every status but one normalises to no filter, and picking that chip again on
+ * the result would filter to it. */
+export function savedChipEdit(seen: readonly ItemStatus[], chip: Chip): (current: readonly ItemStatus[]) => ItemStatus[] {
+  const on = !savedChips(seen).includes(chip), target = setSavedChip(seen, chip, on);
+  return current => current.length === target.length && target.every(status => current.includes(status)) ? [...current] : setSavedChip(current, chip, on);
 }
 
 export function toggleLocalChip(local: readonly LocalChip[], chip: LocalChip): LocalChip[] {
