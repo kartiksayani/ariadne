@@ -409,14 +409,16 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     await page.evaluate(async () => { await document.fonts.ready; });
     const row = page.locator('.tree-item[data-item-id="1"]'), title = row.locator('.tree-question');
     const bounds = (await row.boundingBox())!, text = (await title.boundingBox())!;
-    // The end cluster's slots are fixed (alpha.20 C4), so the title takes the rest: about half the 560px minimum column,
-    // and never any of the cluster's room.
+    // The end cluster's slots are fixed (alpha.20 C4), so the title takes the rest, and never any of the cluster's room. The Ack slot is
+    // as wide as its longest label ("✓ → In progress", the worst case this fixture draws; owner 2026-10-20: visible Ack target), so the
+    // title keeps about a third of the 560px minimum column (it kept about half before the label).
     const heading = (await row.locator('.tree-heading').boundingBox())!, end = (await row.locator('.tree-end').boundingBox())!;
-    expect(heading.width / bounds.width).toBeGreaterThanOrEqual(0.45);
+    expect(heading.width / bounds.width).toBeGreaterThanOrEqual(0.33);
     expect(heading.x + heading.width).toBeLessThanOrEqual(end.x);
     const actions = row.locator('.tree-action');
     // Six hover slots (D4) and Ack in its own.
     await expect(actions).toHaveCount(7);
+    await expect(row.locator('.tree-action-ack .tree-action-label')).toHaveText('→ In progress');
     await row.hover();
     expect((await title.boundingBox())!.width).toBe(text.width);
     expect((await title.boundingBox())!.height).toBe(text.height);
@@ -425,8 +427,10 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
       await expect(action).toBeVisible();
       const box = (await action.boundingBox())!;
       const inBar = await action.evaluate(element => !!element.closest('.tree-actions'));
-      // The six hover slots are 26 x 24; Ack, in its own slot, is 22 x 20.
-      expect(box.width).toBe(inBar ? 26 : 22); expect(box.height).toBe(inBar ? 24 : 20);
+      // The six hover slots are 26 x 24; Ack, in its own slot, is 20 high and as wide as its label (owner 2026-10-20: visible Ack target),
+      // inside its fixed slot.
+      if (inBar) expect(box.width).toBe(26); else expect(box.width).toBeLessThanOrEqual(await action.evaluate(element => element.parentElement!.getBoundingClientRect().width));
+      expect(box.height).toBe(inBar ? 24 : 20);
       if (inBar) lines.add(box.y);
       const name = (await action.getAttribute('aria-label'))!;
       await action.click(); await expect(page.getByLabel('Last action')).toHaveText(name);
@@ -442,9 +446,16 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     expect((await title.boundingBox())!.width).toBe(text.width);
     const noActions = page.locator('.tree-item[data-item-id="2"]');
     await expect(noActions.locator('.tree-actions')).toHaveCount(0);
-    // Every slot keeps its width filled or empty: a row without actions or Ack has the same cluster.
-    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBe((await row.locator('.tree-end').boundingBox())!.width);
+    // Every slot keeps its width filled or empty: a row without actions or Ack has the same cluster, except that only a row with an Ack to
+    // give has the wide Ack slot (owner 2026-10-20: visible Ack target); a row without one keeps 22px.
+    const wide = (await row.locator('.tree-ack-slot').boundingBox())!.width;
+    expect(wide).toBeGreaterThan(22);
+    expect((await noActions.locator('.tree-ack-slot').boundingBox())!.width).toBe(22);
+    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBeCloseTo((await row.locator('.tree-end').boundingBox())!.width - (wide - 22), 1);
     await page.setViewportSize({ width: 320, height: 700 });
+    // A Map under 560px gives the label up (the slot goes back to 22px) so the row does not overflow; the name and tooltip stay.
+    await expect(row.locator('.tree-action-label')).toBeHidden();
+    expect((await row.locator('.tree-ack-slot').boundingBox())!.width).toBe(22);
     for (const item of [row, noActions]) {
       expect(await item.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil((await item.boundingBox())!.width));
     }

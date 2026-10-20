@@ -322,6 +322,11 @@
   white-space: nowrap;
 }
 
+/* A row with an Ack to give names its target on the button ("✓ → Done"; owner 2026-10-20: visible Ack target): its Ack slot is as wide
+   as the longest label ("→ In progress"), the same on every such row so their columns line up. A row without an Ack keeps 22px, so
+   a row's title rewraps when its Ack arrives or is given, and no other row moves. */
+.tree-end-labelled { --tree-end-ack: calc(14px + 84px * var(--text-scale)); }
+
 .tree-end-slot {
   flex: none;
   display: inline-flex;

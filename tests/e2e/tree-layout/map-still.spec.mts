@@ -140,6 +140,13 @@ const triggers: readonly Trigger[] = [
       await expect(page.locator('.tree-hit[data-current]')).toHaveCount(3);
     }],
   ['a new agent row above the reading row', 'held', null, nothing, page => agent(page, 'add-above'), page => expect(row(page, '3.1')).toHaveCount(1)],
+  // owner 2026-10-20: visible Ack target. A row's Ack names its target, so its Ack slot is wider and its title may rewrap when the Ack arrives
+  // or is given: the reading row below it keeps its place all the same.
+  ['a row above the reading row gains an Ack', 'held', null, nothing, page => agent(page, 'ack-gains-above'),
+    page => expect(row(page, '9').getByRole('button', { name: /^Ack/ })).toHaveCount(1)],
+  ['a row above the reading row loses its Ack', 'held', null, async page => {
+    await agent(page, 'ack-gains-above'); await expect(row(page, '9').getByRole('button', { name: /^Ack/ })).toHaveCount(1);
+  }, page => agent(page, 'ack:9'), page => expect(row(page, '9').getByRole('button', { name: /^Ack/ })).toHaveCount(0)],
   ['a new agent row below the reading row', 'still', null, nothing, page => agent(page, 'add-below'), page => expect(row(page, '40')).toHaveCount(1)],
   ['Show them reveals a folded match above', 'held', null, page => search(page, 'receipt'),
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],

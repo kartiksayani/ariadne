@@ -24,7 +24,8 @@ import { Strip } from './Strip';
 import { ChangeMarker } from '../changes/ChangeMarker';
 import { useDockInset } from '../shell/dockInset';
 
-export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
+export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean;
+  /** A short word after the icon (the Ack's "→ Done"); the title stays the full tooltip and name. */ readonly label?: string }
 
 /** How far the hover bar reaches above a row's top edge (tree.css `.tree-actions`): with less room than this above, it floats below. */
 const BAR_ROOM = 24;
@@ -174,7 +175,8 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
   const actionButton = (action: RowAction) => {
     const button = <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
       className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
-      onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}</button>;
+      data-labelled={action.label ? '' : undefined}
+      onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}{action.label && <span className="tree-action-label">{action.label}</span>}</button>;
     // A greyed hover-bar button swallows clicks, and the floating bar can sit over the middle of a narrow row. The wrapper
     // (the button ignores the pointer, tree-rows.css) keeps the tooltip and lets that click through to select the row.
     return action.disabled && !action.persistent ? <span key={action.title} className="tree-action-off" title={action.title}>{button}</span> : button;
@@ -215,7 +217,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         moving the pointer from the row onto it keeps the row hovered. */}
     {hover.length > 0 && <span ref={bar} className="tree-actions" data-side="above">{hover.map(actionButton)}</span>}
     {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). */}
-    <div className="tree-end">
+    <div className={`tree-end${persistent.some(action => action.label) ? ' tree-end-labelled' : ''}`}>
       {row.outside && <span className="tree-outside-tag" title="Outside your filter"><i className="ph ph-funnel" aria-hidden="true" />Outside filter</span>}
       <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
         {changeMarker && <ChangeMarker kind={changeMarker} />}

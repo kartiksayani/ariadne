@@ -1,5 +1,5 @@
 // The actions row in the body of Details (SPEC 5.3 item 5): one primary button, then the hover bar's six icon slots minus the one
-// promoted. "✓ Ack" (filled) for a finding to ack, "↺ Acked · Undo" right after, or "Bring it up" (filled) for an Open or Later item.
+// promoted. "✓ Ack → Done" (filled, the target named) for a finding to ack, "↺ Acked · Undo" right after, or "Bring it up" (filled) for an Open or Later item.
 import { ItemActionIcon, type ItemActionId, type ItemActionView } from './itemActions';
 
 export interface AckControl {
@@ -52,7 +52,7 @@ export function ActionsRow({ actions, ack, statusLabel, closed = false, hint, pr
       ? <button type="button" className="btn btn-secondary detail-primary detail-acked" title="Undo Ack" aria-label="Undo Ack" onClick={ack.onUndo}>
         <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Acked · Undo</button>
       : <button type="button" className="btn btn-primary detail-primary" title={ack.disabled ? ACK_WAITS : ack.title} aria-label={ack.title} disabled={ack.disabled} onClick={ack.onAck}>
-        <i className="ph ph-check" aria-hidden="true" />Ack</button>)}
+        <i className="ph ph-check" aria-hidden="true" />{ack.title}</button>)}
     {promoted && <button type="button" className="btn btn-primary detail-primary" title={promoted.disabledReason ?? TITLE.bring} disabled={!!promoted.disabledReason} onClick={promoted.run}>
       <i className={promoted.icon} aria-hidden="true" />{promoted.label}</button>}
     {slots.map(action => {

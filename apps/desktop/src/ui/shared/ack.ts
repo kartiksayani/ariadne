@@ -12,8 +12,12 @@ import { shortLabel } from './short';
 import { STATUS, statusKey } from './status';
 
 export { ackTarget } from '../../selectors/ack';
-export const ackTitle = (target: NonNullable<Item['ack_to']>, status: Item['status']) => `Ack → ${target === status && target === 'open'
-  ? 'keeps it open' : target === status && target === 'in_progress' ? 'keeps it in progress' : STATUS[statusKey[target]].label}`;
+/** Where an Ack takes the item, in words: "Done", or "keeps it open" when the target is the status it already has. */
+export const ackTargetText = (target: NonNullable<Item['ack_to']>, status: Item['status']) => target === status && target === 'open'
+  ? 'keeps it open' : target === status && target === 'in_progress' ? 'keeps it in progress' : STATUS[statusKey[target]].label;
+/** The Map row's short label after the ✓: just the status the Ack leads to ("→ Done"); the full words stay in the tooltip. */
+export const ackRowLabel = (target: NonNullable<Item['ack_to']>) => `→ ${STATUS[statusKey[target]].label}`;
+export const ackTitle = (target: NonNullable<Item['ack_to']>, status: Item['status']) => `Ack → ${ackTargetText(target, status)}`;
 
 class AckUnavailable extends Error {}
 /** The held proposal is not the item's proposal any more: nothing was saved and the item stays to ack. */
