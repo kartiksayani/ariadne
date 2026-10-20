@@ -4,6 +4,7 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { ItemRow, placeActions, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
+import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { TopicRow, type TopicAction, type TopicRowProps } from '../../../src/ui/tree/TopicRow';
 
 afterEach(cleanup);
@@ -169,6 +170,62 @@ describe('compact row actions', () => {
     expect(bar.dataset.side).toBe(side);
     expect(placeActions(row, null)).toBeUndefined();
     scroller.remove(); group.remove();
+  });
+
+  // The answer dock covers the bottom of the Map (TreeView `visibleBottom` subtracts its inset): a bar that would land under it goes
+  // above, or inside, instead.
+  it.each([
+    ['no dock: room below the row', 0, 'below'],
+    ['a dock that leaves the bar\'s reach below the row', 100, 'below'],
+    ['a dock that covers the space right under the row', 740, 'inside'],
+  ] as const)('counts the dock when it picks the side of the hover bar: %s', (_name, inset, side) => {
+    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    // The window is 768px high in jsdom; the row is at its top (no room above), 30px high, so its bottom edge is at 40.
+    const { container } = render(<DockInsetProvider height={inset}><ItemRow {...props} /></DockInsetProvider>);
+    const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
+    row.getBoundingClientRect = () => ({ top: 10, bottom: 40, right: 500 }) as DOMRect;
+    fireEvent.mouseEnter(row);
+    expect(bar.dataset.side).toBe(side);
+    // With room above (a dock under a row near the bottom): the bar stays above.
+    row.getBoundingClientRect = () => ({ top: 700, bottom: 730, right: 500 }) as DOMRect;
+    fireEvent.mouseMove(row);
+    expect(bar.dataset.side).toBe('above');
+    row.getBoundingClientRect = () => ({ top: 10, bottom: 40, right: 500 }) as DOMRect;
+    expect(placeActions(row, bar, inset)).toBeUndefined();
+    expect(bar.dataset.side).toBe(side);
+    expect(placeActions(row, bar, 0)).toBeUndefined();
+    expect(bar.dataset.side).toBe('below');
+  });
+
+  // Above or below, the bar ends where the end cluster begins, so it never covers the Ack, status pill or related count of the row it
+  // floats over (a deeper neighbour's cluster starts further left, and counts too). Inside a tall row it stays under the cluster.
+  it.each([
+    ['above: the row alone', 'above', 340, null, '160px'],
+    ['above: a deeper row above, whose cluster starts further left', 'above', 340, 328, '172px'],
+    ['above: a shallower row above does not push the bar left', 'above', 340, 346, '160px'],
+    ['below: a deeper row below', 'below', 340, 322, '178px'],
+  ] as const)('ends the hover bar at the end cluster %s', (_name, side, own, neighbour, right) => {
+    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const { container } = render(<ItemRow {...props} />);
+    const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
+    const at = (left: number) => () => ({ left, bottom: 0 }) as DOMRect;
+    row.querySelector('.tree-end')!.getBoundingClientRect = at(own);
+    if (neighbour !== null) {
+      const other = document.createElement('div'), end = document.createElement('div');
+      other.className = 'tree-item'; end.className = 'tree-end'; end.getBoundingClientRect = at(neighbour); other.append(end);
+      if (side === 'above') row.before(other); else row.after(other);
+    }
+    // 'above' needs room over the row; 'below' needs none (it is at the top of the window).
+    const top = side === 'above' ? 200 : 10;
+    row.getBoundingClientRect = () => ({ top, bottom: top + 30, right: 500 }) as DOMRect;
+    fireEvent.mouseEnter(row);
+    expect(bar.dataset.side).toBe(side);
+    expect(bar.style.right).toBe(right);
+    // Inside a row taller than the window it sits under the cluster, at the stylesheet's own right edge.
+    row.getBoundingClientRect = () => ({ top: -500, bottom: 5000, right: 500 }) as DOMRect;
+    fireEvent.mouseMove(row);
+    expect(bar.dataset.side).toBe('inside');
+    expect(bar.style.right).toBe('');
   });
 
   it('keeps the hover bar a direct child of the row, not of the end cluster, and a row without actions has none to place', () => {

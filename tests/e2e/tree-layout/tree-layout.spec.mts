@@ -337,6 +337,20 @@ test('floats the hover bar above the row, or below the first row under the band,
     const overlaps = (a: { left: number; right: number; top: number; bottom: number }, b: typeof a) =>
       a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
     const rows = page.locator('.tree-item');
+    // The bar never covers the end cluster (Ack, status pill, related count, marker) of the row it floats over: those controls stay
+    // reachable, so moving up to click one cannot land on this row's Remove or Hide. The point at each slot's centre belongs to that row.
+    const clusterUncovered = (row: Locator, side: 'previous' | 'next') => row.evaluate((element, which) => {
+      const neighbour = which === 'previous' ? element.previousElementSibling : element.nextElementSibling;
+      if (!neighbour?.matches('.tree-item')) return null;
+      const bar = element.querySelector('.tree-actions')!.getBoundingClientRect();
+      const slots = [...neighbour.querySelectorAll('.tree-end-slot')].map(slot => slot.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
+      const covered = slots.filter(rect => {
+        const hit = document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+        return !hit || hit.closest('.tree-actions') !== null || !neighbour.contains(hit);
+      }).length;
+      const clusterLeft = Math.min(...[element, neighbour].map(row => row.querySelector('.tree-end')!.getBoundingClientRect().left));
+      return { slots: slots.length, covered, barRight: bar.right, clusterLeft };
+    }, side);
     // A row in the middle of the page: the bar is above its top edge and clear of its title.
     const middle = rows.filter({ has: page.locator('.tree-actions') }).nth(2);
     await middle.evaluate(element => element.scrollIntoView({ block: 'center' }));
@@ -356,6 +370,10 @@ test('floats the hover bar above the row, or below the first row under the band,
     await page.mouse.move((mid.bar.left + mid.bar.right) / 2, (mid.bar.top + mid.bar.bottom) / 2, { steps: 4 });
     await expect(middle.locator('.tree-actions')).toHaveCSS('opacity', '1');
     await expect(middle).toHaveCSS('z-index', '2');
+    const above = await clusterUncovered(middle, 'previous');
+    expect(above, 'a row above the middle row').not.toBeNull();
+    expect(above!.slots).toBeGreaterThan(0); expect(above!.covered, 'the bar covers the end cluster of the row above').toBe(0);
+    expect(above!.barRight).toBeLessThanOrEqual(above!.clusterLeft + 0.5);
     // The first row under the band has nothing above it: the bar floats below the row, clear of the title.
     await scroller.evaluate(element => { element.scrollTop = 0; });
     const first = rows.first();
@@ -365,6 +383,10 @@ test('floats the hover bar above the row, or below the first row under the band,
     for (const text of top.text) expect(overlaps(top.bar, text), 'the bar covers the title').toBe(false);
     expect(top.side).toBe('below');
     expect(top.bar.top).toBeGreaterThanOrEqual(top.row.bottom - 6);
+    const below = await clusterUncovered(first, 'next');
+    expect(below, 'a row below the first row').not.toBeNull();
+    expect(below!.slots).toBeGreaterThan(0); expect(below!.covered, 'the bar covers the end cluster of the row below').toBe(0);
+    expect(below!.barRight).toBeLessThanOrEqual(below!.clusterLeft + 0.5);
     // Scrolled so the row sits just under the sticky band, it also floats below.
     await first.evaluate(element => element.scrollIntoView({ block: 'start' }));
     await scroller.evaluate(element => { element.scrollTop += 4; });

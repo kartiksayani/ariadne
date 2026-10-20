@@ -22,6 +22,7 @@ import { Guides } from './Guides';
 import { Boxes, branchStyle } from './BoxSlices';
 import { Strip } from './Strip';
 import { ChangeMarker } from '../changes/ChangeMarker';
+import { useDockInset } from '../shell/dockInset';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
@@ -31,20 +32,32 @@ const BAR_ROOM = 24;
 /**
  * Which side of the row the hover bar floats on: above, unless the sticky topic band or the top of the Map or window is closer than
  * the bar's reach (the first row under the band); then below, unless the row's bottom is as close to the Map's or window's bottom
- * (a row taller than the window); then inside the row, in the empty column under its end cluster, below the first line, so the
- * bar is always on screen and still never covers text. Written straight to the bar, so no render and no layout depends on it.
+ * or to the answer dock that covers it (`inset`, a row taller than the window); then inside the row, in the empty column under its
+ * end cluster, below the first line, so the bar is always on screen and still never covers text. Above or below, the bar ends where
+ * the end cluster begins (the leftmost cluster edge of this row and of the row it floats over), so it never covers a row's Ack,
+ * status pill or related count. Written straight to the bar, so no render and no layout depends on it.
  */
-export function placeActions(row: HTMLElement, bar: HTMLElement | null) {
+export function placeActions(row: HTMLElement, bar: HTMLElement | null, inset = 0) {
   if (!bar) return;
   const band = row.closest('.tree-topic-group')?.querySelector('.tree-topic')?.getBoundingClientRect().bottom ?? -Infinity;
   const top = row.closest('.tree-scroll')?.getBoundingClientRect().top ?? -Infinity;
-  const bottom = Math.min(row.closest('.tree-scroll')?.getBoundingClientRect().bottom ?? Infinity, window.innerHeight);
+  const bottom = Math.min(row.closest('.tree-scroll')?.getBoundingClientRect().bottom ?? Infinity, window.innerHeight) - inset;
   const floor = Math.max(band, top, 0), rect = row.getBoundingClientRect();
   const side = rect.top - floor >= BAR_ROOM ? 'above' : bottom - rect.bottom >= BAR_ROOM ? 'below' : 'inside';
   if (bar.dataset.side !== side) bar.dataset.side = side;
-  if (side !== 'inside') { bar.style.removeProperty('top'); return; }
-  const cluster = row.querySelector('.tree-end')?.getBoundingClientRect().bottom ?? rect.top;
-  bar.style.top = `${Math.max(floor, cluster) - rect.top + 4}px`;
+  if (side === 'inside') {
+    bar.style.removeProperty('right');
+    const cluster = row.querySelector('.tree-end')?.getBoundingClientRect().bottom ?? rect.top;
+    bar.style.top = `${Math.max(floor, cluster) - rect.top + 4}px`;
+    return;
+  }
+  bar.style.removeProperty('top');
+  const next = side === 'above' ? row.previousElementSibling : row.nextElementSibling;
+  const lefts = [row, next?.matches('.tree-item') ? next : null]
+    .map(element => element?.querySelector('.tree-end')?.getBoundingClientRect().left).filter((left): left is number => left !== undefined);
+  if (lefts.length === 0) { bar.style.removeProperty('right'); return; }
+  const right = `${Math.max(0, rect.right - Math.min(...lefts))}px`;
+  if (bar.style.right !== right) bar.style.right = right;
 }
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
@@ -165,14 +178,14 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
     return action.disabled && !action.persistent ? <span key={action.title} className="tree-action-off" title={action.title}>{button}</span> : button;
   };
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
-  const bar = useRef<HTMLSpanElement>(null);
+  const bar = useRef<HTMLSpanElement>(null), dockInset = useDockInset();
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
     data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-branch={row.branch}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
-    style={branchStyle(row.branch, row.depth)} onFocus={(event: FocusEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) { placeActions(event.currentTarget, bar.current); onFocus(row.key); } }}
-    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { placeActions(event.currentTarget, bar.current); onPeekHover?.(item.id, event); }}
-    onMouseMove={event => { placeActions(event.currentTarget, bar.current); onPeekHover?.(item.id, event); }} onMouseLeave={() => onPeekLeave?.()}>
+    style={branchStyle(row.branch, row.depth)} onFocus={(event: FocusEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) { placeActions(event.currentTarget, bar.current, dockInset); onFocus(row.key); } }}
+    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { placeActions(event.currentTarget, bar.current, dockInset); onPeekHover?.(item.id, event); }}
+    onMouseMove={event => { placeActions(event.currentTarget, bar.current, dockInset); onPeekHover?.(item.id, event); }} onMouseLeave={() => onPeekLeave?.()}>
     <Boxes boxes={row.boxes} />
     {selected && <span aria-hidden="true" className="tree-selected-box" />}
     <Guides guides={row.guides} />

@@ -356,8 +356,9 @@
   opacity: 1;
 }
 
-/* The hover bar floats against the row, on a card, just above its top edge and right-aligned with the end cluster (it overlaps
-   only the gap between this row and the one above, never the row's own text), or just below the row's bottom edge where the
+/* The hover bar floats against the row, on a card, just above its top edge and ending where the end cluster begins (ItemRow
+   `placeActions` sets `right` from it; the 18px default is for before it runs, and for the inside spot), so it overlaps neither
+   the row's own text nor the neighbouring row's Ack, status pill or related count, or just below the row's bottom edge where the
    sticky band or the top of the Map is above, or inside the row when neither edge is in view (ItemRow `placeActions` sets data-side). It takes no room, so showing it moves
    nothing. It overlaps the row by 5px, and sits inside it, so the pointer reaches it without the row losing its hover.
    visibility keeps its buttons unclickable while hidden. */
