@@ -129,8 +129,20 @@ class TreeLayoutTransport extends AppTransport {
       return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
         data: { kind: 'topic_lifecycle', topic_id: topic.id, topic_revision: topic.revision, archived_at: topic.archived_at } } } as T;
     }
-    return super.invoke<T>(name, args);
+    const result = await super.invoke<T>(name, args);
+    // The session list names the host's latest report for the active binding, as the real list does. The store re-reads it every
+    // poll (2 s) and lets it replace its live presence, so a list that still told the opening report ("connected") would undo a
+    // reported drop within a poll, and a poll already in flight when the drop came would undo it before the spec could look.
+    if (!('command' in request) && request.request.command === 'session_list') {
+      for (const summary of (result as { data: { data: { sessions: { items: { active_binding: { id: string; presence: unknown } | null }[] } } } }).data.data.sessions.items) {
+        const report = summary.active_binding && this.hostReports.get(summary.active_binding.id);
+        if (report) summary.active_binding!.presence = structuredClone(report);
+      }
+    }
+    return result;
   }
+  /** The latest presence report per binding, as the host last sent it (see `agent`). */
+  private readonly hostReports = new Map<string, unknown>();
   /** What the agent writes while the owner reads: the session's next revision, announced as the desktop does. */
   agent(change: string) {
     const session = this.sessions.get(route.session_id)!, items = session.items;
@@ -146,9 +158,12 @@ class TreeLayoutTransport extends AppTransport {
     const binding = session.bindings[session.active_binding_id!]!;
     if (change === 'agent-stops') { binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; }
     // The host's own report outranks the stored state, so the drop and the return are reported as the host would.
-    const reported = (connection_state: 'connected' | 'reconnecting') => this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation,
-      observation: { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
-        source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never });
+    const reported = (connection_state: 'connected' | 'reconnecting') => {
+      const observation = { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
+        source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never;
+      this.hostReports.set(binding.id, observation);
+      this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation });
+    };
     if (change === 'connection-drops') { binding.connection_state = 'reconnecting'; reported('reconnecting'); return; }
     if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; reported('connected'); }
     if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
