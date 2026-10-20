@@ -470,6 +470,8 @@ async function completeRowLayout(id, item) {
   if (opened) await wait(async () => await browser.execute(id => document.querySelector(`.tree-rows [data-item-id="${id}"]`)?.hasAttribute('data-open'), id), 'Show more did not expand the complete row');
   const layout = await browser.execute(id => {
     const row = document.querySelector(`.tree-rows [data-item-id="${id}"]`);
+    // The hover bar floats against the row (alpha.22), and overhangs it where the pointer rests; it is not text, so leave it out of the measure.
+    const floating = row.querySelector(':scope > [data-side]'); floating?.style.setProperty('display', 'none');
     const bounds = element => { const value = element.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, left: value.left, right: value.right, height: value.height }; };
     const parts = ['.tree-question', '.tree-outcome > .tree-clamp'].map(selector => {
       const element = row.querySelector(selector); if (!element) return null;
@@ -487,7 +489,9 @@ async function completeRowLayout(id, item) {
       return { text: element.textContent, bounds: bounds(element), fragments, containers,
         lineHeight: Number.parseFloat(window.getComputedStyle(element).lineHeight) };
     });
-    return { row: bounds(row), question: parts[0], outcome: parts[1] };
+    const result = { row: bounds(row), question: parts[0], outcome: parts[1] };
+    floating?.style.removeProperty('display');
+    return result;
   }, id);
   for (const [name, text] of [['question', item.question], ['outcome', item.outcome]]) {
     if (text === null) continue;
