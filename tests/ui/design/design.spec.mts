@@ -294,7 +294,13 @@ for (const theme of ['dark', 'light'] as const) {
     await toggle.click();
     await expect(card).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     const comparison = page.locator(`[id="${await card.getByRole('button', { name: 'Hide before → after', exact: true }).getAttribute('aria-controls')}"]`);
-    const label = await box(comparison.getByText('Before', { exact: true }).first()), value = await box(comparison.locator('del').first());
+    await expect(comparison.locator('del').first()).toBeVisible();
+    // One call again, so the opening panel cannot move between the label read and the value read.
+    const { label, value } = await comparison.evaluate(element => {
+      const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width }; };
+      const before = [...element.querySelectorAll('*')].find(node => node.children.length === 0 && node.textContent?.trim() === 'Before')!;
+      return { label: rect(before), value: rect(element.querySelector('del')!) };
+    });
     expect(value.x).toBeGreaterThan(label.x + label.width - 1);
     expect(Math.abs(value.y - label.y)).toBeLessThan(6);
     // Seen: the whole row dims to half, the open Before → after panel with it (the board dims the row, not its parts).
