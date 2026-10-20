@@ -292,9 +292,10 @@ for (const theme of ['dark', 'light'] as const) {
     const label = await box(comparison.getByText('Before', { exact: true }).first()), value = await box(comparison.locator('del').first());
     expect(value.x).toBeGreaterThan(label.x + label.width - 1);
     expect(Math.abs(value.y - label.y)).toBeLessThan(6);
-    // Seen: the row dims to half.
+    // Seen: the whole row dims to half, the open Before → after panel with it (the board dims the row, not its parts).
     await card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }).click();
     await expect(card.locator('time')).toHaveCSS('opacity', '0.5');
+    await expect(comparison).toHaveCSS('opacity', '0.5');
   });
 
   test(`M2 long absence leads with a calm summary, then the brief, and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {

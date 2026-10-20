@@ -511,6 +511,11 @@
   line-height: 1.45;
 }
 
+/* The compare wrapper is `display: contents`, so the seen dim on the row's children skips it: the open panel dims here, as the board dims the row. */
+.changes-row[data-seen] .change-comparison {
+  opacity: .5;
+}
+
 /* SPEC 5.3: Before / After / Why are a label column and a text column; a change of one field needs no field name. */
 .changes-row .change-field,
 .changes-row .change-field > span {
