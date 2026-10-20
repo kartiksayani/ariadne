@@ -2,7 +2,13 @@ import { BACKGROUND_RETRY } from '../../../integrations/claude/plugin/hooks/cont
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { capabilities, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
-afterEach(() => vi.useRealTimers());
+import { balanced, resetLedgers } from './ledger.js';
+// Every conversation health is counted from outside (ledger.js): `balanced()` asserts that every call settled once.
+vi.mock('../../../integrations/claude/plugin/hooks/contracts.js',async importOriginal => {
+  const actual = await importOriginal(), {trackedHealth} = await import('./ledger.js');
+  return {...actual,conversationHealth:(...args) => trackedHealth(actual.conversationHealth(...args))};
+});
+afterEach(() => {vi.useRealTimers();resetLedgers();});
 
 function callbacks(descriptor) {
   const hooks = new Map();
@@ -601,12 +607,30 @@ describe('conversation changes, relaunch and removal', () => {
     const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     await entered.promise;
+    // The reconnect is done and said so; the note is still out and holds nothing.
     expect(h.logs).toEqual(['Ariadne: this conversation is connected to its Ariadne session again.']);
     await hooks.get('session.end')(h.$,{reason:'clear'},next);
     reply.resolve();
     await h.timer().callback();
     await vi.waitFor(() => expect(h.appended).toHaveLength(1));
     expect(h.logs).toEqual(['Ariadne: this conversation is connected to its Ariadne session again.']);
+  });
+  it('a routing note that never settles holds neither /ariadne-connect nor the next owner command, and the tick sends it once', async () => {
+    const note = deferred(), entered = deferred();let appends = 0;
+    const h = host({append:() => {appends += 1;entered.resolve();return note.promise;}});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    const connected = await hooks.get('ariadne-connect')(h.$,{args:''});
+    expect(connected.text).toContain('This conversation is connected to Ariadne.');
+    await entered.promise;
+    // The note is out; the owner transition is free, and ticks do not send it again.
+    for (let tick = 0; tick < 5; tick += 1) await h.timer().callback();
+    expect(appends).toBe(1);
+    expect((await hooks.get('ariadne-status')(h.$)).text).not.toContain('already connecting');
+    expect((await hooks.get('ariadne-disconnect')(h.$)).text).not.toContain('already connecting');
+    note.resolve({uuid:'late-row'});
+    await hooks.get('session.end')(h.$,{},next);
+    await balanced();
   });
   it.each(['store_busy','incompatible_adapter'])('retired report %s failures remain visible while they block reconnect',async code => {
     vi.useFakeTimers();vi.setSystemTime(0);

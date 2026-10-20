@@ -711,6 +711,32 @@ describe('a connect that spans a conversation end never sends for the ended conv
     expect(plugin.appended.some(row => JSON.stringify(row).includes(ended.generation))).toBe(false);
     expect(store.has(`binding:${OLD}`)).toBe(false);
   });
+
+  it('/reload-plugins before the id switched, the reconnect waits in remember, Claude switches the id, the write lands before the next tick: no note in the new conversation', async () => {
+    const app = appModel(), store = new Map(), plugin = instance(app,store);
+    await connectedThenCleared(app,plugin);
+    // Claude has not switched yet: the ended conversation still takes the route.
+    app.claude.real = OLD;
+    // The reloaded instance has no ended id; it reconnects the remembered conversation and waits in remember().
+    const gate = deferred();
+    store.setGate = gate;
+    const reloaded = instance(app,store);
+    await reloaded.start();
+    await vi.waitFor(() => expect(gate.reached).toBe(true));
+    const dead = {...app.binding()};
+    expect(dead).toMatchObject({external:OLD});
+    // Claude switches the id; no tick has followed it, so the instance's cached state is still the old conversation.
+    app.claude.real = NEW;
+    app.claude.id = NEW;
+    gate.resolve();
+    await new Promise(resolve => setTimeout(resolve,20));
+    expect(reloaded.appended).toHaveLength(0);
+    // The next tick handles the rest: the dead binding is ended and the new conversation connects.
+    await settled(reloaded);
+    expect(endReports(app,dead)).toHaveLength(1);
+    expect(app.binding()).toMatchObject({external:NEW,state:'connected'});
+    expect(reloaded.appended.some(row => JSON.stringify(row).includes(dead.generation))).toBe(false);
+  });
 });
 
 // Every await on a connect path: by the name the plugin gives it (a step, run

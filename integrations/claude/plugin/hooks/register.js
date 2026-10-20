@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { BACKGROUND_RETRY, bounded, descriptorValid, failureCode, folderFailure, ModError, conversationHealth, backgroundOutcome, plainFailure, uuid } from './contracts.js';
+import { BACKGROUND_RETRY, TURN_FAILURE, bounded, descriptorValid, failureCode, folderFailure, ModError, conversationHealth, backgroundOutcome, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 import { prCommentsPrompt } from './pr-comments.js';
 
@@ -82,6 +82,11 @@ function failureText(state, error, connect = false) {
 }
 function failure(state, error) {
   return backgroundOutcome(error,failureText(state,error));
+}
+// A turn callback is not run again, so a temporary failure there does not say Ariadne keeps trying.
+function turnFailure(state, error) {
+  const outcome = failure(state,error);
+  return outcome.kind === 'transient' && outcome.text === BACKGROUND_RETRY ? {...outcome,text:TURN_FAILURE} : outcome;
 }
 // Owner commands answer directly and never change background health.
 async function checked(state, $, action, connect = false) {
@@ -244,6 +249,8 @@ function bindingGone(state, h, loop) {
   state.target = null;
   state.note = null;
   state.owner?.forget(h);
+  // The loop recorded its removal and stopped: nothing will call the claim producer again to clear it.
+  healthFor(state).retire(h,'claim');
   void forget(h,state.claudeSessionId);
   if (!state.ownerTransition) void announce(state,h);
 }
@@ -436,16 +443,21 @@ const NOTE_TRIES = 30;
 // Never awaited by a connect: a hung append must not hold an owner command.
 // The note belongs to the conversation its connect ran in (`note.guard`): it
 // is checked right before the append, and nothing is appended after a change.
+// The guard's cached state lags Claude: the ID can switch before a tick
+// follows it, so a fresh read must still name the note's conversation.
 async function deliverNote(state, $) {
   const note = state.note;
   if (!note || note.sending) return;
   note.sending = true;
   try {
     if (state.step) await state.step('note');
+    const id = note.guard ? await $.session.id() : null;
     if (state.note !== note || note.guard?.spanned()) {
       if (state.note === note) state.note = null;
       return;
     }
+    // Claude switched the ID and no tick has followed it yet: append nothing; the next tick handles the rest.
+    if (note.guard && id !== note.guard.id) return;
     note.tries += 1;
     await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath,note.explicit)}]}});
     if (state.note === note) state.note = null;
@@ -707,7 +719,7 @@ async function turnStart(state, $, event, next) {
   if (event?.agentId === undefined) releaseEnded(state);
   const settle = healthFor(state).call(host($),'helper'), loop = state.loop;
   try { if (loop) await loop.start(host($),event); settle(OK); }
-  catch (error) { settle(failure(state,error)); }
+  catch (error) { settle(turnFailure(state,error)); }
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
@@ -718,7 +730,7 @@ async function turnComplete(state, $, event, next) {
     for (const loop of active) await loop.complete(host($),event);
     settle(OK);
   }
-  catch (error) { settle(failure(state,error)); }
+  catch (error) { settle(turnFailure(state,error)); }
   return next(event);
 }
 // /clear and /resume end this conversation but not the process: report the

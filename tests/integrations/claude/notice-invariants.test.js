@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
-import { BACKGROUND_RETRY, ModError, backgroundOutcome, conversationHealth, envelope, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { BACKGROUND_RETRY, TURN_FAILURE, ModError, backgroundOutcome, conversationHealth, envelope, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, prepared } from './fixtures.js';
+import { counted, imbalance, newLedger } from './ledger.js';
 
 const MINUTE = 60000, GRACE = 2 * MINUTE;
 const PRODUCERS = ['announce','helper','auto','qualification','claim','reports'];
@@ -74,10 +75,18 @@ function random(seed) {
 const pick = (rng, list) => list[rng(list.length)];
 const anyExample = rng => pick(rng,pick(rng,Object.values(EXAMPLES)));
 
-// "A call still open after ten seconds (the helper's eight-second limit plus
-// two seconds) counts as a temporary timeout for its producer until it ends."
-const HUNG = 10000;
-const TIMEOUT = Object.freeze({label:'retry',text:BACKGROUND_RETRY});
+// "A call still open longer than its producer's helper runs (each run's
+// eight-second limit, plus two seconds) counts as a temporary timeout for its
+// producer until it ends": typically one run for most, two for a turn
+// callback, five for a report flush, eight for an automatic reconnect.
+const HUNG = Object.freeze({announce:10000,helper:18000,qualification:10000,claim:10000,reports:42000,auto:66000});
+// "A turn callback that failed ... says Ariadne could not record what just
+// happened": a hung turn callback ('helper') too. Its line is a retry line.
+LABELS.set(TURN_FAILURE,'retry');
+const TIMEOUTS = Object.freeze(Object.fromEntries(PRODUCERS.map(producer =>
+  [producer,Object.freeze({label:'retry',text:producer === 'helper' ? TURN_FAILURE : BACKGROUND_RETRY})])));
+// A turn callback's own temporary failure, as the plugin settles it.
+const TURN_RETRY = Object.freeze({cause:coded('timeout'),given:TURN_FAILURE,text:TURN_FAILURE,label:'retry'});
 
 // Drives conversationHealth with timed calls: each call opens, takes its
 // latency and settles with its one outcome. After every step it checks plain
@@ -90,45 +99,43 @@ function simulation() {
   let time = 0, order = 0, failedAt = [], shown = null, advisers = [], quietAt = null;
   const queue = [], lines = [], trace = [];
   const $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text,label:LABELS.get(text)})}};
-  const model = conversationHealth(() => time);
+  // The ledger counts, at the health's own interface, the calls opened and the outcomes settled.
+  const ledger = newLedger(), model = counted(conversationHealth(() => time),ledger);
   // `ends` counts successes, retirements and resets: each ends advice.
-  // `calls` and `outcomes` count what the generator opened and settled.
-  const known = new Map(PRODUCERS.map(producer => [producer,{counted:false,latest:null,ends:0,open:new Set(),calls:0,outcomes:0}]));
+  const known = new Map(PRODUCERS.map(producer => [producer,{counted:false,latest:null,ends:0,open:new Set()}]));
   const forget = p => {p.latest = null;p.ends += 1;};
-  const hung = producer => [...known.get(producer).open].filter(call => time - call.start > HUNG);
+  const hung = producer => [...known.get(producer).open].filter(call => time - call.start > HUNG[producer]);
   const live = producer => known.get(producer).counted || hung(producer).length > 0;
   // A producer's current outcome: a hung call counts as a timeout.
-  const current = producer => hung(producer).length ? TIMEOUT : known.get(producer).latest;
+  const current = producer => hung(producer).length ? TIMEOUTS[producer] : known.get(producer).latest;
   // A retired or reset producer's hung calls stop counting then.
-  const close = p => {for (const call of p.open) if (time - call.start > HUNG) failedAt.push(call.start + HUNG);p.open.clear();};
+  const close = (p, producer) => {for (const call of p.open) if (time - call.start > HUNG[producer]) failedAt.push(call.start + HUNG[producer]);p.open.clear();};
   const at = (when, step) => queue.push({at:when,order:order++,...step});
   function apply(step) {
     const p = step.producer && known.get(step.producer);
     trace.push({at:time,op:step.op,producer:step.producer,text:step.example?.text});
     if (step.op === 'open') {
-      p.calls += 1;
       p.open.add(step.call);
       step.call.settle = model.call($,step.producer);
     } else if (step.op === 'settle') {
-      p.outcomes += 1;
       const value = outcome(step.example);
       if (step.example) check(value.text === step.example.text,`I4: background sentence was ${value.text}`);
       step.call.settle(value);
       // A call that outlived its producer's retirement records nothing.
       step.dead = !p.open.delete(step.call);
       if (step.dead) return;
-      if (time - step.call.start > HUNG) failedAt.push(step.call.start + HUNG);
+      if (time - step.call.start > HUNG[step.producer]) failedAt.push(step.call.start + HUNG[step.producer]);
       p.counted = true;
       if (step.example) {p.latest = step.example;failedAt.push(time);}
       else forget(p);
     } else if (step.op === 'retire') {
       model.retire($,step.producer);
-      close(p);
+      close(p,step.producer);
       p.counted = false;
       forget(p);
     } else if (step.op === 'reset') {
       model.reset();
-      for (const each of known.values()) {close(each);each.counted = false;forget(each);}
+      for (const [producer,each] of known) {close(each,producer);each.counted = false;forget(each);}
       failedAt = [];shown = null;advisers = [];quietAt = null;
     } else if (step.op === 'owner') model.record({...$,background:false},step.producer,outcome(step.example));
   }
@@ -138,7 +145,7 @@ function simulation() {
     for (const line of emitted) {
       check(line.label && !/PRIVATE|could not finish connecting/.test(line.text),`I4: unknown or private line: ${line.text}`);
       if (line.label === 'retry' || line.label === 'generic') {
-        const failures = [...failedAt,...PRODUCERS.flatMap(producer => hung(producer).map(call => call.start + HUNG))];
+        const failures = [...failedAt,...PRODUCERS.flatMap(producer => hung(producer).map(call => call.start + HUNG[producer]))];
         check(failures.some(failed => failed <= time - GRACE),'I1: a retry or generic line printed before two minutes of failure');
         check(quietAt === null || time - quietAt >= GRACE,'I6: retry or generic lines less than two minutes apart');
         quietAt = time;
@@ -194,7 +201,7 @@ function simulation() {
         verify(step,lines.slice(before));
       }
       // "Each call adds exactly one outcome": counted from the outside.
-      if (!queue.length) for (const [producer,p] of known) check(p.calls === p.outcomes,`${producer} opened ${p.calls} calls but settled ${p.outcomes}`);
+      if (!queue.length) check(imbalance(ledger) === null,imbalance(ledger) ?? '');
     },
   };
   return sim;
@@ -422,7 +429,9 @@ describe('README health statements over 128 seeded histories with 0-10 s calls',
   });
   generated('a hung call counts as a timeout until it settles, and nothing longer',(sim,rng) => {
     const producer = pick(rng,PRODUCERS), other = pick(rng,partners(producer));
-    const hang = HUNG + 1 + rng(5 * MINUTE), settles = pick(rng,[null,pick(rng,EXAMPLES.retry)]);
+    // A turn callback settles a temporary failure with its own line, as turnStart and turnComplete do.
+    const retry = producer === 'helper' ? TURN_RETRY : pick(rng,EXAMPLES.retry);
+    const hang = HUNG[producer] + 1 + rng(5 * MINUTE), settles = pick(rng,[null,retry]);
     // The other producer keeps calling with nothing to report, so health is
     // evaluated throughout.
     drive(sim,rng,{[other]:() => null},0,8 * MINUTE);
@@ -430,10 +439,10 @@ describe('README health statements over 128 seeded histories with 0-10 s calls',
     sim.run();
     // A hang is seen at the first check after ten seconds, and prints at the
     // first check after the grace: each comes with the other producer's calls.
-    const retries = sim.lines.filter(line => line.text === BACKGROUND_RETRY), due = HUNG + GRACE + 2 * cycle(other);
+    const retries = sim.lines.filter(line => line.text === TIMEOUTS[producer].text), due = HUNG[producer] + GRACE + 2 * cycle(other);
     check(sim.lines.length === retries.length && retries.length <= 1,`a hung call printed ${sim.lines.map(line => line.label)}`);
     if (hang >= due) check(retries[0]?.at <= due,`a call hung for ${hang} ms printed its retry line at ${retries[0]?.at}, due by ${due}`);
-    if (hang < HUNG + GRACE && settles === null) check(!retries.length,`a call hung for ${hang} ms then healthy printed a retry line`);
+    if (hang < HUNG[producer] + GRACE && settles === null) check(!retries.length,`a call hung for ${hang} ms then healthy printed a retry line`);
   });
   generated('two equally urgent producers keep the line already showing until it recovers',(sim,rng) => {
     const first = pick(rng,PRODUCERS), second = pick(rng,partners(first));

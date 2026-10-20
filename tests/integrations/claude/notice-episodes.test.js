@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { claimLoop, NOTICES } from '../../../integrations/claude/plugin/hooks/claims.js';
-import { BACKGROUND_RETRY, backgroundDiagnostic, backgroundOutcome, connectDiagnostic, conversationHealth, failureCode, ModError, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { BACKGROUND_RETRY, TURN_FAILURE, backgroundDiagnostic, backgroundOutcome, connectDiagnostic, conversationHealth, failureCode, ModError, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { qualify, setup } from '../../../integrations/claude/plugin/hooks/setup.js';
 import { announcements } from '../../../integrations/claude/plugin/hooks/discovery.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
@@ -369,6 +369,34 @@ it.each(['stale_generation','binding_mismatch','not_found'])('paused then remove
   const poll = h.timer().callback;await poll();removed = true;vi.setSystemTime(1000);await poll();
   expect(h.logs).toEqual([plainFailure('invalid_transition',{reason:'owner_paused'}),NOTICES.removed]);
   const calls = h.calls.length;await poll();expect(h.calls).toHaveLength(calls);
+  // The removed binding retires its claim producer: its terminal outcome stops counting, so health is whole again.
+  await vi.waitFor(() => expect(h.store.get('hook-log')).toContainEqual(expect.objectContaining({step:'health',outcome:'recovered',code:'ok'})));
+});
+it('a removed binding does not keep its terminal claim outcome in front of a later failure',async () => {
+  vi.useFakeTimers();vi.setSystemTime(0);let removed = false, announceFailure = false;
+  const h = host({handler:argv => argv[2] === 'claim' ? removed ? failure('stale_generation') : undefined
+    : argv[2] === 'announce' && announceFailure ? failure('store_busy') : undefined});
+  const hooks = hooksFor();await hooks.get('session.start')(h.$,{},async event => event);await hooks.get('ariadne-connect')(h.$,{args:''});
+  const poll = h.timer().callback;removed = true;vi.setSystemTime(1000);await poll();
+  expect(h.logs).toEqual([NOTICES.removed]);
+  // Only the announce producer fails from here: with the claim outcome retired it speaks for itself after its grace.
+  announceFailure = true;const beat = h.timers().find(timer => timer.ms === 30000).callback;
+  for (let at = 31000; at <= 160000; at += 30000) {vi.setSystemTime(at);await beat();}
+  expect(h.logs).toEqual([NOTICES.removed,BACKGROUND_RETRY]);
+});
+it('a turn callback that fails while nothing retries it does not promise to keep trying',async () => {
+  vi.useFakeTimers();vi.setSystemTime(0);
+  const value = await prepared(), submitted = deferred(), submission = deferred();
+  const h = host({claim:value,submit:() => {submitted.resolve();return submission.promise;}});
+  const hooks = hooksFor();await hooks.get('session.start')(h.$,{},async event => event);await hooks.get('ariadne-connect')(h.$,{args:''});
+  const poll = h.timer().callback;await poll();await submitted.promise;
+  // The conversation id cannot be read when the turn starts: that callback fails, and is not run again.
+  h.$.session.id = async () => {throw new Error('Private fixture detail');};
+  await hooks.get('turn.start')(h.$,{text:value.formatted_payload,turnId:'turn-1'},async event => event);
+  for (let at = 1000; at <= 130000; at += 1000) {vi.setSystemTime(at);await poll();}
+  expect(visible(h)).toEqual([TURN_FAILURE]);
+  expect(visible(h)).not.toContain(BACKGROUND_RETRY);
+  submission.resolve({text:value.formatted_payload});
 });
 it('long lease refusal cannot age the first busy failure',async () => {
   vi.useFakeTimers();vi.setSystemTime(0);let busy = false;
