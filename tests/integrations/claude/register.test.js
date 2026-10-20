@@ -593,17 +593,20 @@ describe('conversation changes, relaunch and removal', () => {
     await h.timers().find(timer => timer.ms === 30000).callback();
     expect(h.logs).toEqual([]);
   });
-  it('does not announce an old automatic reconnect when /clear overtakes its routing note',async () => {
+  // The reconnect is announced when it connects; its note never holds it.
+  it('a /clear while the routing note of an automatic reconnect is in flight announces nothing more and appends no second note',async () => {
     const entered = deferred(), reply = deferred();
     const h = host({append:async () => {entered.resolve();await reply.promise;return {uuid:'routing-note'};}});
     h.store.set(`binding:${'original-host-session'}`,{project_id:ids.project,session_id:ids.session,saved_at:'2026-01-01T00:00:00.000Z'});
     const hooks = callbacks(descriptor);
     await hooks.get('session.start')(h.$,{},next);
     await entered.promise;
+    expect(h.logs).toEqual(['Ariadne: this conversation is connected to its Ariadne session again.']);
     await hooks.get('session.end')(h.$,{reason:'clear'},next);
     reply.resolve();
+    await h.timer().callback();
     await vi.waitFor(() => expect(h.appended).toHaveLength(1));
-    expect(h.logs).toEqual([]);
+    expect(h.logs).toEqual(['Ariadne: this conversation is connected to its Ariadne session again.']);
   });
   it.each(['store_busy','incompatible_adapter'])('retired report %s failures remain visible while they block reconnect',async code => {
     vi.useFakeTimers();vi.setSystemTime(0);

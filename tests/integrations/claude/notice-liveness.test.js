@@ -159,9 +159,10 @@ describe('liveness: calls that have nothing to report still record an outcome',(
 });
 
 describe('liveness: a hung call caps out',() => {
-  // The routing note of an automatic reconnect never settles: that reconnect
-  // call stays open, and after ten seconds it counts as a temporary timeout.
-  it('a reconnect whose routing note never settles prints the retry line once after the grace, and recovers when it settles',async () => {
+  // The routing note of an automatic reconnect never settles. The reconnect
+  // never waits for its note: it is connected at once, stays healthy, and
+  // holds no owner command.
+  it('a reconnect whose routing note never settles is connected at once, prints no retry line, and holds no owner command',async () => {
     let time = 0, down = false;
     vi.spyOn(Date,'now').mockImplementation(() => time);
     const note = deferred(), entered = deferred(), lines = [];
@@ -172,20 +173,18 @@ describe('liveness: a hung call caps out',() => {
     const hooks = callbacks();
     await hooks.get('session.start')(h.$,{},next);
     await entered.promise;
+    await new Promise(resolve => setTimeout(resolve,0));
+    const reconnected = ['Ariadne: this conversation is connected to its Ariadne session again.'];
+    expect(lines.map(line => line.text)).toEqual(reconnected);
+    expect((await hooks.get('ariadne-connect')(h.$,{args:''})).text).toContain('This conversation is connected to Ariadne.');
     const beat = h.timers().find(timer => timer.ms === 30000), tick = h.timer();
     for (time = 1000; time <= 4 * MINUTE; time += 1000) {
       await tick.callback();
       if (time % 30000 === 0) await beat.callback();
     }
-    expect(lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
-    // Ten seconds to count as hung, then the two-minute grace, then one tick.
-    expect(lines[0].at).toBeGreaterThanOrEqual(10000 + 2 * MINUTE);
-    expect(lines[0].at).toBeLessThanOrEqual(10000 + 2 * MINUTE + 1000);
+    expect(lines.map(line => line.text)).toEqual(reconnected);
     note.resolve({uuid:'late-row'});
-    await vi.waitFor(() => expect(h.logs).toContain('Ariadne: this conversation is connected to its Ariadne session again.'));
-    const reconnected = lines.map(line => line.text);
-    expect(reconnected).toEqual([BACKGROUND_RETRY,'Ariadne: this conversation is connected to its Ariadne session again.']);
-    // The reconnect settled healthy, so a later outage gets its own full grace.
+    // A healthy connection, so a later outage gets its own full grace.
     down = true;
     const outage = time + 1000;
     for (time = outage; time < outage + 2 * MINUTE; time += 1000) await tick.callback();

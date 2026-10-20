@@ -16,7 +16,7 @@ function hooks() {
 const next = async event => event;
 const mutations = h => h.calls.filter(call => call.argv[2] === 'connect' && !call.argv.includes('--replay-only'));
 // binding_conflict without a session name: one plain step that frees the session.
-const CONFLICT = 'Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection…, then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).';
+const CONFLICT = 'Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection… (or Sending…), then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).';
 function receipt(request, session = ids.session, generation = ids.generation) {
   return success({operation_id:request.command.op_id,session_id:session,revision:2,
     data:{kind:'binding_connect',binding_id:ids.binding,generation,capabilities:capabilities(),setup_instruction:'Use Ariadne commands.'}});

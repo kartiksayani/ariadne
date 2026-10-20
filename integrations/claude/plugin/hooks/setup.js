@@ -145,10 +145,12 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     if ($ && backgroundFailure !== null) reconnectDiagnostic($,'ended',backgroundFailure);
     backgroundFailure = null;
   }
-  async function connect($, requestedSessionId = null, {background = false} = {}) {
+  // `external`: the Claude conversation ID the caller's connect belongs to; read
+  // from the session when the caller has none.
+  async function connect($, requestedSessionId = null, {background = false, external} = {}) {
     const generation = backgroundGeneration;
     try {
-      const result = await connectAttempt($,requestedSessionId,background);
+      const result = await connectAttempt($,requestedSessionId,background,external);
       if (background && generation !== backgroundGeneration) return result;
       if (backgroundFailure !== null) reconnectDiagnostic($,'recovered','ok');
       else if (background) reconnectDiagnostic($,'ended','ok');
@@ -168,7 +170,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       throw error;
     }
   }
-  async function connectAttempt($, requestedSessionId, background) {
+  async function connectAttempt($, requestedSessionId, background, external) {
     if (requestedSessionId !== null && !uuid(requestedSessionId)) {
       throw new ModError('Choose an explicit canonical Ariadne session UUID, or omit it to connect normally.');
     }
@@ -181,7 +183,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       if (epoch !== started) throw new ModError('The conversation ended while it was connecting; nothing more was sent for it.','Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.');
     };
     const targetSessionId = requestedSessionId ?? binding?.session.session_id ?? null;
-    const externalSession = await $.session.id();
+    const externalSession = external === undefined ? await $.session.id() : external;
     current();
     const cwd = await $.session.cwd();
     current();

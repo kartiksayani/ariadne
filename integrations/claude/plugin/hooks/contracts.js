@@ -223,7 +223,7 @@ const HELPER_FAILURES = Object.freeze({
   stale_generation: GONE_FAILURE,
   binding_mismatch: "Ariadne could not use this conversation's project folder or session link. Check that its project folder is available, then run /ariadne-connect again.",
   binding_ambiguous: GONE_FAILURE,
-  binding_conflict: 'Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection…, then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).',
+  binding_conflict: 'Ariadne has this session connected to another Claude conversation, maybe one you cleared. In Ariadne, click the dot by the session name, choose Connection… (or Sending…), then Disconnect. Then run /ariadne-connect here followed by the session ID (Copy session ID in Ariadne).',
   not_found: "Ariadne can't find that session. Open Ariadne to check it still exists, then run /ariadne-connect.",
   invalid_argument: "Ariadne didn't accept that request. Run /ariadne-connect again; if it keeps happening, update the Ariadne app and plugin so they match.",
   permission_denied: "Ariadne isn't allowed to do that. Open the Ariadne app to check what is allowed for this session.",
