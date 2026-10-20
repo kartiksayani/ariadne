@@ -456,6 +456,8 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     // A Map under 560px gives the label up (the slot goes back to 22px) so the row does not overflow; the name and tooltip stay.
     await expect(row.locator('.tree-action-label')).toBeHidden();
     expect((await row.locator('.tree-ack-slot').boundingBox())!.width).toBe(22);
+    // The button itself goes back to the 22px icon too, never wider than its slot.
+    expect((await row.locator('.tree-action-ack').boundingBox())!.width).toBe(22);
     for (const item of [row, noActions]) {
       expect(await item.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil((await item.boundingBox())!.width));
     }
