@@ -201,24 +201,24 @@ describe('queued view edits (E12, §2c)', () => {
     const isOpenWrite = (request: OwnerMutationRequest) => request.command.command === 'preferences_patch' && request.command.params.entries
       .some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.statuses.includes('open'));
     const outcomes = [
-      { name: 'the receipt still on its way', hold: (view: Mounted) => {
+      { name: 'the receipt still on its way', hold: (view: Mounted, isWrite: (request: OwnerMutationRequest) => boolean = isOpenWrite) => {
         // The core commits the write; its response is held.
         let release!: () => void, entered = false;
         const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
         vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
           const reply = await invoke(name, args);
-          if (!entered && 'command' in args.request && isOpenWrite(args.request)) { entered = true; await gate; }
+          if (!entered && 'command' in args.request && isWrite(args.request)) { entered = true; await gate; }
           return reply;
         });
         return { entered: () => entered, settle: async () => { await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)); }); } };
       } },
-      { name: 'the outcome unknown until Check again', hold: (view: Mounted) => {
+      { name: 'the outcome unknown until Check again', hold: (view: Mounted, isWrite: (request: OwnerMutationRequest) => boolean = isOpenWrite) => {
         // The core commits the write; its response is lost.
         let entered = false;
         const invoke = view.transport.invoke.bind(view.transport);
         vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
           const reply = await invoke(name, args);
-          if (!entered && 'command' in args.request && isOpenWrite(args.request)) { entered = true; throw new Error('Lost response'); }
+          if (!entered && 'command' in args.request && isWrite(args.request)) { entered = true; throw new Error('Lost response'); }
           return reply;
         });
         return { entered: () => entered, settle: async () => {
@@ -249,6 +249,59 @@ describe('queued view edits (E12, §2c)', () => {
       expect(rows()).toEqual(drawn);
       expect(viewWrites(view)).toHaveLength(1);
       expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
+    });
+  });
+
+  describe('a legacy save of every status but done: Done saves no filter, and a refresh before the receipt never filters to Done', () => {
+    const legacy = ['waiting_on_me', 'open', 'in_progress', 'decided', 'dropped', 'replaced'] as const;
+    const isDoneWrite = (request: OwnerMutationRequest) => request.command.command === 'preferences_patch' && request.command.params.entries
+      .some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.statuses.length === 0);
+    const outcomes = [
+      { name: 'the receipt still on its way', hold: (view: Mounted) => {
+        let release!: () => void, entered = false;
+        const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+        vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+          const reply = await invoke(name, args);
+          if (!entered && 'command' in args.request && isDoneWrite(args.request)) { entered = true; await gate; }
+          return reply;
+        });
+        return { entered: () => entered, settle: async () => { await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)); }); } };
+      } },
+      { name: 'the outcome unknown until Check again', hold: (view: Mounted) => {
+        let entered = false;
+        const invoke = view.transport.invoke.bind(view.transport);
+        vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+          const reply = await invoke(name, args);
+          if (!entered && 'command' in args.request && isDoneWrite(args.request)) { entered = true; throw new Error('Lost response'); }
+          return reply;
+        });
+        return { entered: () => entered, settle: async () => {
+          await waitFor(() => expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull());
+          await act(async () => { expect(await view.navigation.retryMutation()).toBe(true); });
+          await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        } };
+      } },
+    ];
+    it.each(outcomes)('with $name', async ({ hold }) => {
+      const view = await mount({ configure: transport => { transport.preferences.sessions[0]!.filters.statuses = [...legacy]; } });
+      const rows = () => screen.getAllByRole('treeitem').map(row => row.getAttribute('aria-label') ?? row.textContent);
+      const held = hold(view);
+      act(() => { fireEvent.click(chip('Done')); });
+      await waitFor(() => expect(held.entered()).toBe(true));
+      // Done joins the set, which is every status: no filter is saved.
+      expect(viewOf(view.transport).filters.statuses).toEqual([]);
+      const drawn = rows();
+      await act(async () => { await view.navigation.refresh(); });
+      expect(view.navigation.getSnapshot().preferences!.sessions.find(value => value.session.session_id === route.session_id)!.filters.statuses).toEqual([]);
+      // The Map does not move on its own: no Done-only filter between the refresh and the receipt.
+      expect(rows()).toEqual(drawn);
+      expect(chip('Done').getAttribute('aria-pressed')).toBe('false');
+      await held.settle();
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+      expect(rows()).toEqual(drawn);
+      expect(chip('Done').getAttribute('aria-pressed')).toBe('false');
+      expect(viewWrites(view)).toHaveLength(1);
+      expect(viewOf(view.transport).filters.statuses).toEqual([]);
     });
   });
 

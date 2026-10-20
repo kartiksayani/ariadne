@@ -42,7 +42,7 @@ import { Banner } from './Banner';
 import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { useArchiveBridge } from './archiveBridge';
-import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, savedChips, setSavedChip, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
+import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ConnectionLineShown } from '../shared/connection';
 import { UnreadableMap } from './UnreadableMap';
@@ -508,10 +508,10 @@ export function TreeView(props: TreeViewProps) {
     setNextRevealId(null);
     onDismissReveal();
     if (isLocalChip(chip)) { localChips.set(toggleLocalChip(localChips.chips, chip)); return; }
-    // The chip's target state is taken now, from the view the owner sees: a saved view that already carries this edit
-    // (a refresh before its receipt) takes it again unchanged, never flipped back.
-    const on = !savedChips(latest.current.view?.filters.statuses ?? []).includes(chip);
-    void saveView(next => { next.filters.statuses = setSavedChip(next.filters.statuses, chip, on); });
+    // The chip's whole target is taken now, from the view the owner sees: a saved view that already carries this edit
+    // (a refresh before its receipt) takes it again unchanged, never flipped back or filtered again.
+    const edit = savedChipEdit(latest.current.view?.filters.statuses ?? [], chip);
+    void saveView(next => { next.filters.statuses = edit(next.filters.statuses); });
   };
   // Clear empties everything that makes the filter active (the saved statuses, the local chips, the saved owners and
   // hide-later, which have no chip) so the row never offers a Clear that leaves the filter on. Search and the archive stay.

@@ -61,6 +61,15 @@ export function setSavedChip(statuses: readonly ItemStatus[], chip: Chip, on: bo
   return ordered.length === FILTER_STATUSES.length || ordered.every(value => value === 'dropped') ? [] : ordered;
 }
 
+/** One chip pick or drop, fixed now from the statuses the owner sees (`seen`). Applied to statuses that already are its result it
+ * changes nothing; otherwise it picks or drops the chip on whatever is saved then, so edits made together still compose.
+ * `setSavedChip` alone is not enough: a legacy set of every status but one normalises to no filter, and picking that chip again on
+ * the result would filter to it. */
+export function savedChipEdit(seen: readonly ItemStatus[], chip: Chip): (current: readonly ItemStatus[]) => ItemStatus[] {
+  const on = !savedChips(seen).includes(chip), target = setSavedChip(seen, chip, on);
+  return current => current.length === target.length && target.every(status => current.includes(status)) ? [...current] : setSavedChip(current, chip, on);
+}
+
 export function toggleLocalChip(local: readonly LocalChip[], chip: LocalChip): LocalChip[] {
   return local.includes(chip) ? local.filter(value => value !== chip) : LOCAL_CHIPS.filter(value => value === chip || local.includes(value));
 }
