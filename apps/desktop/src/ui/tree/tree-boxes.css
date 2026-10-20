@@ -3,46 +3,63 @@
    so a branch keeps its hue whatever is added, removed or reloaded around it. */
 [data-theme="light"] {
   --tree-halo: oklch(99.5% 0.003 85deg);
-  --tree-fw-l-1: 0.968;
-  --tree-fw-l-2: 0.946;
-  --tree-fw-l-3: 0.924;
-  --tree-fw-l-4: 0.902;
-  --tree-fw-l-5: 0.88;
-  --tree-fw-c-1: 0.014;
-  --tree-fw-c-2: 0.02;
-  --tree-fw-c-3: 0.026;
-  --tree-fw-c-4: 0.032;
-  --tree-fw-c-5: 0.038;
-  --tree-fe-l-1: 0.74;
-  --tree-fe-l-2: 0.71;
-  --tree-fe-l-3: 0.68;
-  --tree-fe-l-4: 0.65;
-  --tree-fe-l-5: 0.62;
-  --tree-fe-c: 0.07;
+  --tree-fw-l-1: 0.945;
+  --tree-fw-l-2: 0.92;
+  --tree-fw-l-3: 0.895;
+  --tree-fw-l-4: 0.87;
+  --tree-fw-l-5: 0.845;
+  --tree-fw-c-1: 0.03;
+  --tree-fw-c-2: 0.037;
+  --tree-fw-c-3: 0.044;
+  --tree-fw-c-4: 0.051;
+  --tree-fw-c-5: 0.058;
+  --tree-fe-l-1: 0.7;
+  --tree-fe-l-2: 0.67;
+  --tree-fe-l-3: 0.64;
+  --tree-fe-l-4: 0.61;
+  --tree-fe-l-5: 0.58;
+  --tree-fe-c: 0.09;
   --tree-ink-l: 0.42;
   --tree-ink-c: 0.06;
+
+  /* The status text on a Map row (Status Badge `ink`): each status colour at the lightness that reads at 4.5:1 on every
+     box tint and on the page, in its own hue (owner 2026-10-19, with the box colours above). */
+  --st-open-ink: oklch(40% 0.008 80deg);
+  --st-waiting-ink: oklch(40% 0.13 255deg);
+  --st-progress-ink: oklch(40.5% 0.11 68deg);
+  --st-decided-ink: oklch(38% 0.08 185deg);
+  --st-done-ink: oklch(38.5% 0.1 148deg);
+  --st-dropped-ink: oklch(40% 0.008 80deg);
+  --st-replaced-ink: oklch(40% 0.008 80deg);
 }
 
 [data-theme="dark"] {
   --tree-halo: oklch(16.5% 0.006 80deg);
-  --tree-fw-l-1: 0.236;
-  --tree-fw-l-2: 0.264;
-  --tree-fw-l-3: 0.292;
-  --tree-fw-l-4: 0.32;
-  --tree-fw-l-5: 0.348;
-  --tree-fw-c-1: 0.022;
-  --tree-fw-c-2: 0.026;
-  --tree-fw-c-3: 0.031;
-  --tree-fw-c-4: 0.036;
-  --tree-fw-c-5: 0.041;
-  --tree-fe-l-1: 0.5;
-  --tree-fe-l-2: 0.54;
-  --tree-fe-l-3: 0.58;
-  --tree-fe-l-4: 0.62;
-  --tree-fe-l-5: 0.66;
-  --tree-fe-c: 0.065;
+  --tree-fw-l-1: 0.28;
+  --tree-fw-l-2: 0.31;
+  --tree-fw-l-3: 0.34;
+  --tree-fw-l-4: 0.37;
+  --tree-fw-l-5: 0.4;
+  --tree-fw-c-1: 0.04;
+  --tree-fw-c-2: 0.045;
+  --tree-fw-c-3: 0.05;
+  --tree-fw-c-4: 0.055;
+  --tree-fw-c-5: 0.06;
+  --tree-fe-l-1: 0.56;
+  --tree-fe-l-2: 0.6;
+  --tree-fe-l-3: 0.64;
+  --tree-fe-l-4: 0.68;
+  --tree-fe-l-5: 0.72;
+  --tree-fe-c: 0.085;
   --tree-ink-l: 0.86;
   --tree-ink-c: 0.045;
+  --st-open-ink: oklch(87% 0.008 80deg);
+  --st-waiting-ink: oklch(88.5% 0.111 255deg);
+  --st-progress-ink: oklch(87.5% 0.09 78deg);
+  --st-decided-ink: oklch(86.5% 0.075 178deg);
+  --st-done-ink: oklch(86.5% 0.085 148deg);
+  --st-dropped-ink: oklch(87% 0.008 80deg);
+  --st-replaced-ink: oklch(87% 0.008 80deg);
 }
 
 /* One slice of one box on one row, painted behind the row's content (the row isolates its stacking context). Its column

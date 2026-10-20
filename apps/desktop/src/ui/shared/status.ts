@@ -20,3 +20,7 @@ export const STATUS: Readonly<Record<StatusKey, { readonly label: string; readon
 };
 
 export const statusColor = (status: StatusKey): string => `var(--st-${status === 'queued' ? 'open' : status})`;
+
+/** The status colour held to 4.5:1 on the Map's box tints (tree-boxes.css `--st-*-ink`); `agent` is the same mix of waiting and open as `--st-agent`. */
+export const statusInk = (status: StatusKey): string =>
+  status === 'agent' ? 'color-mix(in srgb, var(--st-waiting-ink) 55%, var(--st-open-ink))' : `var(--st-${status === 'queued' ? 'open' : status}-ink)`;

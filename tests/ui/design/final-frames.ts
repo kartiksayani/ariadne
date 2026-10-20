@@ -2,6 +2,12 @@
 // where the board draws it (part + sid), what the app is put in to match it (an AppFixture), whether the app is
 // compared yet (`pending`), and who is expected to turn that on. Thresholds live in final-thresholds.json.
 // Kept free of app imports: Node (final.spec.mts) and Vite (final-gallery.tsx) read it alike.
+//
+// Owner-asked deviation from the board (owner 2026-10-19: variant B + AA muted/pill): the Map's branch boxes use the stronger "variant B"
+// tints and edges in both themes (tree-boxes.css `--tree-fw-*` / `--tree-fe-*`), a closed row's question text is the text colour at 76%
+// (the board: 64%), and a Map row's status badge text and pill use the `--st-*-ink` tokens. All three reach WCAG AA 4.5:1 on every box tint
+// and on the page; the board's colours do not. The comparison's per-channel tolerance still passes every Map state, so no region or
+// mask was needed; a new state that draws these colours and fails by a few channel steps is this deviation, not a layout fault.
 import { Q1, Q2, note1, type MarkSet } from './final-world';
 
 /** The three renders of every state: the board's light and dark at 1280 x 800, and its light at 900 x 650. */

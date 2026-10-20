@@ -24,6 +24,8 @@ import { ChangeMarker } from '../changes/ChangeMarker';
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
+/** A closed row's question: the text colour at the share that reads at 4.5:1 on every box tint, in both themes. */
+const MUTED_QUESTION = 76;
 
 /** Lines of an item's question or preview before "Show more" folds the rest away. */
 const CLAMP_LINES = 3;
@@ -45,7 +47,7 @@ function preview(row: Row): Preview | null {
   if (item.status === 'replaced' && row.replacedBy) {
     return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
       <ItemReference itemId={row.replacedBy.id} className="tree-jump" inline>{row.replacedBy.question}</ItemReference>
-      <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
+      <StatusBadge status={visual(row.replacedBy.status)} variant="text" ink /></div> };
   }
   // The same rule tells the search which outcomes are on the Map (model.ts `outcomeShown`).
   if (outcomeShown(item, row.later, row.replacedBy) && item.outcome) {
@@ -159,7 +161,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
     <div className="tree-body">
       {/* One unfold flag opens the question and the details together; each folds at three lines when that hides a line. */}
       <div className="tree-heading"><ClampBlock className="tree-preview tree-question-block" text={item.question} open={unfolded} onToggle={() => onUnfold(item.id)}>
-        <div className="tree-clamp"><div className="tree-question tree-clamp-content" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
+        <div className="tree-clamp"><div className="tree-question tree-clamp-content" style={{ color: muted ? neutral(MUTED_QUESTION) : 'var(--color-text)' }}>
           {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}
             data-current={segment.hit && current === 'question' || undefined}>{segment.text}</span>)}
         </div></div>
@@ -180,7 +182,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       </span>
       {/* A closed session's chip takes the badge's place and its width, so the cluster never widens. */}
       <span className="tree-end-slot tree-end-badge">
-        {row.sessionClosed ? <SessionClosedChip reason={closedReason} /> : <StatusBadge status={status} label={row.badge} variant="text" />}
+        {row.sessionClosed ? <SessionClosedChip reason={closedReason} /> : <StatusBadge status={status} label={row.badge} variant="text" ink />}
       </span>
       <span className="tree-end-slot tree-end-related">
         {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}

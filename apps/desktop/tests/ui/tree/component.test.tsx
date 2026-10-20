@@ -1357,7 +1357,7 @@ describe('session tree filters', () => {
     expect(await screen.findByText(outsideNotice)).toBeTruthy();
     expect(within(row('1.1')).getByText('Outside filter')).toBeTruthy();
     expect(ids()).toEqual(['1', '1.1', '2']);
-    expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('64%');
+    expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('76%');
     fireEvent.click(screen.getByRole('button', { name: 'Hide it again' }));
     expect(calls.resumed).toBe(1);
     await waitFor(() => expect(viewOf(transport).selected_item_id).toBeNull());
