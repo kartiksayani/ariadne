@@ -8,6 +8,8 @@
 // (the board: 64%), and a Map row's status badge text and pill use the `--st-*-ink` tokens. All three reach WCAG AA 4.5:1 on every box tint
 // and on the page; the board's colours do not. The comparison's per-channel tolerance still passes every Map state, so no region or
 // mask was needed; a new state that draws these colours and fails by a few channel steps is this deviation, not a layout fault.
+// The grey preview lines ("Parked for later", "Replaced by") and the hidden strip text are 76%, the Undo/bin strip text 84% and a hidden
+// branch's chip text 86% (the board: 58-66%), for the same 4.5:1.
 import { Q1, Q2, note1, type MarkSet } from './final-world';
 
 /** The three renders of every state: the board's light and dark at 1280 x 800, and its light at 900 x 650. */

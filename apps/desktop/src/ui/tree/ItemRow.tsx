@@ -24,7 +24,7 @@ import { ChangeMarker } from '../changes/ChangeMarker';
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
-/** A closed row's question: the text colour at the share that reads at 4.5:1 on every box tint, in both themes. */
+/** A closed row's question and a row's grey preview lines: the text colour at the share that reads at 4.5:1 on every box tint, in both themes. */
 const MUTED_QUESTION = 76;
 
 /** Lines of an item's question or preview before "Show more" folds the rest away. */
@@ -42,10 +42,10 @@ function PreviewText({ text }: { readonly text: string }) {
 /** The item's own details under the title, by priority (Item Row.dc.html:68-75). A delivery never takes this place. */
 function preview(row: Row): Preview | null {
   const item = row.item;
-  if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
+  if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(MUTED_QUESTION) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
   if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><PreviewText text={item.ask} /></div> };
   if (item.status === 'replaced' && row.replacedBy) {
-    return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
+    return { text: null, node: <div className="tree-line" style={{ color: neutral(MUTED_QUESTION) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
       <ItemReference itemId={row.replacedBy.id} className="tree-jump" inline>{row.replacedBy.question}</ItemReference>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" ink /></div> };
   }
@@ -55,7 +55,7 @@ function preview(row: Row): Preview | null {
       <PreviewText text={item.outcome} /></div> };
   }
   if (item.status === 'in_progress' && item.note) {
-    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><PreviewText text={item.note} /></div> };
+    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress-ink)' }}><i className="ph ph-robot" /><PreviewText text={item.note} /></div> };
   }
   return null;
 }
