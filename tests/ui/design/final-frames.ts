@@ -391,7 +391,8 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // 12.2's steps: the head and the first step hold. The second step says where Codex's instruction comes from when no setup receipt is at hand
   // (the board's has a Copy instruction button), so it and the foot below it sit at another height.
   '12.2': [...topBar(BAR), ...box('connection line, head and first step', [0, 40, 1280, 82], [0, 40, 900, 82]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
-  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.3 holds the line without its button: the button says "Connection…" where the board says "Sending…" (alpha.22 E5, asked by the owner).
+  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1060, 56], [0, 40, 700, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
   '12.4': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLine()],
   // 12.6 holds the line's icon and title and its button: the sentence between has no drop time (§3a).
   '12.6': [...topBar(BAR), ...box('connection line title', [0, 40, 260, 56], [0, 40, 260, 56]), ...box('connection line button', [1180, 40, 100, 56], [800, 40, 100, 56]),
