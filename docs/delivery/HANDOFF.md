@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-19
+# Ariadne handoff — 2026-10-21
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,9 +21,10 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `8ed87b66` (#173). Alpha.21 released as
-[`v0.1.0-alpha.21`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.21)**
-(tag at `8ed87b66`). Alpha.20 is `v0.1.0-alpha.20` (tag at `c5c8f6a9`, #171), alpha.19 is
+**Main: `66e7a3f8` (#177). Alpha.22 released as
+[`v0.1.0-alpha.22`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.22)**
+(tag at `66e7a3f8`). Alpha.21 is `v0.1.0-alpha.21` (tag at `8ed87b66`, #173), alpha.20 is
+`v0.1.0-alpha.20` (tag at `c5c8f6a9`, #171), alpha.19 is
 `v0.1.0-alpha.19` (tag at `c87909da`, #169), alpha.18 is
 `v0.1.0-alpha.18` (tag at `0336a903`, #164), alpha.17 is
 `v0.1.0-alpha.17` (tag at `925c9645`, #162), alpha.16 is
@@ -31,6 +32,20 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.22 released
+
+[#177](https://github.com/kartiksayani/ariadne/pull/177), `66e7a3f8`, "Fixes and fit": the follow-ups and owner requests after the three redesign releases. The release is a pre-release with the asset `ariadne-0.1.0-alpha.22-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.22` on 2026-10-21 and installed on the owner's machine; both installed binaries match the package, and older helper versions are kept. Saved data is unchanged from alpha.21. It is the first release with its own version number (0.1.0-alpha.22), which Tauri accepted. What changed for the owner:
+
+- Copy session ID on every session row, in All sessions and on each project's page, closed sessions included. The peek card waits a second before it opens on a resting pointer; clicking a name still opens it at once.
+- The window fits the screen: it opens inside the visible area, the minimum width is 1100, and a window dragged partly off-screen is left where the owner put it.
+- `/clear` keeps the session: the conversation reconnects to its Ariadne session on its own, and a stuck state says exactly what to do. Disconnect says so, with a note and Copy session ID, and the connection button reads "Connection…" when the session is off.
+- The hover icons sit above the row, never over its title or the row above's buttons, and moving from one name to the next opens each one's card. Branch colours and the grey text and status pills on them are stronger in light and dark. Ack shows where it goes: "✓ Ack → Done" in Details and "✓ → Done" on the row.
+- The Map keeps a fold or filter made just before a session switch, and never writes it to the wrong session. Changing text size or archiving the last topic at the very bottom no longer moves the row. A link clicked after a Graph node always wins, and `.` works in the Graph as in the Tree.
+- What changed matches the board: icons, Before → after cards and the three buttons. The bin says "Empty", a long absence says "since Monday 18:10", the Back-to pill stays above the dock and Retry waits while an item is being removed. Screen readers keep announcing questions when one session cannot be read.
+- Plugin and store: plugin messages no longer promise "it will keep trying" when they will not, and a stuck note cannot leave `/ariadne-connect` saying "already connecting". `ariadne doctor` waits for busy saved data, and the agent's `session_read` does not wait on the session lock. A brief disk error no longer sets the recovery file aside. A plugin that does not match the app is noticed and the top bar says what to run. An old Claude plugin is therefore noticed instead of running unseen.
+- Process: an eslint rule against class selectors in tests, with a baseline that may only shrink; `scripts/check-previous-release.py` checks that the previous release still reads what this build writes (native CI, release scope).
+- CI fixes made during integration, all test-side: the native window-size checks accept the visible screen when it is smaller than 1100×760 (the CI screen is 1024×768); the What changed popover structure test reads related positions in one call; the native tree row click (`selectRow` in `apps/desktop/tests/e2e/tree.spec.mjs`) waits for a ready session and retries one refused reveal. No retry fired on the green CI run.
 
 ## Alpha.21 released
 
@@ -164,46 +179,18 @@ built.
 
 ## Next steps
 
-The three redesign releases are done (alpha.19, alpha.20 and alpha.21). Item 1 is the follow-ups carried to the next release. Items 2 and 3 are small; take them alongside. Items 4 onward waited on the redesign, which is now done; the owner picks the order.
+Alpha.22 finished the alpha.21 follow-ups, the alpha.18 hook-notice, store and install follow-ups (P11.17–P11.21, P11.24, P11.25, P11.27), the #162 Graph follow-ups (P11.10, P11.11, P11.13), the recovery edge cases (P11.7) and the previous-release read test (P11.8). Item 1 is the follow-ups carried to the next release (alpha.23); the owner picks the order.
 
-1. **Follow-ups carried to the next release** (none blocks it). The `page-keys` flake, the `itemNavigation` flake and the native Graph race from the alpha.20 list were fixed in alpha.21.
-   - Selector lint: an eslint rule against class selectors in tests (the alpha.20 reviewers deferred it).
-   - Graph: with Details open at 1280 px, the deepest nodes scroll sideways. The column is fitted as if Details were folded, and the board refits live.
-   - "Nothing in the bin": the board says "Empty".
-   - The What changed popover body differs from the board: 5.5 summary as icon rows (the app has text lines and buttons), and the 5.2 / 5.3 brief and since-you-were-here row layout.
-   - Long-absence head sub-text: the board says "since Monday 18:10" (weekday when more than a day); the app says "since you looked at 21:25".
-   - Queued view edits are lost on unmount: a Map view change queued behind an unconfirmed Recent save is lost if the session switches first. The same holds for edits queued behind a running Recent write (`TreeView` `pendingEdits`). Flush them or keep them across the remount.
-   - Text scale at the Map's end: stepping the text size back down to 1 at the very bottom moves the reading row by about 17 px. The owner causes the boundary shift; the alpha.20 plan cut it.
-   - Screen-reader announcements of waiting questions stop while any session is unreadable (`components/accessibility/QueueAnnouncements.tsx`, line 14, with the waiting store's stale and error status). This predates alpha.21. Announce from the listed sessions anyway.
-   - Back-to pill under a near-full notice stack: when the expanded stack fills most of the Map, the pill can sit low or under the dock (`tree.css`, line 588). Cap its top. The `.` key still works.
-   - Archive strip at the Map's end: archiving the last topic while reading a tall row near the end puts the strip 11 to 23 px below the row's place. The owner causes the boundary shift; the map-still row is marked fixme.
-   - Retry during a removal window: an uncertain answer's Retry in Details is not blocked while its item is being removed (AnswerSlot drops blocked on the retry bar).
-   - `queue.ts` lines 142-158: the family check can show "Checking other sessions…" for up to 3 × `FAMILY_SETTLE_MS` (30 s), while the docstring says two waits. Cap the second wait from the refresh start, or fix the docstring and the comment at `App.tsx` line 505. Minor, from the review of `2563c4db`.
-
-2. Hook notice follow-ups from the alpha.18 final re-review (non-blocking), each a small task:
-   - P11.17 `claim` is not retired after binding removal (`claims.js` `end()`), so the terminal "removed" line stays current and hides later advice until reconnect. Retire it after the removal is recorded.
-   - P11.18 Pre-existing dead end: `autoConnect` holds `ownerTransition` while awaiting `deliverNote` (`register.js`). If `$.session.append` hangs, `/ariadne-connect` and `/ariadne-disconnect` answer "already connecting" forever. Don't await the note inside the transition window, or time-box it.
-   - P11.19 The oracle's one-outcome check is circular (`notice-invariants.test.js`). Turn on the `balanced()` ledger in `register.test.js` and `connect-recovery.test.mjs`.
-   - P11.20 A transient turn-callback failure stays current while idle, and "it will keep trying" is false there.
-   - P11.21 `HUNG_CALL_MS` (10 s) assumes one helper run per call, but auto and reports do several. Use per-producer thresholds and fix the README wording.
-3. Store and install follow-ups from the alpha.18 head review and install check:
-   - P11.24 Later: the owner's `session_read` takes the session lock (`queries/mod.rs` to `catalogue.rs`). Peek-based reads are possible.
-   - P11.25 While the alpha.17 app ran, `install.sh`'s doctor printed "some data was busy or unreadable" and "Saved data couldn't be read safely". A rerun right after said "No problems found". The install-time doctor should ride out busy like other reads, or word it as busy, try again.
-   - P11.27 Every alpha ships as plugin version 0.1.0, so the Claude plugin cache cannot tell alphas apart.
-4. Follow-ups from #162, each a small task:
-   - P11.10 Graph selection reply race: a Graph click's `revealItem` reply is dropped when a reveal is dismissed mid-flight, because the `external` guard in `GraphView.tsx` compares App's `treeReveal`. Fix with a counter that changes only on a non-own, non-null outside reveal.
-   - P11.11 Stale "outside your filters" banner: it stays after a Graph fold or stub toggle; the Tree dismisses it through `onDismissReveal`.
-   - P11.12 Reveal selected detail parity: the Graph keeps detail closed and the Tree opens it. The owner decides, then both align.
-   - P11.13 Missing composed tests: a plain Graph click keeps scroll and focus through App, and the selection is asserted after Resume.
+1. **Follow-ups carried to the next release** (none blocks it).
+   - Native tree row click refused with "still loading this session's latest changes" on CI at 1024×677. It failed 2 of 3 runs before the retry in `selectRow` (`apps/desktop/tests/e2e/tree.spec.mjs`) was added, and never on main at 1300 wide. An investigation found no alpha.22 cause: `TreeView.tsx` `select()` rejects when the store is not ready after `refresh(true)`, or on its 5 s reveal budget. Find which trigger fires, using the new evidence files `tree-reveal-refused-*.json` and `sessionStatus` in `tree-journey-failure.json`. Then decide whether real users at small windows see it.
+   - The What changed popover moves about 45 to 52 px shortly after opening and after Before → after expands, as seen on CI. Find out what moves it (the placement `ResizeObserver` in `ChangesOpener.tsx`, the BriefLead "Show more" measure, or something else) and whether the owner can see it.
+   - Known native flake "Visible detail Reply did not save the exact owner text" (`runRecoveryAcceptance`; seen on main since alpha.11): a Send click is lost while the text and Send stay enabled.
+   - Carried over: the saved window size over an external display (pre-existing).
+   - After install, check whether `/reload-plugins` alone loads the new plugin and whether it fires `session.end`. Pending the owner's report.
+2. Follow-ups from #162, each a small task:
+   - P11.12 Reveal selected detail parity: the Graph keeps detail closed and the Tree opens it. The owner decides, then both align. Alpha.22 gave the Graph the Back-to key like the Tree; the detail parity itself is still open.
    - P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
-5. Recovery edge cases from a failure table. Three rare cases from the #159 review:
-   a rollback that could remove the only copy of the recovery file on network
-   filesystems, transient read errors that set a good recovery file aside, and a
-   needless sync on reads. Brief it as a full failure table (ORCHESTRATOR, "Delivery
-   feedback rules"). Task P11.7.
-6. Previous-release read test: an automatic check that the previous release accepts
-   the files the new build writes. Task P11.8.
-7. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
+3. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
 
 ## Process lessons
 
@@ -225,6 +212,13 @@ Refresh this page, tasks.json and the roadmap chart using
 ## Known flakes
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
+
+- **Native tree journey, row click refused with “still loading this session's latest changes” (`apps/desktop/tests/e2e/tree.spec.mjs`, `selectRow`).** Test-side retry added in alpha.22; cause not found.
+  - First failed: alpha.22 integration CI at 1024×677, 2 of 3 runs. Never on main at 1300 wide. No retry fired on the green run.
+  - Suspected cause: `TreeView.tsx` `select()` rejects when the store is not ready after `refresh(true)`, or on its 5 s reveal budget. `selectRow` now waits for a ready session and retries one refused reveal, and writes `tree-reveal-refused-*.json`; `tree-journey-failure.json` carries `sessionStatus`. Read those first.
+
+- **Native journey, “Visible detail Reply did not save the exact owner text” (`runRecoveryAcceptance`).** Seen on main since alpha.11; not fixed.
+  - A Send click is lost while the text and Send stay enabled.
 
 - **`apps/desktop/tests/ui/tree/component.test.tsx`, “waits for a stale session before selecting with click”.** Fixed in #162 (released in alpha.17).
   - First failed: local #162 coverage gate, 2026-10-15. Selection completed and was saved, but the final notice assertion expected zero notices and saw one (then line 647); an unchanged full coverage rerun passed. Second occurrence: the owner's full coverage run on the same working tree, also 2026-10-15 (about 60 s for the file with `--maxWorkers=3`).

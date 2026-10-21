@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-19T00:00:00Z",
-    "headline": "Alpha.21 released (v0.1.0-alpha.21, #173): Details and the rest, with a new Details head and one changed-since box, toasts and a notice stack, connection states, remove, archive and the bin, and a two-step Continue elsewhere. It follows alpha.20 (#171, the Map), alpha.19 (#169, the window) and alpha.18 (#164, quiet hook notices and a retryable busy store).",
+    "updated_at": "2026-10-21T00:00:00Z",
+    "headline": "Alpha.22 released (v0.1.0-alpha.22, #177): fixes and fit, with Copy session ID on every row, a window that fits the screen, /clear keeping the session, branch colours that read better, a What changed popover that matches the board, and the first per-alpha version number. It follows alpha.21 (#173, Details and the rest), alpha.20 (#171, the Map) and alpha.19 (#169, the window).",
     "notes": [
-      "Next: the follow-ups carried from alpha.21 are in HANDOFF (Next steps, item 1).",
-      "The remaining alpha.18 follow-ups (P11.17–P11.21, P11.24, P11.25, P11.27) are small and do not depend on the redesign; take them next.",
+      "Next: the follow-ups carried from alpha.22 are in HANDOFF (Next steps, item 1): the native tree row click refused on small CI windows, the What changed popover moving 45 to 52 px after it opens, the native Reply flake, the saved window size over an external display, and the /reload-plugins check.",
+      "Alpha.22 finished the alpha.18 follow-ups (P11.17–P11.21, P11.24, P11.25, P11.27), the #162 Graph follow-ups (P11.10, P11.11, P11.13), the recovery edge cases (P11.7) and the previous-release read test (P11.8). Still open from #162: P11.12 (detail parity, the owner decides) and P11.14 (flake watch).",
       "The UI redesign is done in three releases from the approved board: the window (alpha.19), the Map including what changed and peek (alpha.20), then Details, dialogs, notices and pages, with connection states (alpha.21). All three are released.",
-      "Queued behind the redesign: the #162 follow-ups (P11.10–P11.14), the recovery edge cases from a failure table and the previous-release read test.",
       "Owner decision: no session-wide Conversation view and no host transcript reading. Chat with the agent stays in the terminal.",
       "Before merging a PR whose base is behind main, merge main into it and let push-triggered quality run on that head; the tree-equality check assumes this.",
       "Run cargo test --workspace before pushing integration-resource changes; installed-plugin fixtures live in several crates.",
