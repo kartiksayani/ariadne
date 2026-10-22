@@ -1,5 +1,5 @@
 use super::{
-    geometry::{MinimumSize, WorkArea},
+    geometry::{DisplayState, MinimumSize, MonitorPrint, SaveGate, WorkArea, FIT_QUIET},
     preferences::WindowPreferenceWrite,
 };
 use crate::commands::DesktopService;
@@ -9,6 +9,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 use tauri::Manager;
 
 #[derive(Clone, Default)]
@@ -19,9 +20,13 @@ pub struct NativeWindow {
     worker: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
     worker_failed: Arc<AtomicBool>,
     applied_revision: Arc<AtomicU64>,
-    movement: Arc<AtomicU64>,
+    /// Counts the owner's own moves and resizes: those the save gate allowed.
+    owner_movement: Arc<AtomicU64>,
+    /// Keeps the app's own fits and display changes from being saved.
+    gate: Arc<Mutex<SaveGate>>,
     stopped: Arc<AtomicBool>,
 }
+type Gate = Mutex<SaveGate>;
 type AfterReconcile<R> = Box<dyn FnOnce(&tauri::AppHandle<R>) + Send>;
 /// How long launch waits for the saved size before showing the window anyway.
 const LAUNCH_FALLBACK: std::time::Duration = std::time::Duration::from_secs(3);
@@ -73,6 +78,22 @@ fn content_minimum<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Minim
         })
         .unwrap_or_default()
 }
+/// How the displays look now, for the save gate. None when they cannot be read.
+fn display_state<R: tauri::Runtime>(window: &tauri::Window<R>) -> Option<DisplayState> {
+    let monitors = window
+        .available_monitors()
+        .ok()?
+        .iter()
+        .map(|monitor| MonitorPrint {
+            id: monitor_id(monitor),
+            width: monitor.size().width,
+            height: monitor.size().height,
+            scale_milli: (monitor.scale_factor() * 1000.0).round() as i64,
+        })
+        .collect();
+    let current = window.current_monitor().ok()?.as_ref().map(monitor_id);
+    Some(DisplayState { monitors, current })
+}
 /// Whether the window's current frame is a resting size worth saving: not the
 /// full-screen Space, a minimized or hidden window, or a size mid-transition.
 fn resting<R: tauri::Runtime>(window: &tauri::Window<R>) -> bool {
@@ -84,6 +105,11 @@ fn resting<R: tauri::Runtime>(window: &tauri::Window<R>) -> bool {
 /// shortcuts work without a click first.
 pub(crate) fn present<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
     window.show()?;
+    // Displays may have changed while it was hidden: note them without hushing,
+    // so the owner's first drag after the show is saved.
+    if let Some(native) = window.try_state::<NativeWindow>() {
+        native.refresh_displays(display_state(&window.as_ref().window()));
+    }
     window.unminimize()?;
     window.set_focus()?;
     focus_webview(window);
@@ -106,9 +132,19 @@ pub(crate) fn first_show<R: tauri::Runtime>(
             return;
         }
         if let Some(window) = app.get_webview_window("main") {
+            // The fit's events arrive after the show: keep them out of the
+            // saved frame. `present` alone does not hush (tray, routes).
+            let gate = app.try_state::<NativeWindow>();
+            let hush = || {
+                if let Some(native) = &gate {
+                    native.hush(Instant::now(), FIT_QUIET);
+                }
+            };
+            hush();
             if present(&window).is_err() {
                 eprintln!("Ariadne could not show its main window.");
             }
+            hush();
         }
         crate::native::routes::window_shown(app);
     }
@@ -183,6 +219,7 @@ fn fit_window<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     frame: &WindowGeometry,
     only_if_needed: bool,
+    gate: &Gate,
 ) -> Result<(), CoreError> {
     let screen = screen(window)?;
     let plan = super::geometry::plan_fit(
@@ -193,21 +230,59 @@ fn fit_window<R: tauri::Runtime>(
         only_if_needed,
     )?;
     let minimum = plan.content_minimum;
-    window
-        .set_min_size(Some(tauri::LogicalSize::new(minimum.width, minimum.height)))
-        .map_err(|_| unavailable())?;
-    let Some(fitted) = plan.frame else {
-        return Ok(());
-    };
-    window
-        .set_size(tauri::LogicalSize::new(
-            (fitted.width - screen.chrome.width).max(1.0),
-            (fitted.height - screen.chrome.height).max(1.0),
-        ))
-        .map_err(|_| unavailable())?;
-    window
-        .set_position(tauri::LogicalPosition::new(fitted.x, fitted.y))
-        .map_err(|_| unavailable())
+    run_fit(
+        gate,
+        Instant::now,
+        plan.frame.is_some(),
+        || {
+            window
+                .set_min_size(Some(tauri::LogicalSize::new(minimum.width, minimum.height)))
+                .map_err(|_| unavailable())
+        },
+        || {
+            let fitted = plan.frame.as_ref().ok_or_else(unavailable)?;
+            window
+                .set_size(tauri::LogicalSize::new(
+                    (fitted.width - screen.chrome.width).max(1.0),
+                    (fitted.height - screen.chrome.height).max(1.0),
+                ))
+                .map_err(|_| unavailable())
+        },
+        || {
+            let fitted = plan.frame.as_ref().ok_or_else(unavailable)?;
+            window
+                .set_position(tauri::LogicalPosition::new(fitted.x, fitted.y))
+                .map_err(|_| unavailable())
+        },
+    )
+}
+/// Runs a fit's setters inside a quiet save window: hushed before the first
+/// setter, so none of the events they cause is saved, and again after the last,
+/// so the events macOS delivers late stay inside it. `now` reads the clock.
+fn run_fit(
+    gate: &Gate,
+    now: impl Fn() -> Instant,
+    moves_frame: bool,
+    set_min_size: impl FnOnce() -> Result<(), CoreError>,
+    set_size: impl FnOnce() -> Result<(), CoreError>,
+    set_position: impl FnOnce() -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+    hush_gate(gate, now(), FIT_QUIET);
+    let result = (|| {
+        set_min_size()?;
+        if moves_frame {
+            set_size()?;
+            set_position()?;
+        }
+        Ok(())
+    })();
+    hush_gate(gate, now(), FIT_QUIET);
+    result
+}
+fn hush_gate(gate: &Gate, now: Instant, span: Duration) {
+    gate.lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .hush(now, span);
 }
 /// What a reconcile does with the window's frame, after applying the pin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -251,6 +326,7 @@ fn fit_main<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     fit: Fit,
     saved: Option<&WindowGeometry>,
+    gate: &Gate,
 ) -> Result<(), CoreError> {
     let Some(frame) = fit_frame(fit, saved) else {
         return Ok(());
@@ -259,11 +335,12 @@ fn fit_main<R: tauri::Runtime>(
         return Ok(());
     }
     match frame {
-        FitFrame::Saved(saved) => fit_window(window, saved, false),
+        FitFrame::Saved(saved) => fit_window(window, saved, false, gate),
         FitFrame::Current { only_if_needed } => fit_window(
             window,
             &geometry(&window.as_ref().window())?,
             only_if_needed,
+            gate,
         ),
     }
 }
@@ -285,8 +362,8 @@ impl NativeWindow {
     ) {
         let service = app.state::<DesktopService>().inner().clone();
         let revision = self.applied_revision.clone();
-        let movement = self.movement.clone();
-        let captured_movement = movement.load(Ordering::Acquire);
+        let native = self.clone();
+        let captured_movement = self.owner_movement.load(Ordering::Acquire);
         tauri::async_runtime::spawn(async move {
             let result =
                 tauri::async_runtime::spawn_blocking(move || service.native_preferences()).await;
@@ -308,8 +385,8 @@ impl NativeWindow {
                             saved = snapshot.global.window;
                         }
                     }
-                    if movement.load(Ordering::Acquire) == captured_movement
-                        && fit_main(&window, fit, saved.as_ref()).is_err()
+                    if !native.owner_moved_since(captured_movement)
+                        && fit_main(&window, fit, saved.as_ref(), &native.gate).is_err()
                     {
                         eprintln!("Ariadne could not fit the native window to its screen.");
                     }
@@ -327,7 +404,12 @@ impl NativeWindow {
     /// is fitted to its screen first, so a slow read never shows it unfitted.
     pub(crate) fn launch<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>) {
         if let Some(window) = app.get_webview_window("main") {
-            if fit_main(&window, Fit::Launch, None).is_err() {
+            // Seed the displays before anything moves the window, so a change
+            // before the owner's first move is noticed.
+            if let Some(display) = display_state(&window.as_ref().window()) {
+                self.lock_gate().monitors(Instant::now(), &display.monitors);
+            }
+            if fit_main(&window, Fit::Launch, None, &self.gate).is_err() {
                 eprintln!("Ariadne could not fit the native window to its screen.");
             }
         }
@@ -336,16 +418,74 @@ impl NativeWindow {
         self.reconcile_then(app, Fit::Launch, Some(Box::new(show)));
     }
 
+    /// Saves only the owner's own moves and resizes: not the app's fits, the
+    /// first show or a display change (see `SaveGate`).
     pub(crate) fn moved<R: tauri::Runtime>(&self, window: &tauri::Window<R>) {
         if self.stopped.load(Ordering::Acquire) || !resting(window) {
             return;
         }
-        self.movement.fetch_add(1, Ordering::AcqRel);
-        let Ok(geometry) = geometry(window) else {
-            return;
-        };
         let service = window.state::<DesktopService>().inner().clone();
-        self.queue_geometry(geometry, service);
+        self.moved_with(
+            Instant::now(),
+            display_state(window),
+            || geometry(window),
+            |geometry| {
+                self.queue_geometry(geometry, service);
+            },
+        );
+    }
+    /// The order of a resting move: the gate admits it, an allowed one fences a
+    /// pending restore, and only then is its save queued.
+    fn moved_with(
+        &self,
+        now: Instant,
+        display: Option<DisplayState>,
+        read_geometry: impl FnOnce() -> Result<WindowGeometry, CoreError>,
+        queue: impl FnOnce(WindowGeometry),
+    ) {
+        if !self.admit_move(now, display) {
+            return;
+        }
+        if let Ok(geometry) = read_geometry() {
+            queue(geometry);
+        }
+    }
+    /// Whether a window event may be saved. An allowed one is the owner's: it
+    /// fences a pending launch restore, before its save is queued.
+    fn admit_move(&self, now: Instant, display: Option<DisplayState>) -> bool {
+        let mut gate = self.lock_gate();
+        let admitted = gate.admit(now, display);
+        if admitted {
+            self.owner_movement.fetch_add(1, Ordering::AcqRel);
+        }
+        admitted
+    }
+    /// Whether an allowed (owner) move happened since `captured` was read.
+    fn owner_moved_since(&self, captured: u64) -> bool {
+        self.owner_movement.load(Ordering::Acquire) != captured
+    }
+    /// Keeps saving quiet until `span` after `now`.
+    pub(crate) fn hush(&self, now: Instant, span: Duration) {
+        hush_gate(&self.gate, now, span);
+    }
+    /// A scale change fired. It is a display change only when the monitors
+    /// changed or the previous monitor is gone: then its events are not saved
+    /// (returns true). An owner drag between a 2x and a 1x display fires it too,
+    /// and is not hushed. Unreadable displays do not hush: `moved` skips those.
+    pub(crate) fn scale_changed<R: tauri::Runtime>(&self, window: &tauri::Window<R>) -> bool {
+        self.display_changed(Instant::now(), display_state(window))
+    }
+    fn display_changed(&self, now: Instant, display: Option<DisplayState>) -> bool {
+        display.is_some_and(|display| self.lock_gate().observe(now, &display))
+    }
+    /// Notes the displays without hushing (the window was just shown).
+    fn refresh_displays(&self, display: Option<DisplayState>) {
+        if let Some(display) = display {
+            self.lock_gate().refresh(&display);
+        }
+    }
+    fn lock_gate(&self) -> std::sync::MutexGuard<'_, SaveGate> {
+        self.gate.lock().unwrap_or_else(|error| error.into_inner())
     }
     pub(crate) fn queue_geometry(
         &self,
