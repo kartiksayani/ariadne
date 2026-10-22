@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Page, ProjectSummary, QueryCursor, SessionSummary, SummaryCounts } from '../../generated/domain/models';
 import type { ProjectListResult, SessionListResult, SessionRef } from '../../generated/core';
+import { changesNothing, sameFailure, sameValue } from '../../data/same';
 import { CoreFailure, ServiceFailure, immutable, type Immutable, type OpenSessions, type RendererService, type SessionStore, type SessionState, type Unsubscribe } from '../../data';
 import { sentRows, waitingRows, type SentRow, type WaitingRow, type WaitingSession } from './rows';
 
@@ -99,6 +100,15 @@ export class WaitingStore {
     this.state = Object.freeze({ ...this.state, ...update });
     this.listeners.forEach(receive => receive());
   }
+  /**
+   * Equality contract (alpha.23 F6): a capture that read the same data publishes nothing. Rows, `sessions`, `counts`,
+   * `unavailableProjects` and each session entry keep their previous object when equal, so an unchanged poll leaves
+   * every reference as it was. The one publish kept unconditionally is the forward of a captured session's change
+   * (`publish({})` in `load`), which AnswerDock and WaitingSync read live child state through.
+   */
+  private publishChanges(update: Partial<WaitingState>): void {
+    if (!changesNothing(this.state, update)) this.publish(update);
+  }
   start(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (this.timer !== null) return this.flight ?? Promise.resolve();
@@ -111,7 +121,7 @@ export class WaitingStore {
   }
   private invalidate = (): void => {
     this.requested = true;
-    if (this.state.counts) this.publish({ status: 'stale' });
+    if (this.state.counts) this.publishChanges({ status: 'stale' });
     this.reconcile();
   };
   private ensureSubscriptions(): Promise<void> {
@@ -142,7 +152,7 @@ export class WaitingStore {
         const capture = await catalogue(this.service, () => this.stopped);
         if (this.stopped) return;
         const projects = new Map(capture.projects.map(project => [project.project_id, project]));
-        const sessions: WaitingSession[] = [];
+        const sessions: WaitingSession[] = [], previous = this.state;
         const capturedStores = new Map<string, SessionStore>();
         let degraded: CoreFailure | ServiceFailure | null = null;
         // Sequential registered reads bound concurrent IO without truncating the catalogue.
@@ -161,19 +171,29 @@ export class WaitingStore {
             if (!state.snapshot) continue;
           }
           capturedStores.set(JSON.stringify([summary.project_id, summary.session_id]), store);
-          sessions.push(Object.freeze({ project: immutable(project), summary: immutable(summary), session: state.snapshot.session }));
+          const earlier = previous.sessions.find(entry => entry.session.project_id === summary.project_id && entry.session.id === summary.session_id);
+          sessions.push(earlier && earlier.session === state.snapshot.session && sameValue(earlier.project, project) && sameValue(earlier.summary, summary)
+            ? earlier : Object.freeze({ project: immutable(project), summary: immutable(summary), session: state.snapshot.session }));
         }
-        const waiting = waitingRows(sessions), sent = sentRows(sessions);
+        const unchanged = sessions.length === previous.sessions.length && sessions.every((entry, index) => entry === previous.sessions[index]);
+        let waiting = unchanged ? previous.waiting : waitingRows(sessions), sent = unchanged ? previous.sent : sentRows(sessions);
+        if (sameValue(waiting, previous.waiting)) waiting = previous.waiting;
+        if (sameValue(sent, previous.sent)) sent = previous.sent;
         this.sessionSubscriptions.forEach(unsubscribe => unsubscribe());
         this.capturedStores = capturedStores;
+        // Kept on purpose: a captured session's change is forwarded as a publish, because AnswerDock and WaitingSync read
+        // live child state (draft receipts, presence, errors) through it. It is rare now that an unchanged session poll publishes nothing.
         this.sessionSubscriptions = [...capturedStores.values()].map(store => store.subscribe(() => this.publish({})));
-        this.publish({ sessions: Object.freeze(sessions), waiting, sent, counts: immutable(capture.result.counts),
-          unavailableProjects: immutable(capture.projects.filter(project => project.availability === 'unavailable')),
+        const unavailable = capture.projects.filter(project => project.availability === 'unavailable');
+        this.publishChanges({ sessions: unchanged ? previous.sessions : Object.freeze(sessions), waiting, sent,
+          counts: previous.counts && sameValue(previous.counts, capture.result.counts) ? previous.counts : immutable(capture.result.counts),
+          unavailableProjects: sameValue(previous.unavailableProjects, unavailable) ? previous.unavailableProjects : immutable(unavailable),
           status: this.requested || sessions.some(session => this.opened.open({ project_id: session.session.project_id,
-            session_id: session.session.id }).getSnapshot().status !== 'ready') || degraded ? 'stale' : 'ready', error: degraded });
+            session_id: session.session.id }).getSnapshot().status !== 'ready') || degraded ? 'stale' : 'ready',
+          error: sameFailure(previous.error, degraded) ? previous.error : degraded });
       } catch (error: unknown) {
         const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('invalid_response');
-        this.publish({ status: this.state.counts ? 'stale' : 'unavailable', error: failure });
+        this.publishChanges({ status: this.state.counts ? 'stale' : 'unavailable', error: sameFailure(this.state.error, failure) ? this.state.error : failure });
       }
     }
   }

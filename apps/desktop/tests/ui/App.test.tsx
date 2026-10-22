@@ -251,7 +251,7 @@ describe('ordinary desktop composition', () => {
     expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeTruthy();
   });
 
-  it('clears a route loading refusal on a same-revision ready capture', async () => {
+  it('clears a route loading refusal on a newer ready capture', async () => {
     const { transport } = setup();
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
@@ -272,10 +272,13 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByText(loading)).toBeTruthy();
     expect(store.getSnapshot().status).toBe('ready');
     refresh.mockRestore();
+    // A read that finds nothing new is not a new capture (the store keeps the snapshot), so the refusal waits for one that does.
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot().snapshot).toBe(before.snapshot);
+    transport.sessions.get(route.session_id)!.revision++;
     await act(async () => { await store.refresh(); });
     expect(store.getSnapshot().status).toBe('ready');
     expect(store.getSnapshot().snapshot).not.toBe(before.snapshot);
-    expect(store.getSnapshot().snapshot!.session).toBe(before.snapshot!.session);
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
     expect(screen.queryByText(loading)).toBeNull();
   });
