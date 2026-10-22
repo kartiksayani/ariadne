@@ -7,7 +7,7 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 // banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute } from '../../generated/core';
@@ -21,16 +21,15 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, stripAnchorFor, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
+import { collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, stripAnchorFor, treeModel, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
 import { Keycap } from '../parts/parts';
 import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
-import { HideIcon } from '../shared/HideIcon';
-import { ackHoldFor, ackRowLabel, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
-import { STATUS } from '../shared/status';
-import { ItemRow, type RowAction } from './ItemRow';
+import { ackHoldFor, ackTarget, useAckHeld } from '../shared/ack';
+import { useLatest } from '../shared/latest';
+import { ItemRow, type RowCommand } from './ItemRow';
 import { TopicRow, type BandSlots, type TopicAction } from './TopicRow';
 import { ContinueButton } from './band/ContinueButton';
 import { FocusButton } from './band/FocusButton';
@@ -129,6 +128,8 @@ const FOLDS_KEPT = 256;
 const RECENT_WAIT_MS = 1000;
 // A row ending at the sticky edge can peek out by a sub-pixel without being the reading row.
 const READING_EDGE_CLEARANCE = 1;
+const NO_ROWS: readonly Row[] = Object.freeze([]);
+const NO_MATCHES: readonly MapMatch[] = Object.freeze([]);
 /** A saved reading offset, or the initial selection centred while the view loads. */
 interface Anchor { readonly key: string; readonly offset: number | null }
 const SKELETON = [
@@ -257,14 +258,17 @@ export function TreeView(props: TreeViewProps) {
     else if (place.reason === 'archived') { if (!lifecycle.busy) lifecycle.undo(); }
     else binView.reveal(route, place.itemId ? place.topicId : null);
   };
+  // The last rows drawn: a rebuilt row that draws the same is that row again, so its memoised ItemRow does not redraw (F6c).
+  const drawnRows = useRef<readonly Row[]>(NO_ROWS);
   const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
-    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places }) : null,
+    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places, previous: drawnRows.current }) : null,
   [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
-  const rows = useMemo(() => model?.rows ?? [], [model]);
+  const rows = model?.rows ?? NO_ROWS;
+  if (model) drawnRows.current = rows;
   // Every mounted item row would draw "✓ Acked · Undo" for a held Ack. Say so to the hold: a row folded away, filtered out or
   // gone with the Graph leaves the Undo to a notice (D11).
   const drawnItems = useMemo(() => graph ? '' : rows.flatMap(row => row.kind === 'item' ? [row.key] : []).join('\n'), [rows, graph]);
@@ -285,7 +289,8 @@ export function TreeView(props: TreeViewProps) {
 
   // ------------------------------------------------------------ search in place
   // The count runs over the matches on the rows the owner can see, field by field, in Map order.
-  const matches = useMemo(() => terms.length ? rows.flatMap(row => row.kind === 'item' ? row.matches.map(field => ({ id: row.key, field })) : []) : [],
+  // With no search the list is one shared empty list, so the search context stays the same object (F6d).
+  const matches = useMemo(() => terms.length ? rows.flatMap(row => row.kind === 'item' ? row.matches.map(field => ({ id: row.key, field })) : []) : NO_MATCHES,
     [rows, terms]);
   const pinnedIndex = searchCurrent ? matches.findIndex(match => match.id === searchCurrent.id && match.field === searchCurrent.field) : -1;
   const matchIndex = Math.max(0, pinnedIndex), currentMatch = matches[matchIndex] ?? null;
@@ -1210,39 +1215,37 @@ export function TreeView(props: TreeViewProps) {
 
   // ------------------------------------------------------------ rows
   const running = bar?.running ?? false;
-  const itemActions = (row: ItemRowModel): RowAction[] => {
-    const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
-    const ackTo = row.ack;
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), label: ackRowLabel(ackTo), persistent: true, disabled: viewBusy || actionState.writing || !!actionState.pending || ackHeld.has(item.id), run: () => { runAck(item.id); } });
-    const act = (intent: RowIntent) => () => {
-      ++request.current; centered.current = true; settled.current = true; setAnchor(null);
-      scrollRequested.current = null;
-      onAct(intent, target, result => { clickedReveal.current = result; });
-    };
-    // The hover bar always has the same six slots in SPEC 6.2's order. A slot that does not apply is greyed and says why;
-    // slots 1-4 are all greyed when the agent is not running or the session is archived (D4).
-    const statusLabel = row.later ? 'Later' : STATUS[visual(row.status)].label;
-    const open = item.status === 'open', isClosed = closed(item.status);
-    const stopped = archivedMode || session?.archived_at ? 'archived' : running && session?.state === 'active' ? null : 'the agent is not running';
-    // A message already on its way to the agent holds the row's other actions, as before.
-    const inFlight = !!row.delivery && !row.delivery.failed && !isClosed;
-    const slot = (action: string, applies: boolean, offer: { icon: string; title: string; run: () => void }): RowAction =>
-      stopped ? { icon: offer.icon, title: `${action}: ${stopped}`, disabled: true, run: () => {} }
-        : !applies ? { icon: offer.icon, title: `${action}: not for ${statusLabel} items`, disabled: true, run: () => {} }
-        : inFlight ? { icon: offer.icon, title: `${action}: a message is on its way`, disabled: true, run: () => {} } : offer;
-    const reply = item.status === 'waiting_on_me' ? { title: 'Answer (r)', intent: 'reply' as const } : isClosed ? { title: 'Follow up (r)', intent: 'followup' as const }
-      : open ? { title: 'Reply (r)', intent: 'reply' as const } : { title: 'Add a note (r)', intent: 'note' as const };
-    list.push(
-      slot(reply.title.replace(/ \(r\)$/, ''), true, { icon: 'ph ph-chat-text', title: reply.title, run: act(reply.intent) }),
-      isClosed ? slot('Back to Open', item.status !== 'replaced', { icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') })
-        : slot('Bring it up', open, { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') }),
-      row.later ? slot('Unpark', true, { icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') })
-        : slot('Later', open, { icon: 'ph ph-clock', title: 'Later (z)', run: act('later') }),
-      slot('Drop', open, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: act('drop') }));
-    list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (h)' : 'Hide (h)', run: () => hideItem(row) });
-    list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
-    return list;
-  };
+  // The agent's slots on every row grey for this reason (D4); each row builds its own buttons (ItemRow `rowActions`).
+  const stopped = archivedMode || session?.archived_at ? 'archived' : running && session?.state === 'active' ? null : 'the agent is not running';
+  const ackBusy = viewBusy || actionState.writing || !!actionState.pending;
+  // One stable dispatcher for every row's buttons (F6d). It acts on the row as the Map shows it when pressed, never on a row
+  // object a memoised row kept, so Hide then Unhide on the same row toggles each way.
+  const runRow = useLatest((command: RowCommand, id: string) => {
+    if (command === 'ack') { runAck(id); return; }
+    const target = { ...route, item_id: id };
+    if (command === 'remove') { onRemove({ kind: 'item', item: target }); return; }
+    if (command === 'hide') {
+      const row = latest.current.rows.find(value => value.kind === 'item' && value.key === id);
+      if (row?.kind === 'item') hideItem(row);
+      return;
+    }
+    ++request.current; centered.current = true; settled.current = true; setAnchor(null);
+    scrollRequested.current = null;
+    onAct(command, target, result => { clickedReveal.current = result; });
+  });
+  // The rows' other callbacks, stable for the same reason; each calls this render's code.
+  const selectRow = useLatest(activate), toggleRow = useLatest(toggleItem), unfoldRow = useLatest(unfold);
+  const undoAck = useLatest((id: string) => { hold.undo(id); });
+  const peekHover = useLatest((id: string, event: MouseEvent<HTMLDivElement>) => {
+    const handlers = peek?.chipProps({ ...route, item_id: id });
+    if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
+  });
+  const peekLeave = useLatest(() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.());
+  const openReference = useLatest((id: string) => { select(id, false); });
+  const itemRefs = useMemo(() => ({ route: (id: string) => ({ ...route, item_id: id }), lookup: (id: string) => {
+    const item = session?.items[id];
+    return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
+  }, onOpenItem: openReference }), [route, session, names, openReference]);
   // The archive view's only hover action is Restore; a live topic's actions are the band's buttons and its "…" menu.
   const topicActions = (row: Extract<Row, { kind: 'topic' }>): TopicAction[] => archivedMode
     ? [{ icon: 'ph ph-arrow-counter-clockwise', label: 'Restore', title: 'Restore topic', run: () => lifecycle.restore(row.topic.id), archive: true }] : [];
@@ -1274,10 +1277,8 @@ export function TreeView(props: TreeViewProps) {
         remove={{ run: () => onRemove({ kind: 'topic', session: route, topic_id: id }), items: activeItems(session).filter(item => item.topic_id === id).length }} />,
     };
   };
-  const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={{ route: id => ({ ...route, item_id: id }), lookup: id => {
-    const item = session?.items[id];
-    return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
-  }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
+  const closedReason = session ? sessionAnswerBlocked(session) : undefined;
+  const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={itemRefs}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
     {sections.map(section => {
       if (!section.topic) return <div key={section.place.key} className="tree-topic-group tree-topic-place" role="presentation">
         <Strip variant="row" row={section.place} focused={focusKey === section.place.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
@@ -1292,17 +1293,14 @@ export function TreeView(props: TreeViewProps) {
         />
       {items.map(row => row.kind === 'strip'
         ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
-        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={closedReason}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
-        actions={itemActions(row)}
-        unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        acked={ackHeld.has(row.key)} onUndoAck={id => { hold.undo(id); }}
-        onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
-          if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
-        }}
-        onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
-        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={activate} onToggle={toggleItem} />)}
+        stopped={stopped} ackDisabled={!!row.ack && (ackBusy || ackHeld.has(row.key))} run={runRow}
+        current={currentMatch?.id === row.key ? currentMatch.field : null} terms={row.matches.length ? terms : undefined}
+        unfolded={isUnfolded(row.key)} onUnfold={unfoldRow}
+        acked={ackHeld.has(row.key)} onUndoAck={undoAck} onPeekHover={peekHover} onPeekLeave={peekLeave}
+        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={selectRow} onToggle={toggleRow} />)}
     </div>; })}
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 

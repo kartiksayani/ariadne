@@ -5,7 +5,8 @@ import { useState } from 'react';
 import { DesktopApp } from '../../../apps/desktop/src/App';
 import { createDesktopService } from '../../../apps/desktop/src/data/service';
 import { AppTransport, route } from '../../../apps/desktop/tests/ui/app/transport';
-import { ItemRow, type RowAction } from '../../../apps/desktop/src/ui/tree/ItemRow';
+import { ItemRow, type RowCommand } from '../../../apps/desktop/src/ui/tree/ItemRow';
+import { ackTitle } from '../../../apps/desktop/src/ui/shared/ack';
 import { immutable } from '../../../apps/desktop/src/data';
 import type { ItemRow as Row } from '../../../apps/desktop/src/ui/tree/model';
 import { Shell } from '../../../apps/desktop/src/ui/shell/Shell';
@@ -20,7 +21,7 @@ import { toasts } from '../../../apps/desktop/src/ui/shell/toast';
 // Item 1 carries a long finding (it must fold to three lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor({ gettingAround = false, changes = false, card = false, still = false, filter = false, continuable = false } = {}) {
+  constructor({ gettingAround = false, changes = false, card = false, still = false, filter = false, continuable = false, many = false } = {}) {
     super();
     const session = this.sessions.get(route.session_id)!;
     // A topic that began here, not one continued from another session: its band draws Continue elsewhere.
@@ -46,6 +47,8 @@ class TreeLayoutTransport extends AppTransport {
     items['1']!.outcome = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
     items['5']!.outcome = 'A decision paragraph that is long enough to wrap over several lines in the tree column, so that any change in the width of its '
       + 'column on hover would move words from one line to the next and show up as a different line count.';
+    // A big session (map-idle.spec.mts): 2,000 more one-line results after item 18, in the same topic, about 2,020 rows.
+    if (many) for (let n = 100; n < 2100; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Result ${n}`, outcome: 'A short result.' };
     if (gettingAround) {
       items['1']!.question = 'Harbor check'; items['1']!.short = 'Harbor check';
       const names = ['Review scope', 'Rehearsal notes', 'Evidence check', 'Owner handoff', 'Final check'];
@@ -168,14 +171,16 @@ class TreeLayoutTransport extends AppTransport {
     const binding = session.bindings[session.active_binding_id!]!;
     if (change === 'agent-stops') { binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; }
     // The host's own report outranks the stored state, so the drop and the return are reported as the host would.
-    const reported = (connection_state: 'connected' | 'reconnecting') => {
-      const observation = { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
+    const reported = (connection_state: 'connected' | 'reconnecting', instance_id: string = crypto.randomUUID()) => {
+      const observation = { instance_id, generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
         source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never;
       this.hostReports.set(binding.id, observation);
       this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation });
     };
     if (change === 'connection-drops') { binding.connection_state = 'reconnecting'; reported('reconnecting'); return; }
     if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; reported('connected'); }
+    // The host's heartbeat while the agent is quiet: the same running instance, seen again now. Nothing on the Map changes.
+    if (change === 'heartbeat') { reported('connected', '00000000-0000-4000-8000-0000000000ab'); return; }
     if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
     if (change === 'read-returns') this.failReads = false;
     // A hint arrives and the read it starts takes 6 s (a row click and Send must not wait for it); 'read-release' ends the hold.
@@ -226,25 +231,21 @@ function ActionGridFixture() {
   const [selected, setSelected] = useState(false), [clicked, setClicked] = useState('');
   const item = new TreeLayoutTransport().sessions.get(route.session_id)!.items['1']!;
   item.status = 'open';
-  const row: Row = { kind: 'item', key: item.id, item: immutable(item), status: 'open', ack: null, depth: 1,
+  const row: Row = { kind: 'item', key: item.id, item: immutable(item), status: 'open', ack: 'in_progress', depth: 1,
     hasKids: false, expanded: false, context: false, guides: [], later: false, hidden: false,
     segments: [{ text: item.question, hit: false }], matches: [], replacedBy: null, relatedCount: 0,
     collapsed: null, delivery: null, badge: 'Open', branch: 0, boxes: [] };
-  // The hover bar's six slots in SPEC 6.2's order, then Ack in its own persistent slot.
-  const definitions = [
-    { icon: 'ph ph-check', title: 'Ack → In progress', label: '→ In progress', persistent: true },
-    { icon: 'ph ph-chat-text', title: 'Reply (r)' }, { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)' },
-    { icon: 'ph ph-clock', title: 'Later (z)' }, { icon: 'ph ph-x-circle', title: 'Drop (d)' },
-    { icon: 'ph ph-eye-slash', title: 'Hide (h)' }, { icon: 'ph ph-trash', title: 'Remove (⌫)' },
-  ];
-  const actions: RowAction[] = definitions.map(action => ({ ...action, run: () => setClicked(action.title) }));
-  const props = { focused: false, highlight: null, note: null, answer: null, unfolded: false, onUnfold: () => {},
-    remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onSelect: () => setSelected(true), onToggle: () => {}, onHover: () => {} };
+  // The hover bar's six slots in SPEC 6.2's order, then Ack in its own persistent slot: an open item with an Ack to In progress.
+  const titles: Record<RowCommand, string> = { ack: ackTitle('in_progress', 'open'), reply: 'Reply (r)', bring: 'Bring it up (b)', later: 'Later (z)', drop: 'Drop (d)',
+    hide: 'Hide (h)', remove: 'Remove (⌫)', followup: 'Follow up (r)', note: 'Add a note (r)', reopen: 'Back to Open (o)' };
+  const props = { focused: false, note: null, unfolded: false, onUnfold: () => {}, stopped: null, ackDisabled: false,
+    run: (command: RowCommand) => setClicked(titles[command]),
+    remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onSelect: () => setSelected(true), onToggle: () => {} };
   return <>
     {/* 560px is the desktop's minimum centre column, including when both side panels are open. */}
     <div className="tree-column" style={{ width: 'min(560px, 100%)', containerName: 'tree-map', containerType: 'inline-size' }}>
-      <ItemRow {...props} row={row} selected={selected} actions={actions} />
-      <ItemRow {...props} row={{ ...row, key: '2', item: immutable({ ...item, id: '2', ordinal: 2 }) }} selected={false} actions={[]} />
+      <ItemRow {...props} row={row} selected={selected} />
+      <ItemRow {...props} row={{ ...row, key: '2', ack: null, item: immutable({ ...item, id: '2', ordinal: 2 }) }} selected={false} />
     </div>
     <output aria-label="Last action">{clicked}</output>
   </>;
@@ -270,7 +271,7 @@ function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
 }
 
 const query = new URLSearchParams(window.location.search);
-const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter'), continuable: query.has('continuable') });
+const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter'), continuable: query.has('continuable'), many: query.has('many') });
 // The specs drive agent writes and seen marks through this handle.
 (window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
 // The notice stack and the toast, which the Map must never move for (notices-still.spec.mts).

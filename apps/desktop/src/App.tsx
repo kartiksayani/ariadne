@@ -49,6 +49,7 @@ import { SessionNotice } from './components/edge-states/EdgeState';
 import { DraftConflictNotices } from './components/edge-states/DraftConflictNotices';
 import { hiddenItems, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
+import { useLatest } from './ui/shared/latest';
 import type { MapSearchStatus } from './ui/tree/mapSearch';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
@@ -661,6 +662,27 @@ function Workspace({ application }: { application: Application }) {
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
+  // The Map's callbacks keep one identity for the life of the workspace (alpha.23 F6d); each runs this render's code when called.
+  const map = {
+    closeFilter: useLatest(() => { setFilterOpen(false); }),
+    dismissBanner: useLatest(() => { setBannerDismissed(currentReveal); }),
+    selected: useLatest(selected),
+    openTopic: useLatest(openTopic),
+    hid: useLatest((itemId: string) => { if (route) announceHid({ ...route, item_id: itemId }); }),
+    openItem: useLatest((itemId: string) => { if (route) revealItem({ ...route, item_id: itemId }); }),
+    dismissReveal: useLatest(() => { setDismissedReveal(currentReveal); }),
+    resume: useLatest(() => { setDismissedReveal(currentReveal); closeDetail(); }),
+    act: useLatest((intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => {
+      if (intent === 'bring') void queueBring(target, onReveal);
+      else if (intent === 'hide') toggleHidden(target);
+      else if (intent === 'later') toggleLater(target, target.item_id);
+      else focusOwner(target, intent, undefined, onReveal);
+    }),
+    clearSearch: useLatest(clearSearch),
+    clearFilters: useLatest(clearFilters),
+    showArchive: useLatest(() => { showView('archive'); }),
+    remove: useLatest((target: TreeRemoveTarget) => { askRemove(target); }),
+  };
   return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} navigation={navigation} onGoTo={target => revealItem(target, false)} onOpenDetails={target => revealItem(target)} onAgentNotRunning={onAgentNotRunning}
     answerTarget={conversationOpen && conversation && route ? { ...route, item_id: conversation.itemId } : undefined}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
@@ -742,24 +764,17 @@ function Workspace({ application }: { application: Application }) {
         focusRequest={ownerFocus?.route === key && ownerFocus.itemId === conversation.itemId ? ownerFocus : undefined}
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
-      renderSession={opened => <SessionCenter filterOpen={filterOpen} onCloseFilter={() => setFilterOpen(false)} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
-        onDismissBanner={() => setBannerDismissed(currentReveal)} bannerDismissed={treeReveal !== null && treeReveal === bannerDismissed}
+      renderSession={opened => <SessionCenter filterOpen={filterOpen} onCloseFilter={map.closeFilter} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+        onDismissBanner={map.dismissBanner} bannerDismissed={treeReveal !== null && treeReveal === bannerDismissed}
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && (!!selectedId || topicMode)}
-        onSelected={selected} onOpenTopic={openTopic} onHid={itemId => { if (route) announceHid({ ...route, item_id: itemId }); }}
-        onOpenItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }}
-        onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
-        onAct={(intent, target, onReveal) => {
-          if (intent === 'bring') void queueBring(target, onReveal);
-          else if (intent === 'hide') toggleHidden(target);
-          else if (intent === 'later') toggleLater(target, target.item_id);
-          else focusOwner(target, intent, undefined, onReveal);
-        }}
+        onSelected={map.selected} onOpenTopic={map.openTopic} onHid={map.hid} onOpenItem={map.openItem}
+        onDismissReveal={map.dismissReveal} onResume={map.resume} onAct={map.act}
         onSearchStatus={setSearchStatus}
-        onClearSearch={clearSearch}
-        onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
-        onRemove={target => { askRemove(target); }} />} />
+        onClearSearch={map.clearSearch}
+        onClearFilters={map.clearFilters} onShowArchive={map.showArchive}
+        onRemove={map.remove} />} />
     {asking && <RemoveDialog review={asking.review} family={asking.family} onCancel={() => setAsking(null)}
       onConfirm={() => removeTarget(asking.review.target, asking.review.subject, asking.review.pinned)}
       onArchiveInstead={asking.review.target.kind === 'topic' ? (() => { const target = asking.review.target as Extract<RemoveTarget, { kind: 'topic' }>;
