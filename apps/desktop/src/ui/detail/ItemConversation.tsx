@@ -483,7 +483,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   // The Send button and the keys follow one rule: nothing goes out while this says no.
   // An item (or one above it, or its topic) in a pending removal's window sends nothing until Undo (alpha.21 E28).
   const removing = !!session && pendingRemoval.item({ project_id: session.project_id, session_id: session.id }, session, itemId);
-  const sendOff = (slot: Words) => removing || !submit.ready || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
+  // The words Send needs a copy of the session, not a fresh one (`sendable`): a refresh in flight never blocks it. A Send already
+  // waiting for that refresh holds the box (`waiting`).
+  const sendOff = (slot: Words) => removing || !submit.sendable || !!slot.waiting || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
   const wordsKey = (slot: Words) => (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.stopPropagation(); event.preventDefault(); if (!sendOff(slot)) sendWords(slot); }

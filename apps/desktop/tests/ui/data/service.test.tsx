@@ -384,6 +384,54 @@ describe('selectors and registered reveal', () => {
     stop(); transport.emit('ariadne://route', { ...route, item_id: null });
     expect(received).toHaveBeenCalledTimes(1); expect(failed).not.toHaveBeenCalled();
   });
+  it('opens an item from the loaded copy without a read, ready or stale, and refuses anything else', async () => {
+    const { transport, sessions } = setup(); const routes = new RegisteredRoutes(createDesktopService(transport), sessions);
+    const store = sessions.open(route);
+    // No snapshot yet: the caller takes the read path.
+    expect(routes.revealLoaded(itemRoute, store)).toBeNull();
+    transport.script.push(loaded()); await store.refresh();
+    const ready = routes.revealLoaded(itemRoute, store);
+    expect(ready).toMatchObject({ kind: 'item', route: itemRoute, store, temporaryExpandedItemIds: ['1'] });
+    // A hint that only marked the copy stale does not block it, and a read in flight is not waited for.
+    const pending = deferred<QueryEnvelope>(); transport.script.push(pending.promise);
+    transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: 22 });
+    expect(store.getSnapshot().status).toBe('stale');
+    expect(routes.revealLoaded(itemRoute, store)).toMatchObject({ kind: 'item', route: itemRoute });
+    expect(transport.calls.filter(call => (call.request as { request?: { command?: string } }).request?.command === 'reveal_item')).toEqual([]);
+    // An item the copy lacks, or has removed, takes the read path.
+    expect(routes.revealLoaded({ ...itemRoute, item_id: '99' }, store)).toBeNull();
+    const removed = snapshot(22); removed.session.items['1.1']!.removed_at = removed.session.updated_at;
+    pending.resolve(success({ kind: 'session_get', data: removed })); await store.refresh();
+    expect(routes.revealLoaded(itemRoute, store)).toBeNull();
+    // A store holding an error refuses, even beside a good copy.
+    transport.script.push({ api_version: 1, ok: false, error: coreError }); await store.refresh();
+    expect(store.getSnapshot().error).not.toBeNull();
+    expect(routes.revealLoaded({ ...itemRoute, item_id: '1' }, store)).toBeNull();
+  });
+  it('supersedes an older reveal read synchronously when it opens from the loaded copy', async () => {
+    const { transport, service, sessions } = setup(); const routes = new RegisteredRoutes(service, sessions);
+    const store = sessions.open(route); transport.script.push(loaded()); await store.refresh();
+    const old = deferred<QueryEnvelope>(); transport.script.push(old.promise);
+    const first = routes.revealItem({ ...itemRoute, item_id: '2' });
+    expect(routes.revealLoaded(itemRoute, store)).toMatchObject({ kind: 'item', route: itemRoute });
+    old.resolve(success({ kind: 'reveal_item', data: { ...itemRoute, item_id: '2' } }));
+    expect(await first).toBeNull();
+  });
+  it('leaves a reveal still reading alone when a loaded reveal is refused', async () => {
+    const { transport, service, sessions } = setup(); const routes = new RegisteredRoutes(service, sessions);
+    const store = sessions.open(route); transport.script.push(loaded()); await store.refresh();
+    const old = deferred<QueryEnvelope>(); transport.script.push(old.promise);
+    const first = routes.revealItem({ ...itemRoute, item_id: '2' });
+    // The copy lacks the item: the click takes the read path, and the link reveal still opens.
+    expect(routes.revealLoaded({ ...itemRoute, item_id: '99' }, store)).toBeNull();
+    // A store holding an error refuses too.
+    transport.script.push({ api_version: 1, ok: false, error: coreError }); await store.refresh();
+    expect(store.getSnapshot().error).not.toBeNull();
+    expect(routes.revealLoaded({ ...itemRoute, item_id: '2' }, store)).toBeNull();
+    transport.script.push(loaded());
+    old.resolve(success({ kind: 'reveal_item', data: { ...itemRoute, item_id: '2' } }));
+    expect(await first).toMatchObject({ kind: 'item', route: { item_id: '2' } });
+  });
   it('preserves inaccessible session failures and handles a missing item after a successful route read', async () => {
     const { transport, service, sessions } = setup(); const routes = new RegisteredRoutes(service, sessions);
     transport.script.push({ api_version: 1, ok: false, error: { ...coreError, code: 'not_found' } },

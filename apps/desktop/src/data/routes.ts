@@ -51,6 +51,23 @@ export class RegisteredRoutes {
     return Object.freeze({ kind: 'item', route: Object.freeze({ ...registered }), store,
       temporaryExpandedItemIds: revealAncestors(state.snapshot.session, registered) });
   }
+  /**
+   * Opens an item from the copy of the session already on screen, without a read. A refresh in flight (or a hint that only
+   * marked the copy stale) never blocks it: reveal_item is a pure lookup, so the loaded copy answers the same. It bumps the
+   * request synchronously when it returns a reveal, so the latest click wins. Returns null, and the caller takes the read path,
+   * unless the store has a snapshot with no error, is ready or stale, and holds the item, not removed. A null return leaves
+   * the request alone: a refused click must not cancel a reveal still in flight.
+   */
+  revealLoaded(route: ItemRoute, store: SessionStore): RevealedItem | null {
+    const state = store.getSnapshot();
+    if (!state.snapshot || state.error || (state.status !== 'ready' && state.status !== 'stale')) return null;
+    const session = state.snapshot.session;
+    if (state.route.project_id !== route.project_id || state.route.session_id !== route.session_id) return null;
+    if (!session.items[route.item_id] || itemRemoved(session, route.item_id)) return null;
+    ++this.request;
+    return Object.freeze({ kind: 'item', route: Object.freeze({ ...route }), store,
+      temporaryExpandedItemIds: revealAncestors(session, route) });
+  }
   async subscribe(receive: (route: OpenRoute, reveal: RevealedItem | null) => void,
     failed: (error: CoreFailure | ServiceFailure) => void): Promise<Unsubscribe> {
     let closed = false;

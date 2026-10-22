@@ -111,6 +111,24 @@ describe('composed item navigation', () => {
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     expect(document.activeElement).toBe(otherControl);
   });
+  it('opens a clicked row while a refresh is held, then drops the selection when the read finds the item removed', async () => {
+    const transport = await setup(); await openSession();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    const session = transport.sessions.get(route.session_id)!; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await click(treeRow('3'));
+    await waitFor(() => screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="3"]' }));
+    expect(transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+    session.items['3']!.removed_at = session.updated_at;
+    await act(async () => { release(); });
+    await waitFor(() => expect(document.querySelector('[data-detail-item-id="3"]')).toBeNull());
+  });
   it('marks current details as read and leaves changes unseen while the pane is closed', async () => {
     const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
     const transport = await setup(); await openSession();
