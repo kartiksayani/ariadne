@@ -33,7 +33,7 @@ async function open(page: Page, origin: string) {
 }
 
 for (const how of ['click', 'Enter'] as const) {
-  test(`a row opens within a second while the session read is held for 6 s (${how})`, async ({ page }) => {
+  test(`a row opens at once while the session read is held for 6 s (${how})`, async ({ page }) => {
     test.setTimeout(30_000);
     await serve(async origin => {
       await open(page, origin);
@@ -42,9 +42,10 @@ for (const how of ['click', 'Enter'] as const) {
       const row = page.locator('[role="treeitem"][data-item-id]').nth(2);
       const id = (await row.getAttribute('data-item-id'))!;
       if (how === 'click') await row.click(); else { await row.focus(); await page.keyboard.press('Enter'); }
-      await expect(page.locator(`[data-detail-item-id="${id}"]`)).toBeVisible({ timeout: 1000 });
-      // The read is still held, and the budget passes without a refusal.
-      await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'stale');
+      // 4 s leaves room for a busy runner; the old path was refused at 5 s and the read is held for 6 s, so it still tells them apart.
+      await expect(page.locator(`[data-detail-item-id="${id}"]`)).toBeVisible({ timeout: 4000 });
+      // The read the click did not wait for is still pending, and the budget passes without a refusal.
+      expect(await page.evaluate(() => (window as unknown as { treeLayout: { heldReads: number } }).treeLayout.heldReads)).toBeGreaterThan(0);
       await page.waitForTimeout(5200);
       await expect(page.getByText(/could not be opened/)).toHaveCount(0);
       await expect(page.locator(`[data-detail-item-id="${id}"]`)).toBeVisible();

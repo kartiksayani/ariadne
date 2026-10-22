@@ -417,6 +417,21 @@ describe('selectors and registered reveal', () => {
     old.resolve(success({ kind: 'reveal_item', data: { ...itemRoute, item_id: '2' } }));
     expect(await first).toBeNull();
   });
+  it('leaves a reveal still reading alone when a loaded reveal is refused', async () => {
+    const { transport, service, sessions } = setup(); const routes = new RegisteredRoutes(service, sessions);
+    const store = sessions.open(route); transport.script.push(loaded()); await store.refresh();
+    const old = deferred<QueryEnvelope>(); transport.script.push(old.promise);
+    const first = routes.revealItem({ ...itemRoute, item_id: '2' });
+    // The copy lacks the item: the click takes the read path, and the link reveal still opens.
+    expect(routes.revealLoaded({ ...itemRoute, item_id: '99' }, store)).toBeNull();
+    // A store holding an error refuses too.
+    transport.script.push({ api_version: 1, ok: false, error: coreError }); await store.refresh();
+    expect(store.getSnapshot().error).not.toBeNull();
+    expect(routes.revealLoaded({ ...itemRoute, item_id: '2' }, store)).toBeNull();
+    transport.script.push(loaded());
+    old.resolve(success({ kind: 'reveal_item', data: { ...itemRoute, item_id: '2' } }));
+    expect(await first).toMatchObject({ kind: 'item', route: { item_id: '2' } });
+  });
   it('preserves inaccessible session failures and handles a missing item after a successful route read', async () => {
     const { transport, service, sessions } = setup(); const routes = new RegisteredRoutes(service, sessions);
     transport.script.push({ api_version: 1, ok: false, error: { ...coreError, code: 'not_found' } },
