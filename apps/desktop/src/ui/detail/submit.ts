@@ -30,6 +30,8 @@ export interface Words {
   readonly changed: boolean;
   /** Where the words came from, for the composer's chip: back after a restart, or taken back from the queue to edit. */
   readonly origin?: DraftEntry['origin'];
+  /** A Send is waiting for a session refresh to land: the box is read-only (not disabled) and Send shows busy. */
+  readonly waiting?: boolean;
 }
 /** An intent's own draft, or one specific draft of the owner's words. */
 export type DraftTarget = DetailIntent | Words;
@@ -37,8 +39,15 @@ export type DraftTarget = DetailIntent | Words;
 export interface DetailSubmit {
   /** Drafts are loaded and the session is ready, so edits and sends can start. */
   readonly ready: boolean;
+  /**
+   * The owner's words can be sent: drafts are loaded and the session has a copy with no error, ready or only marked stale by a
+   * hint (a refresh in flight must not block Send). For the words Send only; `ready` still gates bring, drop-off and answers.
+   */
+  readonly sendable: boolean;
   /** The draft is locked while its operation is saving or awaits a retry. */
   readonly locked: (target: DraftTarget) => boolean;
+  /** A Send of these words is waiting for a refresh (the box is read-only, Send is busy). */
+  readonly waiting: (target: DraftTarget) => boolean;
   readonly edit: (target: DraftTarget, text: string) => void;
   /** The item or its binding changed since the saved draft was written; it must be reviewed before sending. */
   readonly changed: (target: DraftTarget) => boolean;
@@ -64,15 +73,34 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   const [sendError, setSendError] = useState<string | null>(null);
   const [reopening, setReopening] = useState(false);
   const ready = state.ready && current.status === 'ready' && !current.error && !!session;
+  const sendable = state.ready && (current.status === 'ready' || current.status === 'stale') && !current.error && !!session;
   const request = useRef<{ cancelled: boolean } | null>(null);
+  // Sends of words that wait for a refresh, one per draft (or per box before its first keystroke); see `send`.
+  const waits = useRef(new Map<string, { cancelled: boolean }>());
+  const [waiting, setWaiting] = useState<ReadonlySet<string>>(() => new Set());
+  // The "still loading" refusal after a wait that found no usable copy stays until the owner's next send or review.
+  const keptError = useRef(false);
+  const endWait = (key: string, wait: { cancelled: boolean }) => {
+    if (waits.current.get(key) !== wait) return;
+    waits.current.delete(key);
+    setWaiting(previous => { const next = new Set(previous); next.delete(key); return next; });
+  };
   useEffect(() => { void drafts.load(); }, [drafts]);
   useEffect(() => {
     setSendError(null);
     setReopening(false);
-    return () => { if (request.current) request.current.cancelled = true; request.current = null; };
+    keptError.current = false;
+    return () => {
+      if (request.current) request.current.cancelled = true;
+      request.current = null;
+      // Navigating away cancels a Send still waiting for a refresh; its text stays in the draft.
+      waits.current.forEach(wait => { wait.cancelled = true; });
+      waits.current.clear();
+      setWaiting(previous => previous.size ? new Set() : previous);
+    };
   }, [drafts, store, itemId]);
   useEffect(() => {
-    if (ready) setSendError(error => error === loadingError ? null : error);
+    if (ready && !keptError.current) setSendError(error => error === loadingError ? null : error);
   }, [ready, current.snapshot]);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const find = (intent: DetailIntent): DraftEntry | undefined => route ? drafts.find(route, itemId, intent) : undefined;
@@ -99,18 +127,22 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   };
   const lockedEntry = (entry: DraftEntry | undefined) => !state.ready || state.preferenceUncertain || (!!entry && (entry.saving || entry.uncertain));
   const changed = (target: DraftTarget) => changedEntry(entryOf(target));
-  const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) { setSendError(null); drafts.review(entry.draft.op_id, session); } };
+  const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) { keptError.current = false; setSendError(null); drafts.review(entry.draft.op_id, session); } };
+  const waitKey = (target: DraftTarget) => typeof target === 'string' ? target : target.id ?? target.kind;
   const mine = Object.values(state.entries).filter(entry => route && entry.draft.session.project_id === route.project_id
     && entry.draft.session.session_id === route.session_id && entry.draft.target.item_id === itemId);
   const failed = mine.find(entry => entry.draft.intent !== 'answer' && entry.error);
   const written = mine.filter(entry => !entry.receipt && WORDS.has(entry.draft.intent) && entry.draft.text.trim())
-    .map((entry): Words => ({ id: entry.draft.op_id, kind: entry.draft.intent as WordsKind, text: entry.draft.text, locked: lockedEntry(entry), changed: changedEntry(entry), origin: entry.origin }));
+    .map((entry): Words => ({ id: entry.draft.op_id, kind: entry.draft.intent as WordsKind, text: entry.draft.text, locked: lockedEntry(entry), changed: changedEntry(entry), origin: entry.origin,
+      waiting: waiting.has(entry.draft.op_id) }));
   return {
-    ready,
+    ready, sendable,
     locked: target => target === 'reopen' && reopening || lockedEntry(entryOf(target)),
+    waiting: target => waiting.has(waitKey(target)),
     // Typing needs only the loaded drafts and a snapshot: a refresh in progress (status 'stale') must not swallow the owner's
     // words. Sending still waits for `ready`, and a draft written against an older snapshot is reviewed before it goes.
-    edit: (target, text) => { if (!state.ready || !session) return; const id = open(target); if (id) drafts.edit(id, { text }); },
+    // While a Send waits for its refresh the words are locked: the text sent is the text the owner pressed Send on.
+    edit: (target, text) => { if (!state.ready || !session || waits.current.has(waitKey(target))) return; const id = open(target); if (id) drafts.edit(id, { text }); },
     changed, review,
     send: async (target, text, as) => {
       // Reopen is a one-press request. Keep that intent across an in-flight refresh,
@@ -118,20 +150,35 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
       const attempt = target === 'reopen' ? { cancelled: false } : null;
       if (attempt && request.current && !request.current.cancelled) return false;
       if (attempt) { request.current = attempt; setReopening(true); }
+      // The owner's words, sent while a hint has only marked the copy stale: one wait per draft. A second call while it is
+      // pending returns false silently, and the box is read-only (not disabled) until the wait and the send are over.
+      const words = WORDS.has(intentOf(target)), key = waitKey(target);
+      let wait: { cancelled: boolean } | null = null;
+      if (words && store.getSnapshot().status === 'stale') {
+        if (waits.current.has(key)) return false;
+        wait = { cancelled: false };
+        waits.current.set(key, wait);
+        setWaiting(previous => new Set(previous).add(key));
+      }
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
+        keptError.current = false;
         setSendError(null);
-        if (attempt && (store.getSnapshot().status !== 'ready' || store.getSnapshot().error)) {
+        if (wait || attempt && (store.getSnapshot().status !== 'ready' || store.getSnapshot().error)) {
           await Promise.race([
             store.refresh(true),
             new Promise<void>(resolve => { timeout = setTimeout(resolve, 5000); }),
           ]);
-          if (attempt.cancelled) return false;
+          if (attempt?.cancelled || wait?.cancelled) return false;
         }
         const latest = store.getSnapshot();
         const sendingSession = latest.snapshot?.session;
-        if (!drafts.getSnapshot().ready || !sendingSession || latest.status !== 'ready' || latest.error) {
+        // Words need a copy of the session, not a fresh one: `stale` after the wait only means a newer hint is pending (the read
+        // itself is always current), and the item-changed check below still guards what the owner saw.
+        const usable = words ? (latest.status === 'ready' || latest.status === 'stale') && !latest.error : latest.status === 'ready' && !latest.error;
+        if (!drafts.getSnapshot().ready || !sendingSession || !usable) {
           setSendError(loadingError);
+          if (wait) keptError.current = true;
           return false;
         }
         // The store can already hold a newer snapshot than the one on screen (a busy Mac renders it a moment late). The send
@@ -165,17 +212,19 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
         }
         return sent;
       } catch (error: unknown) {
-        if (!attempt?.cancelled) setSendError(plainFailure(error, 'This message could not be saved. Try again.'));
+        if (!attempt?.cancelled && !wait?.cancelled) setSendError(plainFailure(error, 'This message could not be saved. Try again.'));
         return false;
       } finally {
         clearTimeout(timeout);
+        if (wait) endWait(key, wait);
         if (attempt && request.current === attempt) { request.current = null; setReopening(false); }
       }
     },
     written,
     blank: kind => {
       const entry = find(kind), live = entry && !entry.receipt ? entry : undefined;
-      return { id: live?.draft.op_id ?? null, kind, text: live?.draft.text ?? '', locked: lockedEntry(entry), changed: changedEntry(live), origin: live?.origin };
+      return { id: live?.draft.op_id ?? null, kind, text: live?.draft.text ?? '', locked: lockedEntry(entry), changed: changedEntry(live), origin: live?.origin,
+        waiting: waiting.has(live?.draft.op_id ?? kind) };
     },
     saving: (mine.find(entry => entry.saving)?.draft.intent as InputKind | undefined) ?? null,
     error: sendError ?? (failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null),

@@ -1296,8 +1296,9 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.change(box, { target: { value: 'Typed while refreshing' } });
     await waitFor(() => expect(value.prefs.drafts.some(draft => draft.text === 'Typed while refreshing')).toBe(true));
     expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe('Typed while refreshing');
-    // Nothing goes out against a view that may be behind.
-    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+    // alpha.23: the words Send stays available: a press waits for the refresh (see readiness.test.tsx), so it is never lost.
+    // Answers still wait for a fresh view (the next test).
+    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false);
     value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(false));

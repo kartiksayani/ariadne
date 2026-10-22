@@ -335,7 +335,8 @@ describe('detail actions while the owner view is stale', () => {
     expect(followup.disabled).toBe(false);
     fireEvent.click(followup);
     fireEvent.change(screen.getByLabelText('Follow-up message'), { target: { value: 'Please check this once more.' } });
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send follow-up' }).disabled).toBe(true);
+    // alpha.23: a refresh in flight (status stale) no longer holds the words Send off; the item-changed review still does after it lands.
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send follow-up' }).disabled).toBe(false);
     await act(async () => { release(); });
     await waitFor(() => expect(store.getSnapshot().status).toBe('ready'));
     fireEvent.click(screen.getByRole('button', { name: 'Review this question' }));
@@ -346,6 +347,197 @@ describe('detail actions while the owner view is stale', () => {
     expect(Object.values(session.inputs).filter(input => input?.kind === 'followup' && input.target.item_id === '1')).toHaveLength(1);
   });
 
+  /** An item's Reply box holding typed words, then a hint that marks the copy stale with its read held (alpha.23 F2). */
+  async function staleReply(itemId = '1.1') {
+    const { transport, store, drafts } = await setup();
+    const props = { store, drafts, itemId, later: false, onOpenItem: vi.fn() };
+    const view = render(<ItemDetail {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.change(screen.getByLabelText('Reply message'), { target: { value: 'Please go ahead.' } });
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(store.getSnapshot().status).toBe('stale');
+    const box = () => screen.getByLabelText<HTMLTextAreaElement>('Reply message');
+    const send = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Send reply' });
+    return { transport, store, drafts, session, props, view, release, box, send };
+  }
+  it('sends a reply clicked while a session refresh is in flight, once, with the text locked during the wait', async () => {
+    const { transport, store, session, release, box, send } = await staleReply();
+    expect(send().disabled).toBe(false);
+    fireEvent.click(send());
+    // The wait: read-only and busy, not disabled (focus and the caret stay); Send is busy; nothing has gone out yet.
+    expect(box().readOnly).toBe(true); expect(box().disabled).toBe(false); expect(box().getAttribute('aria-busy')).toBe('true');
+    expect(send().disabled).toBe(true); expect(send().getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByText('◌ Sending…')).toBeTruthy();
+    fireEvent.change(box(), { target: { value: 'Changed during the wait.' } });
+    fireEvent.click(send());
+    expect(box().value).toBe('Please go ahead.');
+    expect(sends(transport)).toHaveLength(0);
+    await act(async () => { release(); });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'reply', text: 'Please go ahead.', target: { item_id: '1.1' } } } });
+    expect(store.getSnapshot().status).toBe('ready');
+    expect(Object.values(session.inputs).filter(input => input?.target.item_id === '1.1' && input.payload.text === 'Please go ahead.')).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('sends once for a double click and a second key press during the wait, with no error', async () => {
+    const { transport, release, box, send } = await staleReply();
+    fireEvent.click(send()); fireEvent.click(send());
+    fireEvent.keyDown(box(), { key: 'Enter', metaKey: true });
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => { release(); });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    await act(async () => {});
+    expect(sends(transport)).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('refuses a second send call for the same words while one waits, without a message', async () => {
+    const { transport, store, drafts } = await setup();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    const { result } = renderHook(() => useDetailSubmit(drafts, store, '1.1'));
+    const session = transport.sessions.get(route.session_id)!; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    let first!: Promise<boolean>;
+    act(() => { first = result.current.send('reply', 'Once only.'); });
+    await act(async () => { expect(await result.current.send('reply', 'Once only.')).toBe(false); });
+    expect(result.current.error).toBeNull();
+    expect(result.current.waiting('reply')).toBe(true);
+    await act(async () => { release(); expect(await first).toBe(true); });
+    expect(sends(transport)).toHaveLength(1);
+    expect(result.current.waiting('reply')).toBe(false);
+  });
+  it.each(['question', 'status', 'binding'] as const)('keeps the text and asks for a review when %s changes during the Send wait', async change => {
+    const { transport, drafts, session, release } = await staleReply();
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    if (change === 'question') session.items['1.1']!.question = 'A different question';
+    if (change === 'status') session.items['1.1']!.status = 'done';
+    if (change === 'binding') session.active_binding_id = null;
+    await act(async () => { release(); });
+    await waitFor(() => expect(screen.getAllByRole('alert').map(alert => alert.textContent))
+      .toContain('This item changed. Review it before sending. Your text is kept.'));
+    expect(sends(transport)).toHaveLength(0);
+    expect(drafts.find(route, '1.1', 'reply')?.draft.text).toBe('Please go ahead.');
+    expect(drafts.find(route, '1.1', 'reply')?.saving).toBe(false);
+  });
+  it('proceeds after five seconds when a usable copy exists, sending once after the item-changed check', async () => {
+    const { transport, drafts, release, box, send } = await staleReply();
+    const draft = () => drafts.find(route, '1.1', 'reply')!;
+    vi.useFakeTimers();
+    fireEvent.click(send());
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(box().readOnly).toBe(true); expect(draft().saving).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    // The wait is over and the send went on: the draft is saving (core's own fresh read of the session is still held).
+    expect(draft().saving).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(sends(transport)).toHaveLength(0);
+    vi.useRealTimers();
+    await act(async () => { release(); });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('unlocks with the text kept and keeps the loading message when no usable copy exists after five seconds', async () => {
+    const { transport, store, drafts } = await setup();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void, failing = true;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') {
+        if (failing) throw new Error('Read failed');
+        await gate;
+      }
+      return invoke(name, args);
+    });
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot().error).not.toBeNull();
+    failing = false;
+    const { result } = renderHook(() => useDetailSubmit(drafts, store, '1.1'));
+    expect(result.current.sendable).toBe(false);
+    vi.useFakeTimers();
+    let sent: Promise<boolean>;
+    act(() => { sent = result.current.send('reply', 'Keep these words.'); });
+    expect(result.current.waiting('reply')).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(await sent!).toBe(false);
+    expect(result.current.waiting('reply')).toBe(false);
+    expect(result.current.error).toBe(loadingError);
+    // A copy lands later: the refusal stays until the owner's next send or review.
+    await act(async () => { release(); await store.refresh(); });
+    expect(store.getSnapshot().status).toBe('ready');
+    expect(result.current.ready).toBe(true);
+    expect(result.current.error).toBe(loadingError);
+    expect(sends(transport)).toHaveLength(0);
+    vi.useRealTimers();
+    await act(async () => { expect(await result.current.send('reply', 'Keep these words.')).toBe(true); });
+    expect(result.current.error).toBeNull();
+    expect(sends(transport)).toHaveLength(1);
+  });
+  it('cancels a waiting Send when the owner moves to another item, unlocks and keeps the text', async () => {
+    const { transport, drafts, props, view, release, box } = await staleReply();
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    expect(box().readOnly).toBe(true);
+    view.rerender(<ItemDetail {...props} itemId="5" />);
+    await act(async () => { release(); });
+    await act(async () => {});
+    expect(sends(transport)).toHaveLength(0);
+    view.rerender(<ItemDetail {...props} />);
+    expect(drafts.find(route, '1.1', 'reply')?.draft.text).toBe('Please go ahead.');
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply message').readOnly).toBe(false);
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Please go ahead.');
+    expect(screen.queryByText(loadingError)).toBeNull();
+  });
+  it.each(['loading', 'error', 'inaccessible'] as const)('keeps Send off while the session is %s', async state => {
+    const { transport, store, drafts } = await setup();
+    const invoke = transport.invoke.bind(transport);
+    const props = { store, drafts, itemId: '1.1', later: false, onOpenItem: vi.fn() };
+    const view = render(<ItemDetail {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.change(screen.getByLabelText('Reply message'), { target: { value: 'Words to keep.' } });
+    if (state === 'error') {
+      vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+        if ('request' in args.request && args.request.request.command === 'session_get') throw new Error('Read failed');
+        return invoke(name, args);
+      });
+      await act(async () => { await store.refresh(); });
+      expect(store.getSnapshot().error).not.toBeNull();
+    } else if (state === 'inaccessible') {
+      vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+        if ('request' in args.request && args.request.request.command === 'session_get') {
+          throw Object.assign(new Error('gone'), { code: 'not_found' });
+        }
+        return invoke(name, args);
+      });
+      await act(async () => { await store.refresh(); });
+      expect(store.getSnapshot().error).not.toBeNull();
+    } else {
+      // Nothing is loaded yet: there is no copy to send against, and no box to send from.
+      const fresh = new SessionStore(createDesktopService(transport), route); stores.push(fresh);
+      const { result } = renderHook(() => useDetailSubmit(drafts, fresh, '1.1'));
+      expect(fresh.getSnapshot().status).toBe('loading');
+      expect(result.current.sendable).toBe(false);
+      view.unmount();
+      await act(async () => { expect(await result.current.send('reply', 'Words to keep.')).toBe(false); });
+      expect(result.current.error).toBe(loadingError);
+      expect(sends(transport)).toHaveLength(0);
+      return;
+    }
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send reply' }).disabled).toBe(true);
+    expect(sends(transport)).toHaveLength(0);
+  });
   it('shows a plain timeout and never replays a reopen when the late refresh finishes', async () => {
     const { transport, store, drafts } = await setup();
     render(<ItemDetail store={store} drafts={drafts} itemId="1" later={false} onOpenItem={vi.fn()} />);
