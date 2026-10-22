@@ -473,12 +473,12 @@
   cursor: pointer;
 }
 
-.changes-seen:disabled {
+.changes-seen[aria-disabled="true"] {
   color: var(--st-done);
   cursor: default;
 }
 
-.changes-seen:hover:not(:disabled) {
+.changes-seen:hover:not([aria-disabled="true"]) {
   background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
