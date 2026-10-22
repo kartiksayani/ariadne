@@ -929,7 +929,9 @@ describe('session graph view', () => {
     expect(notices.getSnapshot()).toEqual([]);
     expect(screen.queryByText(changed)).toBeNull();
     value.writeWith(async () => false);
-    await act(async () => { fireEvent.click(node('8')); await vi.advanceTimersByTimeAsync(300); });
+    // The notice's 300 ms delay starts when the failed save is reported, so wait after the click has settled (as for the first one).
+    await act(async () => { fireEvent.click(node('8')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
     expect(screen.getByText(initial)).toBeTruthy();
     view.unmount();
     expect(notices.getSnapshot()).toEqual([]);

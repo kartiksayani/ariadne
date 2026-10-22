@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { PresenceChangedHint, SessionChangedHint, SessionListResult, SessionRef, SessionSnapshot } from '../generated/core';
 import type { PresenceObservation, QueryCursor } from '../generated/domain/models';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from './service';
+import { changesNothing, sameFailure, sameValue } from './same';
 
 export type Immutable<T> = T extends readonly (infer V)[] ? readonly Immutable<V>[]
   : T extends object ? { readonly [K in keyof T]: Immutable<T[K]> } : T;
@@ -49,9 +50,20 @@ export class SessionStore {
     this.listeners.add(receive);
     return () => { this.listeners.delete(receive); };
   };
+  /**
+   * Equality contract (alpha.23 F6): this store publishes only a real change. A poll that read the same data publishes
+   * nothing and keeps the state, `snapshot` and `presence` objects (and so every `item` inside the snapshot) exactly as
+   * they were, by identity. Something real is a new revision, `freshness`, `status`, `error`, or a presence entry whose
+   * content changed; each publishes once. Rows built from this state may rely on that identity.
+   *
+   * `snapshot` itself is a new object on more than a new revision: also when `freshness` changes and on the first good
+   * read after a failed one (the recovery), both over the same `snapshot.session`. So derived rows (and anything built
+   * from the items) must key on `snapshot.session` or the items inside it, never on `snapshot`, or they rebuild on a
+   * freshness flip or a recovery that changed none of their data.
+   */
   private publish(update: Partial<SessionState>): void {
-    if (this.closed) return;
-    this.state = Object.freeze({ ...this.state, ...update });
+    if (this.closed || changesNothing(this.state, update)) return;
+    this.state =Object.freeze({ ...this.state, ...update });
     this.listeners.forEach((receive) => receive());
   }
   private changed = (hint: SessionChangedHint): void => {
@@ -70,6 +82,7 @@ export class SessionStore {
         || this.state.snapshot?.session.active_binding_id !== hint.binding_id
         || hint.generation !== hint.observation.generation || hint.generation !== binding.generation) return;
     const previous = this.state.presence[hint.binding_id];
+    if (previous && sameValue(previous, hint.observation)) return;
     if (previous?.instance_id === hint.observation.instance_id) {
       const previousAt = previous.last_seen_at ? Date.parse(previous.last_seen_at) : -Infinity;
       const nextAt = hint.observation.last_seen_at ? Date.parse(hint.observation.last_seen_at) : -Infinity;
@@ -151,16 +164,25 @@ export class SessionStore {
             || revision < (this.state.snapshot?.session.revision ?? 0)) {
           throw new ServiceFailure('invalid_response');
         }
-        const presence = Object.fromEntries(Object.entries(this.state.presence).filter(([id, observation]) =>
+        const entries = Object.entries(this.state.presence).filter(([id, observation]) =>
           snapshot.session.active_binding_id === id && snapshot.session.bindings[id]?.generation === observation.generation
-          && snapshot.session.bindings[id]?.dispatch_state !== 'disconnected'));
+          && snapshot.session.bindings[id]?.dispatch_state !== 'disconnected');
+        // The entries are the stored observations, so an unchanged map keeps the published object.
+        const presence = entries.length === Object.keys(this.state.presence).length ? this.state.presence
+          : Object.freeze(Object.fromEntries(entries));
         const previous = this.state.snapshot;
-        // Durable contents change with the canonical session revision. Keep the
-        // immutable session identity when polling only refreshes qualification.
+        // Durable contents change with the canonical session revision. Keep the immutable session identity when polling
+        // only refreshes qualification, and the whole snapshot when its freshness is unchanged too. The first good read after
+        // a failed one is a new capture, though: it gets a new snapshot object (same session), because App clears a "still
+        // loading" refusal only on a capture that differs from the one it was reported against.
+        const recovered = this.state.error !== null;
         const next = previous && previous.session.revision === revision
-          ? Object.freeze({ session: previous.session, freshness: snapshot.freshness }) : immutable(snapshot);
-        readAt(next);
-        this.publish({ snapshot: next, presence: Object.freeze(presence), error: null,
+          ? previous.freshness === snapshot.freshness && !recovered ? previous : Object.freeze({ session: previous.session, freshness: snapshot.freshness })
+          : immutable(snapshot);
+        // A poll that changes nothing publishes nothing. While the read is fresh it is still a good read, so re-stamp it.
+        // A read that stays stale is not: "the last good copy" must not move, or it would jump on an unrelated redraw.
+        if (snapshot.freshness === 'fresh' || next !== previous) stampRead(next);
+        this.publish({ snapshot: next, presence, error: null,
           status: revision < this.hintedRevision || snapshot.freshness !== 'fresh' ? 'stale' : 'ready' });
         // Presence is volatile and separate from durable session freshness. A
         // failed seed keeps the actual snapshot; later refresh/live hints recover.
@@ -168,7 +190,9 @@ export class SessionStore {
       } catch (error: unknown) {
         const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('transport');
         const inaccessible = failure instanceof CoreFailure && ['permission_denied', 'not_found', 'io_error'].includes(failure.error.code);
-        this.publish({ status: inaccessible || !this.state.snapshot ? 'inaccessible' : 'stale', error: failure });
+        // The same failure again keeps the one already shown.
+        this.publish({ status: inaccessible || !this.state.snapshot ? 'inaccessible' : 'stale',
+          error: sameFailure(this.state.error, failure) ? this.state.error : failure });
       }
     }
   }
@@ -196,6 +220,14 @@ export function readAt(snapshot: object): number {
   let at = readTimes.get(snapshot);
   if (at === undefined) { at = Date.now(); readTimes.set(snapshot, at); }
   return at;
+}
+/**
+ * Stamps a read now, replacing an earlier stamp. The store calls it for every fresh read, including a poll that found
+ * nothing new and so publishes the same snapshot object again: "the last good copy, from 21:24" must name that read.
+ * A read that stays stale, or is new, is stamped only when it publishes a changed state.
+ */
+export function stampRead(snapshot: object, at = Date.now()): void {
+  readTimes.set(snapshot, at);
 }
 
 export class OpenSessions {

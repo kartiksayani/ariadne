@@ -6,6 +6,7 @@ import type { RevealedItem } from '../../data/routes';
 import type { ItemStatus } from '../../generated/domain/models';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
+import { changesNothing, sameFailure, sameValue } from '../../data/same';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from '../../data/service';
 import { navigationFailure, OwnFailure } from '../../data/plain';
 import { initialExpansion } from '../../selectors/tree/rows';
@@ -171,6 +172,14 @@ export class NavigationStore {
     this.state = Object.freeze({ ...this.state, ...update });
     this.listeners.forEach(receive => receive());
   }
+  /**
+   * Equality contract (alpha.23 F6): a poll that read the same data publishes nothing and keeps `preferences`,
+   * `projects` and `sessions` (and the view objects inside `preferences`) as they were, by identity. Only a real change
+   * moves them, once. Other publishes (an owner write, a navigation) are events and still publish as they did.
+   */
+  private publishChanges(update: Partial<NavigationState>): void {
+    if (!changesNothing(this.state, update)) this.publish(update);
+  }
   async start(): Promise<void> {
     if (this.stopped) return;
     if (!this.timer) {
@@ -263,16 +272,27 @@ export class NavigationStore {
         const captured = immutable(normalizeStatusFilters(preferences, registered)), previous = this.state.preferences;
         // Reconciliation of seen bookkeeping must keep unchanged view objects
         // stable too, including when the native hint arrives before its receipt.
-        const stable = previous ? Object.freeze({ ...captured,
+        const stable = previous ? sameValue(previous, captured) ? previous : Object.freeze({ ...captured,
           global: equal(previous.global, captured.global) ? previous.global : captured.global,
           sessions: equal(previous.sessions, captured.sessions) ? previous.sessions : captured.sessions,
           later: equal(previous.later, captured.later) ? previous.later : captured.later }) : captured;
-        this.publish({ lastSession: selection.kind === 'session' ? selection.session : this.state.lastSession ?? lastSessionFrom(selection, stable.sessions), preferences: stable, projects: immutable(projects), sessions: immutable(sessions),
+        const heldLast = this.state.lastSession;
+        const lastSession = selection.kind === 'session' ? heldLast && sameRoute(heldLast, selection.session) ? heldLast : selection.session
+          : heldLast ?? lastSessionFrom(selection, stable.sessions);
+        this.publishChanges({ lastSession, preferences: stable,
+          projects: this.state.projects && sameValue(this.state.projects, projects) ? this.state.projects : immutable(projects),
+          sessions: this.state.sessions && sameValue(this.state.sessions, sessions) ? this.state.sessions : immutable(sessions),
           sessionProjectId: projectId, status: 'ready', error: this.mutationFailure, ...this.setupAfter(sessions, projectId) });
         if (selection.kind === 'session') this.initializeSeen(selection.session);
         this.flushStartupRoute();
       } catch (error: unknown) {
-        if (epoch === this.epoch) this.publish({ status: this.state.projects ? 'stale' : 'unavailable', error: fail(error) });
+        if (epoch === this.epoch) {
+          const failure = fail(error), shown = this.state.error;
+          // A repeat of the read failure already shown keeps that object. A failed save is another matter: the page tells a save
+          // failure from a read failure by this object's identity (`getMutationFailure`), so a read failure never reuses it.
+          this.publishChanges({ status: this.state.projects ? 'stale' : 'unavailable',
+            error: shown && shown !== this.mutationFailure && sameFailure(shown, failure) ? shown : failure });
+        }
       }
     }
   }
