@@ -40,7 +40,7 @@ can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 
 - Clicks open at once, even on big sessions (F1). Clicking a row, or pressing Enter on it, opens it from the loaded snapshot instead of re-reading the whole session first, so there is no false "still loading… Try again".
 - Send never silently does nothing (F2). Clicking Send while the agent is updating the session waits for that update, then sends once (`sendable`, and a read-only wait lock). The box holds the owner's text while it waits.
-- What changed holds the rows it showed (F3). A row read elsewhere while the popover is open stays in place, dimmed, instead of disappearing and moving the list.
+- What changed holds the rows it showed (F3). A row read elsewhere while the popover is open stays in place, dimmed, instead of disappearing and moving the list. This was the alpha.22 follow-up "the popover moves 45 to 52 px after opening": the 1 s seen-dwell on the item open in Details removed its row (53 px).
 - Only owner-made window frames are saved (F4). A time-bounded `SaveGate` plus display-change and scale-change rules mean opening on the laptop alone no longer overwrites the size set on an external display, and unplugging it does not either.
 - Reveal selected opens Details in both the Tree and the Graph (F5, P11.12; the owner chose this on 2026-10-22). The Back to pill does the same.
 - The Map stops redrawing while idle (F6). Stores skip no-change publishes, and rows are reused and memoised. On a 2,000-item fixture, idle row renders went from 30,285 per 5 s to 0, and click-to-Details from 5.4 s to about 2 s.
