@@ -154,9 +154,10 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
       // pending returns false silently, and the box is read-only (not disabled) until the wait and the send are over.
       const words = WORDS.has(intentOf(target)), key = waitKey(target);
       let wait: { cancelled: boolean } | null = null;
+      // The guard holds whatever the status: the store turns ready a moment before the wait ends, and a second send then must not pass.
+      if (words && waits.current.has(key)) return false;
       if (words && store.getSnapshot().status === 'stale') {
-        if (waits.current.has(key)) return false;
-        wait = { cancelled: false };
+        wait ={ cancelled: false };
         waits.current.set(key, wait);
         setWaiting(previous => new Set(previous).add(key));
       }

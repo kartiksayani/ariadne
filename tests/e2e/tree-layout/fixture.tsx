@@ -106,6 +106,8 @@ class TreeLayoutTransport extends AppTransport {
   failReads = false;
   /** While above 0, every read of the session takes this many ms to answer, as a 2,000-item session on a busy machine does. */
   holdReads = 0;
+  /** Session reads held by `holdReads` that have not answered yet: a spec asserts a read is still pending with it. */
+  heldReads = 0;
   /** While set, a preferences save waits here: it is in flight, and its outcome is not known yet. */
   private saveGate: Promise<void> | null = null;
   /** Set until the owner's next "Later" is saved: that write is lost on its way back (reading marks and the like still land). */
@@ -115,7 +117,10 @@ class TreeLayoutTransport extends AppTransport {
   async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
     if (this.failReads && !('command' in request) && request.request.command === 'session_get') throw new Error('The session file could not be read.');
-    if (this.holdReads && !('command' in request) && request.request.command === 'session_get') await new Promise(resolve => setTimeout(resolve, this.holdReads));
+    if (this.holdReads && !('command' in request) && request.request.command === 'session_get') {
+      ++this.heldReads;
+      try { await new Promise(resolve => setTimeout(resolve, this.holdReads)); } finally { --this.heldReads; }
+    }
     if ('command' in request && request.command.command === 'preferences_patch' && this.saveGate) await this.saveGate;
     if ('command' in request && request.command.command === 'preferences_patch' && this.loseLater
         && request.command.params.entries.some(entry => entry.kind === 'set_later')) { this.loseLater = false; throw new Error('Lost response'); }

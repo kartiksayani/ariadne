@@ -423,15 +423,20 @@ export function TreeView(props: TreeViewProps) {
         if (expired || !mounted.current || call !== request.current) return null;
       }
       // A rendered row opens from the loaded copy, so a refresh in flight never blocks the click. Anything else reads first.
+      // The busy check comes first here: a refused click must not reach revealLoaded, which supersedes a reveal still in flight.
+      const refuseWhileSaving = () => {
+        const current = navigation.getSnapshot();
+        if ((current.writing || current.pendingOperationId !== null) && !navigation.isRecentPending()) throw new OwnFailure({ code: 'store_busy',
+          message: 'Another view change is being saved. Wait for it, then try again.', hint: '', retryable: true, field_errors: [] });
+      };
+      if (options.loaded) refuseWhileSaving();
       const loadedReveal = options.loaded ? navigation.routes.revealLoaded({ ...route, item_id: id }, store) : null;
       if (!loadedReveal) {
         if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
         if (expired || !mounted.current || call !== request.current) return null;
         if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) throw loading();
+        refuseWhileSaving();
       }
-      const current = navigation.getSnapshot();
-      if ((current.writing || current.pendingOperationId !== null) && !navigation.isRecentPending()) throw new OwnFailure({ code: 'store_busy',
-        message: 'Another view change is being saved. Wait for it, then try again.', hint: '', retryable: true, field_errors: [] });
       return loadedReveal ?? navigation.routes.revealItem({ ...route, item_id: id });
     };
     // Bound both the readiness wait and route read; only the latest click can select a row.

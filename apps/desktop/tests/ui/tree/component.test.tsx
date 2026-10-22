@@ -918,6 +918,60 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     await waitFor(() => expect(value.calls.selected).toHaveLength(1));
     expect(value.transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(1);
   });
+  /** Holds every reveal_item read until released, and lets a test fail the session reads. */
+  function heldReveal(value: Awaited<ReturnType<typeof mount>>) {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const reads = { fail: false, held: 0, sessionGate: null as Promise<void> | null };
+    const invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'reveal_item') { ++reads.held; await gate; }
+      if (name === 'session_get') {
+        if (reads.fail) throw new Error('Read failed');
+        if (reads.sessionGate) await reads.sessionGate;
+      }
+      return invoke(name, args);
+    });
+    return { release, reads };
+  }
+  it('does not cancel a link reveal still reading when a row click is refused for a busy view save', async () => {
+    const value = await mount(), { release, reads } = heldReveal(value);
+    reads.fail = true;
+    await act(async () => { await value.store.refresh(); });
+    expect(value.store.getSnapshot().error).not.toBeNull();
+    let link!: Promise<RevealedItem | null>;
+    act(() => { link = value.navigation.routes.revealItem({ ...route, item_id: '8' }); });
+    await waitFor(() => expect(reads.held).toBe(1));
+    // The click reads first (the store holds an error) and waits on that read. A view save fails unconfirmed meanwhile, so the
+    // read ends with the view still busy: the click is refused as busy.
+    let finish!: () => void;
+    reads.fail = false; reads.sessionGate = new Promise<void>(resolve => { finish = resolve; });
+    fireEvent.click(row('3'));
+    value.transport.failNext = 'preferences_patch';
+    await act(async () => { expect(await value.navigation.saveSessionView(structuredClone(viewOf(value.transport)), value.transport.preferences.revision)).toBe(false); });
+    expect(value.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+    await act(async () => { finish(); });
+    await waitFor(() => expect(notices.getSnapshot()[0]?.text).toMatch(/could not be opened\. /));
+    expect(notices.getSnapshot()[0]?.text).not.toMatch(/still loading/);
+    expect(value.calls.selected).toHaveLength(0);
+    await act(async () => { release(); });
+    expect(await link).toMatchObject({ kind: 'item', route: { item_id: '8' } });
+  });
+  it('does not cancel a link reveal still reading when a row click is refused for an errored session', async () => {
+    const value = await mount(), { release, reads } = heldReveal(value);
+    reads.fail = true;
+    await act(async () => { await value.store.refresh(); });
+    expect(value.store.getSnapshot().error).not.toBeNull();
+    let link!: Promise<RevealedItem | null>;
+    act(() => { link = value.navigation.routes.revealItem({ ...route, item_id: '8' }); });
+    await waitFor(() => expect(reads.held).toBe(1));
+    fireEvent.click(row('3'));
+    await waitFor(() => expect(notices.getSnapshot()[0]?.text).toMatch(/could not be opened\. Ariadne is still loading/));
+    expect(value.calls.selected).toHaveLength(0);
+    reads.fail = false;
+    await act(async () => { release(); });
+    expect(await link).toMatchObject({ kind: 'item', route: { item_id: '8' } });
+  });
   it('keeps the 5 s bounded read path for a folded start-up selection', async () => {
     const view = await mount({ configure: transport => {
       const saved = viewOf(transport); saved.selected_item_id = '1.1'; saved.expanded_item_ids = []; saved.scroll = null;

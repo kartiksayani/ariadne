@@ -420,6 +420,36 @@ describe('detail actions while the owner view is stale', () => {
     expect(sends(transport)).toHaveLength(1);
     expect(result.current.waiting('reply')).toBe(false);
   });
+  it('refuses a second send for the same words in the window where the store is ready but the wait has not ended', async () => {
+    const { transport, store, drafts } = await setup();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void, releaseRead!: () => void, held = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const readGate = new Promise<void>(resolve => { releaseRead = resolve; });
+    // The refresh publishes `ready`, then seeds presence: holding that read keeps the wait open after the status has changed.
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const command = 'request' in args.request ? args.request.request.command : null;
+      if (command === 'session_get') await readGate;
+      if (command === 'session_list') { ++held; await gate; }
+      return invoke(name, args);
+    });
+    const { result } = renderHook(() => useDetailSubmit(drafts, store, '1.1'));
+    const session = transport.sessions.get(route.session_id)!; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(store.getSnapshot().status).toBe('stale');
+    let first!: Promise<boolean>;
+    act(() => { first = result.current.send('reply', 'Once only.'); });
+    await act(async () => { releaseRead(); });
+    await waitFor(() => expect(held).toBe(1));
+    expect(store.getSnapshot().status).toBe('ready');
+    expect(result.current.waiting('reply')).toBe(true);
+    await act(async () => { expect(await result.current.send('reply', 'Once only.')).toBe(false); });
+    expect(sends(transport)).toHaveLength(0);
+    expect(result.current.error).toBeNull();
+    await act(async () => { release(); expect(await first).toBe(true); });
+    expect(sends(transport)).toHaveLength(1);
+    expect(result.current.waiting('reply')).toBe(false);
+  });
   it.each(['question', 'status', 'binding'] as const)('keeps the text and asks for a review when %s changes during the Send wait', async change => {
     const { transport, drafts, session, release } = await staleReply();
     fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
