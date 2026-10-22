@@ -376,14 +376,25 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     if (itemReveal?.temporaryExpandedItemIds.includes(node.item.id)) setDismissedReveal(currentReveal);
   };
 
-  // `.` goes back to the selected node, as in the Tree (SPEC 8.5): a drawn node is scrolled into view and focused, and Details stays as
-  // it is. A selection folded or filtered away is revealed through its route, which opens Details on it (the Tree does the same).
+  // `.` goes back to the selected node, as in the Tree (SPEC 8.5): a drawn node is scrolled into view and focused, and Details opens
+  // on it. A selection folded or filtered away is revealed through its route, which opens Details on it (the Tree does the same).
   useIntents({
     'map.backToSelected': () => {
       const { graph: current, selectedId: id } = latest.current;
       if (covered || !id || !current) return false;
       peek?.closeAll();
-      if (current.nodes.has(id)) { setScrollTarget({ id, center: false, focus: true }); return true; }
+      if (current.nodes.has(id)) {
+        setScrollTarget({ id, center: false, focus: true });
+        // A drawn node needs no read: Details opens on it from what is on screen. The reveal is marked as this view's own, so
+        // coming back through `reveal` does not centre the node; it carries the selection's temporary unfolds for the Tree.
+        const pending = ownReveal.current;
+        const own: RevealedItem = pending?.kind === 'item' && pending.route.item_id === id ? pending
+          : Object.freeze({ kind: 'item' as const, route: Object.freeze({ ...latest.current.view.session, item_id: id }), store,
+            temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [] });
+        ownReveal.current = own;
+        latest.current.onReveal(own, true);
+        return true;
+      }
       const call = ++request.current, asked = latest.current.asked;
       const stale = () => !mounted.current || call !== request.current || asked !== latest.current.asked;
       void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {

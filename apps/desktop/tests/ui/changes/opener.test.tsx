@@ -138,7 +138,7 @@ describe('ChangesOpener', () => {
     expect(value.navigation.reading.getSnapshot()).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Mark Updated name A seen' }));
     expect(value.navigation.reading.getSnapshot().some(patch => patch.items.some(item => item.item_id === 'updated-0'))).toBe(true);
-    expect(screen.getByRole('button', { name: 'Updated name A is seen' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Updated name A is seen' }).getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByRole('button', { name: /1 new.*2 changed/ })).toBeTruthy();
   });
   it('marks everything caught up with an 8 second Undo that restores the markers', async () => {

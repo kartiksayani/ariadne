@@ -534,6 +534,19 @@ describe('source-backed answer dock', () => {
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'all_sessions' });
   });
 
+  // alpha.23 F6b: the waiting store forwards a captured session's change, so the dock shows live child state even when the
+  // capture itself found nothing new (no hint reached the waiting store here, only the captured session's own read).
+  it('shows a captured session\'s own change in the other-sessions list through the forwarded publish', async () => {
+    const { transport, opened } = await dockUI(otherSession);
+    fireEvent.click(within(dock()).getByRole('button', { name: '1 in other sessions' }));
+    const others = document.querySelector<HTMLElement>('[aria-label="Questions in other sessions"]')!;
+    expect(within(others).getByRole('heading', { name: /Separate session/ })).toBeTruthy();
+    const second = transport.sessions.get(secondId)!;
+    second.name = 'Renamed by its owner'; second.revision++;
+    await act(async () => { await opened.get({ ...route, session_id: secondId })!.refresh(); });
+    expect(within(others).getByRole('heading', { name: /Renamed by its owner/ })).toBeTruthy();
+  });
+
   it('sends an other-session answer to its original session and item without navigation', async () => {
     const { transport } = await dockUI(otherSession);
     fireEvent.click(within(dock()).getByRole('button', { name: '1 in other sessions' }));

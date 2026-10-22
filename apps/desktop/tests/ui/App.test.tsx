@@ -251,7 +251,8 @@ describe('ordinary desktop composition', () => {
     expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeTruthy();
   });
 
-  it('clears a route loading refusal on a same-revision ready capture', async () => {
+  /** Opens an item, makes Bring refuse with the "still loading" notice, and hands back the store and the way to bend its next reads. */
+  async function refusedWhileLoading() {
     const { transport } = setup();
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
@@ -272,12 +273,49 @@ describe('ordinary desktop composition', () => {
     expect(await screen.findByText(loading)).toBeTruthy();
     expect(store.getSnapshot().status).toBe('ready');
     refresh.mockRestore();
+    // A read that finds nothing new is not a new capture (the store keeps the snapshot): the refusal stays.
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot().snapshot).toBe(before.snapshot);
+    expect(screen.getByText(loading)).toBeTruthy();
+    const reads = { freshness: 'fresh', failing: false };
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get' && reads.failing) throw new Error('Read failed');
+      const answer = await invoke(name, args);
+      if (name === 'session_get' && reads.freshness !== 'fresh') {
+        (answer as { data: { data: { freshness: string } } }).data.data.freshness = reads.freshness;
+      }
+      return answer;
+    });
+    return { transport, store, before, loading, reads };
+  }
+
+  it('clears a route loading refusal when the session goes stale and back to fresh', async () => {
+    const { transport, store, before, loading, reads } = await refusedWhileLoading();
+    reads.freshness = 'stale';
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot().status).toBe('stale');
+    expect(screen.getByText(loading)).toBeTruthy();
+    reads.freshness = 'fresh';
     await act(async () => { await store.refresh(); });
     expect(store.getSnapshot().status).toBe('ready');
     expect(store.getSnapshot().snapshot).not.toBe(before.snapshot);
-    expect(store.getSnapshot().snapshot!.session).toBe(before.snapshot!.session);
+    await waitFor(() => expect(screen.queryByText(loading)).toBeNull());
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
-    expect(screen.queryByText(loading)).toBeNull();
+  });
+
+  it('clears a route loading refusal when a failed read recovers', async () => {
+    const { transport, store, before, loading, reads } = await refusedWhileLoading();
+    reads.failing = true;
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot()).toMatchObject({ status: 'stale', error: expect.anything() });
+    expect(screen.getByText(loading)).toBeTruthy();
+    reads.failing = false;
+    await act(async () => { await store.refresh(); });
+    expect(store.getSnapshot()).toMatchObject({ status: 'ready', error: null });
+    expect(store.getSnapshot().snapshot).not.toBe(before.snapshot);
+    await waitFor(() => expect(screen.queryByText(loading)).toBeNull());
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
 
   it('keeps a different route refusal after another ready capture', async () => {
