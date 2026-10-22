@@ -158,6 +158,33 @@ async function staleTree(value: Awaited<ReturnType<typeof mount>>) {
   return { release, spy, session };
 }
 
+/**
+ * A tree whose store holds an error (a read failed) beside its last good copy: a row click there is not eligible for the loaded
+ * path, so it still reads first. `failing` keeps every read failing; `held` lets the next read through once released;
+ * `hinted` also emits a hint, so a held read is already in flight.
+ */
+async function erroredTree(value: Awaited<ReturnType<typeof mount>>, mode: 'failing' | 'held' | 'hinted') {
+  let release!: () => void, failing = true;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const invoke = value.transport.invoke.bind(value.transport);
+  const spy = vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'session_get') {
+      if (failing) throw new Error('Read failed');
+      await gate;
+    }
+    return invoke(name, args);
+  });
+  await act(async () => { await value.store.refresh(); });
+  expect(value.store.getSnapshot().error).not.toBeNull();
+  if (mode !== 'failing') failing = false;
+  const session = value.transport.sessions.get(route.session_id)!;
+  if (mode === 'hinted') {
+    ++session.revision;
+    act(() => { value.transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
+  }
+  return { release, spy, session };
+}
+
 describe('session tree rows', () => {
   it('preserves Focus before a cold session refresh and again after restart', async () => {
     const transport = new AppTransport(); viewOf(transport).focused_item_id = '1';
@@ -853,17 +880,39 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     }
   });
 
-  it.each(['click', 'Enter'] as const)('waits for a stale session before selecting with %s', async method => {
+  it.each(['click', 'Enter'] as const)('opens a row at once from the loaded copy while a read is held, with %s', async method => {
     const value = await mount(), { release } = await staleTree(value);
     expect(row('3').getAttribute('aria-disabled')).toBeNull();
+    vi.useFakeTimers();
     if (method === 'click') fireEvent.click(row('3'));
     else { row('3').focus(); fireEvent.keyDown(row('3'), { key: 'Enter' }); }
+    // Held past the 5 s budget: the click neither waits for the read nor reports "still loading".
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(value.calls.selected).toHaveLength(1);
+    expect(value.calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '3' } });
+    expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+    expect(value.transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+    vi.useRealTimers();
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(viewOf(value.transport).selected_item_id).toBe('3'));
+    expect(value.calls.selected).toHaveLength(1);
+    expect(notices.getSnapshot()).toHaveLength(0);
+  });
+  it('keeps the bounded read for a store that holds an error: a click waits for the read, not the loaded copy', async () => {
+    const value = await mount(), { release } = await erroredTree(value, 'held');
+    fireEvent.click(row('3'));
+    await act(async () => {});
     expect(value.calls.selected).toHaveLength(0);
     await act(async () => { release(); await value.store.refresh(); });
     await waitFor(() => expect(value.calls.selected).toHaveLength(1));
-    expect(value.calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '3' } });
-    await waitFor(() => expect(viewOf(value.transport).selected_item_id).toBe('3'));
-    expect(notices.getSnapshot()).toHaveLength(0);
+    expect(value.transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(1);
+  });
+  it('keeps the 5 s bounded read path for a folded start-up selection', async () => {
+    const view = await mount({ configure: transport => {
+      const saved = viewOf(transport); saved.selected_item_id = '1.1'; saved.expanded_item_ids = []; saved.scroll = null;
+    }, props: { selectedId: '1.1' } });
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    expect(view.transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(1);
   });
   it.each(['click', 'a'] as const)('lets a stale tree Ack reach the readiness wait with %s', async method => {
     // `a` acts on the selected item, so the item is the selection.
@@ -902,19 +951,18 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     expect(value.transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
     expect(notices.getSnapshot()).toHaveLength(0);
   });
-  it.each(['stale', 'failed'] as const)('reports a plain selection error when the refresh remains %s', async result => {
-    const value = await mount(), { release, spy, session } = await staleTree(value);
+  it.each(['stale', 'failed'] as const)('reports a plain selection error when the refresh of an errored session remains %s', async result => {
+    const value = await mount(), { release, session } = await erroredTree(value, result === 'stale' ? 'hinted' : 'failing');
     fireEvent.click(row('3'));
     if (result === 'stale') --session.revision;
-    else spy.mockRejectedValue(new Error('Read failed'));
     await act(async () => { release(); await value.store.refresh(); });
     await waitFor(() => expect(notices.getSnapshot()[0]?.text)
       .toBe("“Implement receipt lookup” could not be opened. Ariadne is still loading this session's latest changes. Try again."));
     expect(value.calls.selected).toHaveLength(0);
     expect(value.transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
   });
-  it('bounds stale selection at five seconds and ignores the late refresh', async () => {
-    const value = await mount(), { release } = await staleTree(value);
+  it('bounds an errored session selection at five seconds and ignores the late refresh', async () => {
+    const value = await mount(), { release } = await erroredTree(value, 'held');
     vi.useFakeTimers();
     fireEvent.click(row('3'));
     await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
@@ -2953,6 +3001,8 @@ describe('scrolling the tree', () => {
     await waitFor(() => expect(row('1.1')).toBeNull());
     backToSelected();
     await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    // A hidden selection is not a rendered row: it keeps the read (reveal_item) path.
+    expect(view.transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(1);
     expect(scroller().scrollTop).toBe(150);
     view.rerender({ reveal: view.calls.selected[0], selectedId: '1.1' });
     expect(row('1.1')).not.toBeNull();

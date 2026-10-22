@@ -384,7 +384,8 @@ export function TreeView(props: TreeViewProps) {
     return edits.queue(route, change, subject);
   };
   const clickedReveal = useRef<RevealedItem | null>(null);
-  const select = (id: string, fromRow = true, opening = false) => {
+  /** `loaded`: only the activation of a rendered row opens from the copy on screen; see RegisteredRoutes.revealLoaded. */
+  const select = (id: string, fromRow = true, opening = false, options: { readonly loaded?: boolean } = {}) => {
     if (fromRow && viewBusy && !navigation.isRecentPending()) return false;
     if (fromRow) peek?.closeAll();
     releaseReveal();
@@ -416,13 +417,17 @@ export function TreeView(props: TreeViewProps) {
         await completion;
         if (expired || !mounted.current || call !== request.current) return null;
       }
-      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
-      if (expired || !mounted.current || call !== request.current) return null;
-      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) throw loading();
+      // A rendered row opens from the loaded copy, so a refresh in flight never blocks the click. Anything else reads first.
+      const loadedReveal = options.loaded ? navigation.routes.revealLoaded({ ...route, item_id: id }, store) : null;
+      if (!loadedReveal) {
+        if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
+        if (expired || !mounted.current || call !== request.current) return null;
+        if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) throw loading();
+      }
       const current = navigation.getSnapshot();
       if ((current.writing || current.pendingOperationId !== null) && !navigation.isRecentPending()) throw new OwnFailure({ code: 'store_busy',
         message: 'Another view change is being saved. Wait for it, then try again.', hint: '', retryable: true, field_errors: [] });
-      return navigation.routes.revealItem({ ...route, item_id: id });
+      return loadedReveal ?? navigation.routes.revealItem({ ...route, item_id: id });
     };
     // Bound both the readiness wait and route read; only the latest click can select a row.
     void Promise.race([reveal(), new Promise<null>((_resolve, reject) => { timeout = setTimeout(() => { expired = true; reject(loading()); }, 5000); })]).then(result => {
@@ -453,6 +458,8 @@ export function TreeView(props: TreeViewProps) {
     });
     return true;
   };
+  /** A pointer click or Enter on a rendered row. Every other caller of select() keeps the read path. */
+  const activate = (id: string) => select(id, true, false, { loaded: true });
   const focusBranch = (id: string | null) => {
     if (focusDisabled) return;
     if (id && (!session?.items[id] || session.items[id]!.parent)) return;
@@ -600,7 +607,7 @@ export function TreeView(props: TreeViewProps) {
     enter: onRow(row => {
       if (row.kind === 'topic') { toggleTopic(row.topic.id); return true; }
       if (row.kind === 'strip') { if (row.reason === 'hidden') toggleStrip(row); return true; }
-      select(row.item.id); return true;
+      activate(row.item.id); return true;
     }),
     peek: onRow((row, _index, _intent, event) => {
       if (row.kind !== 'item' || !peek) return false;
@@ -1283,7 +1290,7 @@ export function TreeView(props: TreeViewProps) {
           if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
         }}
         onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
-        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} />)}
+        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={activate} onToggle={toggleItem} />)}
     </div>; })}
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 

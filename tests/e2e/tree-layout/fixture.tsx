@@ -101,6 +101,8 @@ class TreeLayoutTransport extends AppTransport {
   failAck = false;
   /** Set while a read of the session fails, as a locked or damaged session file does: the Map keeps its last good copy. */
   failReads = false;
+  /** While above 0, every read of the session takes this many ms to answer, as a 2,000-item session on a busy machine does. */
+  holdReads = 0;
   /** While set, a preferences save waits here: it is in flight, and its outcome is not known yet. */
   private saveGate: Promise<void> | null = null;
   /** Set until the owner's next "Later" is saved: that write is lost on its way back (reading marks and the like still land). */
@@ -110,6 +112,7 @@ class TreeLayoutTransport extends AppTransport {
   async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
     if (this.failReads && !('command' in request) && request.request.command === 'session_get') throw new Error('The session file could not be read.');
+    if (this.holdReads && !('command' in request) && request.request.command === 'session_get') await new Promise(resolve => setTimeout(resolve, this.holdReads));
     if ('command' in request && request.command.command === 'preferences_patch' && this.saveGate) await this.saveGate;
     if ('command' in request && request.command.command === 'preferences_patch' && this.loseLater
         && request.command.params.entries.some(entry => entry.kind === 'set_later')) { this.loseLater = false; throw new Error('Lost response'); }
@@ -170,6 +173,9 @@ class TreeLayoutTransport extends AppTransport {
     if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; reported('connected'); }
     if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
     if (change === 'read-returns') this.failReads = false;
+    // A hint arrives and the read it starts takes 6 s (a row click and Send must not wait for it); 'read-release' ends the hold.
+    if (change === 'read-hold') { this.holdReads = 6000; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
+    if (change === 'read-release') { this.holdReads = 0; return; }
     // SPEC 12.9: the next save is lost on its way back (Ariadne can't tell whether it landed); its check can be held in flight and released.
     if (change === 'save-unsure') { this.loseLater = true; return; }
     if (change === 'save-hold') { this.saveGate = new Promise<void>(resolve => { this.releaseSave = resolve; }); return; }
