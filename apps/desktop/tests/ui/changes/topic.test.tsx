@@ -47,7 +47,7 @@ describe('topic brief and shared catch-up', () => {
     open();
     const row = screen.getByText('Updated name A').closest('li')!;
     fireEvent.click(within(row).getByRole('button', { name: 'Mark Updated name A seen' }));
-    expect((within(row).getByRole('button', { name: 'Updated name A is seen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(row).getByRole('button', { name: 'Updated name A is seen' }).getAttribute('aria-disabled')).toBe('true');
     expect(row.getAttribute('data-seen')).toBe('true');
     expect(within(row).queryByTestId('change-marker')).toBeNull();
     expect(value.navigation.reading.getSnapshot().some(patch => patch.items.some(item => item.item_id === 'updated-0'))).toBe(true);
@@ -56,13 +56,120 @@ describe('topic brief and shared catch-up', () => {
     expect(within(popover()).queryByText('Updated name A')).toBeNull();
     expect(within(popover()).getByText('Updated name B')).toBeTruthy();
   });
-  it('drops a row read elsewhere (the dock or Details) without a click', async () => {
+  it('keeps a row read elsewhere (the dock or Details), dimmed, with focus on its check and a polite announcement', async () => {
+    const value = await setup(2);
+    open();
+    const check = within(popover()).getByRole('button', { name: 'Mark Updated name A seen' });
+    check.focus();
+    act(() => value.navigation.markItemSeen(route, 'updated-0'));
+    const row = within(popover()).getByText('Updated name A').closest('li')!;
+    expect(row.getAttribute('data-seen')).toBe('true');
+    expect(within(row).queryByTestId('change-marker')).toBeNull();
+    const seen = within(row).getByRole('button', { name: 'Updated name A is seen' });
+    expect(seen.getAttribute('aria-disabled')).toBe('true');
+    expect(seen.hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(seen);
+    expect(within(popover()).getAllByTestId('changes-row')).toHaveLength(2);
+    expect(within(popover()).getByText('Updated name B')).toBeTruthy();
+    expect(within(popover()).getByRole('status', { name: 'Seen elsewhere' }).textContent).toBe('Updated name A seen');
+    expect(value.session.items['updated-0']!.status).toBe('open');
+    // A click on a dimmed check does nothing more.
+    const mark = vi.spyOn(value.navigation, 'markItemSeen');
+    fireEvent.click(seen);
+    expect(mark).not.toHaveBeenCalled();
+  });
+  it('does not announce a row the owner marked with its own check', async () => {
+    await setup(2);
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Updated name A seen' }));
+    expect(within(popover()).getByRole('status', { name: 'Seen elsewhere' }).textContent).toBe('');
+  });
+  it('keeps the last unseen row and the away summary when it is read elsewhere', async () => {
+    const value = await setup(1, 0, 1, true);
+    open();
+    const before = within(popover()).getByRole('region', { name: 'While you were away' }).textContent;
+    expect(before).toBeTruthy();
+    act(() => { value.navigation.markItemSeen(route, 'updated-0'); value.navigation.markItemSeen(route, 'new-0'); });
+    expect(within(popover()).getAllByTestId('changes-row')).toHaveLength(2);
+    expect(within(popover()).getByRole('region', { name: 'While you were away' }).textContent).toBe(before);
+    expect(within(popover()).queryByText(/All caught up/)).toBeNull();
+    expect(within(popover()).getByRole('region', { name: 'Since you were here' })).toBeTruthy();
+  });
+  it('shows a row seen elsewhere as live again when the agent changes the item once more', async () => {
+    const value = await setup(1);
+    open();
+    act(() => value.navigation.markItemSeen(route, 'updated-0'));
+    expect(within(popover()).getByRole('button', { name: 'Updated name A is seen' })).toBeTruthy();
+    const item = value.session.items['updated-0']!;
+    item.revision = 3;
+    item.changes!.push(value.record({ revision: 3, at: '2026-10-10T01:30:00Z' }));
+    ++value.session.revision; value.session.updated_at = '2026-10-10T01:30:00Z';
+    value.rerender(value.element());
+    const row = within(popover()).getByText('Updated name A').closest('li')!;
+    expect(row.getAttribute('data-seen')).toBeNull();
+    expect(within(row).getByTestId('change-marker')).toBeTruthy();
+    const check = within(row).getByRole('button', { name: 'Mark Updated name A seen' });
+    expect(check.getAttribute('aria-disabled')).toBeNull();
+    expect(within(popover()).getAllByTestId('changes-row')).toHaveLength(1);
+  });
+  it('keeps an open Before → after panel open when its row turns seen elsewhere', async () => {
+    const value = await setup(2);
+    open();
+    const row = within(popover()).getByText('Updated name A').closest('li')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Before → after' }));
+    act(() => value.navigation.markItemSeen(route, 'updated-0'));
+    expect(within(row).getByRole('button', { name: 'Hide before → after' }).getAttribute('aria-expanded')).toBe('true');
+    expect(row.isConnected).toBe(true);
+  });
+  it('lists a change that arrives while a seen row is held', async () => {
+    const value = await setup(1);
+    open();
+    act(() => value.navigation.markItemSeen(route, 'updated-0'));
+    value.add('arrival', 'A later arrival', { created_at: '2026-10-10T01:30:00Z', changes: [], created_message_id: 'later-batch' });
+    ++value.session.revision; value.session.updated_at = '2026-10-10T01:30:00Z';
+    value.rerender(value.element());
+    expect(within(popover()).getAllByTestId('changes-row')).toHaveLength(2);
+    expect(within(popover()).getByRole('button', { name: 'Mark A later arrival seen' })).toBeTruthy();
+    expect(within(popover()).getByRole('button', { name: 'Updated name A is seen' })).toBeTruthy();
+  });
+  it.each([
+    ['removed', (value: Awaited<ReturnType<typeof setup>>) => { value.session.items['updated-0']!.removed_at = '2026-10-10T01:30:00Z'; }],
+    ['archived with its parent', (value: Awaited<ReturnType<typeof setup>>) => {
+      value.session.items['updated-0']!.parent = '1'; value.session.items['1']!.removed_at = '2026-10-10T01:30:00Z';
+    }],
+    ['moved to another topic', (value: Awaited<ReturnType<typeof setup>>) => { value.session.items['updated-0']!.topic_id = 'elsewhere'; }],
+  ])('drops a held row when its item is %s', async (_name, change) => {
     const value = await setup(2);
     open();
     act(() => value.navigation.markItemSeen(route, 'updated-0'));
-    expect(within(popover()).queryByText('Updated name A')).toBeNull();
+    expect(within(popover()).getByText('Updated name A')).toBeTruthy();
+    change(value);
+    ++value.session.revision; value.session.updated_at = '2026-10-10T01:30:00Z';
+    value.rerender(value.element());
+    expect(screen.queryByText('Updated name A')).toBeNull();
     expect(within(popover()).getByText('Updated name B')).toBeTruthy();
-    expect(value.session.items['updated-0']!.status).toBe('open');
+  });
+  it('does not announce an unseen row that leaves because its item was removed', async () => {
+    const value = await setup(2);
+    open();
+    value.session.items['updated-0']!.removed_at = '2026-10-10T01:30:00Z';
+    ++value.session.revision; value.session.updated_at = '2026-10-10T01:30:00Z';
+    value.rerender(value.element());
+    expect(screen.queryByText('Updated name A')).toBeNull();
+    expect(within(popover()).getByRole('status', { name: 'Seen elsewhere' }).textContent).toBe('');
+  });
+  it('clears the held rows on Mark all caught up, so All caught up shows, and Undo brings the unseen rows back', async () => {
+    await setup(2);
+    open();
+    fireEvent.click(within(popover()).getByRole('button', { name: 'Mark Updated name A seen' }));
+    expect(within(popover()).getByRole('button', { name: 'Updated name A is seen' })).toBeTruthy();
+    fireEvent.click(within(popover()).getByRole('button', { name: /Mark all caught up/ }));
+    expect(within(popover()).getByText(/All caught up\. The markers are cleared/)).toBeTruthy();
+    expect(within(popover()).queryAllByTestId('changes-row')).toHaveLength(0);
+    fireEvent.click(within(popover()).getByRole('button', { name: '↺ Undo' }));
+    const check = within(popover()).getByRole('button', { name: 'Mark Updated name B seen' });
+    expect(check.getAttribute('aria-disabled')).toBeNull();
+    expect(within(popover()).queryByText(/All caught up/)).toBeNull();
   });
   it('accepts an explicit Seen while a change hint makes the session stale', async () => {
     const value = await setup();
@@ -87,7 +194,7 @@ describe('topic brief and shared catch-up', () => {
     value.rerender(value.element());
     // The newer revision is still unread: it comes back as a changed row the owner can mark.
     fireEvent.keyDown(window, { key: 'Escape' }); open();
-    expect(within(popover()).getByRole('button', { name: 'Mark Updated name A seen' }).hasAttribute('disabled')).toBe(false);
+    expect(within(popover()).getByRole('button', { name: 'Mark Updated name A seen' }).getAttribute('aria-disabled')).toBeNull();
     expect(value.navigation.getSnapshot().error).toBeNull();
   });
   it('keeps an unaccepted Seen action available without showing success or removing its row', async () => {
@@ -98,7 +205,7 @@ describe('topic brief and shared catch-up', () => {
     expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
     expect(screen.queryByRole('button', { name: 'Updated name A is seen' })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-    expect(screen.getByRole('button', { name: 'Mark Updated name A seen' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Mark Updated name A seen' }).getAttribute('aria-disabled')).toBeNull();
     expect(screen.getByRole('button', { name: 'Updated name A' })).toBeTruthy();
   });
   it.each(['implicit', 'bulk'] as const)('keeps an unobserved commit made before %s catch-up unread, with its changed marker', async kind => {

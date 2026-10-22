@@ -1101,6 +1101,7 @@ export function TreeView(props: TreeViewProps) {
   };
   const revealSelected = (returnFocus = false) => {
     if (!selectedId || graph) return;
+    peek?.closeAll();
     if (!elements.current.has(selectedId)) {
       // Reuse the temporary reveal route when the owner has folded the selection away.
       if (select(selectedId, false) && returnFocus) focusRequested.current = selectedId;
@@ -1108,6 +1109,12 @@ export function TreeView(props: TreeViewProps) {
     }
     settled.current = true; setAnchor(null); nearest(selectedId, 8); retainReveal(selectedId);
     if (returnFocus) focusRow(selectedId);
+    // Reveal selected also opens Details on the row (owner's pick, 2026-10-22). The reveal is built here from what is on screen:
+    // no read, and `clickedReveal` marks it as this view's own so the selection effect does not scroll a second time.
+    const own = Object.freeze({ kind: 'item' as const, route: Object.freeze({ ...route, item_id: selectedId }), store,
+      temporaryExpandedItemIds: revealId === selectedId && temporary ? temporary : [] });
+    clickedReveal.current = own;
+    onSelected(own, true);
   };
   useLayoutEffect(() => {
     const target = focusRequested.current;
