@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-21
+# Ariadne handoff — 2026-10-23
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,9 +21,10 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `66e7a3f8` (#177). Alpha.22 released as
-[`v0.1.0-alpha.22`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.22)**
-(tag at `66e7a3f8`). Alpha.21 is `v0.1.0-alpha.21` (tag at `8ed87b66`, #173), alpha.20 is
+**Main: `37cdfc69` (#179). Alpha.23 released as
+[`v0.1.0-alpha.23`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.23)**
+(tag at `37cdfc69`). Alpha.22 is `v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
+`v0.1.0-alpha.21` (tag at `8ed87b66`, #173), alpha.20 is
 `v0.1.0-alpha.20` (tag at `c5c8f6a9`, #171), alpha.19 is
 `v0.1.0-alpha.19` (tag at `c87909da`, #169), alpha.18 is
 `v0.1.0-alpha.18` (tag at `0336a903`, #164), alpha.17 is
@@ -32,6 +33,19 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.23 released
+
+[#179](https://github.com/kartiksayani/ariadne/pull/179), `37cdfc69`, "Nothing blocks you": a brief refresh, a timer or the app's own window fit no longer undoes or blocks what the owner just did. The release is a pre-release with the asset `ariadne-0.1.0-alpha.23-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.23` on 2026-10-23 and installed on the owner's machine; both installed binaries match the package, and older helper versions are kept. CI was green on the first run. Saved data is unchanged from alpha.22. What changed for the owner:
+
+- Clicks open at once, even on big sessions (F1). Clicking a row, or pressing Enter on it, opens it from the loaded snapshot instead of re-reading the whole session first, so there is no false "still loading… Try again".
+- Send never silently does nothing (F2). Clicking Send while the agent is updating the session waits for that update, then sends once (`sendable`, and a read-only wait lock). The box holds the owner's text while it waits.
+- What changed holds the rows it showed (F3). A row read elsewhere while the popover is open stays in place, dimmed, instead of disappearing and moving the list.
+- Only owner-made window frames are saved (F4). A time-bounded `SaveGate` plus display-change and scale-change rules mean opening on the laptop alone no longer overwrites the size set on an external display, and unplugging it does not either.
+- Reveal selected opens Details in both the Tree and the Graph (F5, P11.12; the owner chose this on 2026-10-22). The Back to pill does the same.
+- The Map stops redrawing while idle (F6). Stores skip no-change publishes, and rows are reused and memoised. On a 2,000-item fixture, idle row renders went from 30,285 per 5 s to 0, and click-to-Details from 5.4 s to about 2 s.
+- Version 0.1.0-alpha.23 (F7), and test follow-through (F8).
+- Flakes fixed in the release: the native tree journey "row click refused…" and the native "Visible detail Reply did not save the exact owner text" (causes under Known flakes). One new first-occurrence flake is recorded: "Native Quit note observation deadline".
 
 ## Alpha.22 released
 
@@ -179,17 +193,15 @@ built.
 
 ## Next steps
 
-Alpha.22 finished the alpha.21 follow-ups, the alpha.18 hook-notice, store and install follow-ups (P11.17–P11.21, P11.24, P11.25, P11.27), the #162 Graph follow-ups (P11.10, P11.11, P11.13), the recovery edge cases (P11.7) and the previous-release read test (P11.8). Item 1 is the follow-ups carried to the next release (alpha.23); the owner picks the order.
+Alpha.23 closed the alpha.22 follow-ups list (the native tree row click and the native Reply flake are fixed; the saved window size over an external display is fixed by F4, with the owner hardware check below) and finished P11.12 (Reveal selected opens Details in both views). Item 1 is the follow-ups carried to the next release (alpha.24); the owner picks the order.
 
 1. **Follow-ups carried to the next release** (none blocks it).
-   - Native tree row click refused with "still loading this session's latest changes" on CI at 1024×677. It failed 2 of 3 runs before the retry in `selectRow` (`apps/desktop/tests/e2e/tree.spec.mjs`) was added, and never on main at 1300 wide. An investigation found no alpha.22 cause: `TreeView.tsx` `select()` rejects when the store is not ready after `refresh(true)`, or on its 5 s reveal budget. Find which trigger fires, using the new evidence files `tree-reveal-refused-*.json` and `sessionStatus` in `tree-journey-failure.json`. Then decide whether real users at small windows see it.
-   - The What changed popover moves about 45 to 52 px shortly after opening and after Before → after expands, as seen on CI. Find out what moves it (the placement `ResizeObserver` in `ChangesOpener.tsx`, the BriefLead "Show more" measure, or something else) and whether the owner can see it.
-   - Known native flake "Visible detail Reply did not save the exact owner text" (`runRecoveryAcceptance`; seen on main since alpha.11): a Send click is lost while the text and Send stay enabled.
-   - Carried over: the saved window size over an external display (pre-existing).
+   - After `.` or Enter, the keyboard focus ring hides: in `TreeView.tsx` the selection effect runs `setKbd(false)` on the view's own reveal echo. Decide whether keyboard selection should keep the ring.
+   - `ui/tree/model.ts` `sameValue` treats Sets, Maps and Dates as equal. This is latent, since no row field holds one today. Recurse only into arrays and plain objects.
+   - Owner hardware check for F4: put the window on the external display, unplug it, wait more than 2 s, quit, replug and relaunch; it should open on the external display at the owner's size. Also drag the window between a 2x and a 1x display and relaunch.
    - After install, check whether `/reload-plugins` alone loads the new plugin and whether it fires `session.end`. Pending the owner's report.
-2. Follow-ups from #162, each a small task:
-   - P11.12 Reveal selected detail parity: the Graph keeps detail closed and the Tree opens it. The owner decides, then both align. Alpha.22 gave the Graph the Back-to key like the Tree; the detail parity itself is still open.
-   - P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
+   - F6e residual: `disabled` flips on all rows during a view write, so a click causes two full-row redraws.
+2. Follow-up from #162, a small task: P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
 3. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
 
 ## Process lessons
@@ -213,12 +225,19 @@ Refresh this page, tasks.json and the roadmap chart using
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
 
-- **Native tree journey, row click refused with “still loading this session's latest changes” (`apps/desktop/tests/e2e/tree.spec.mjs`, `selectRow`).** Test-side retry added in alpha.22; cause not found.
-  - First failed: alpha.22 integration CI at 1024×677, 2 of 3 runs. Never on main at 1300 wide. No retry fired on the green run.
-  - Suspected cause: `TreeView.tsx` `select()` rejects when the store is not ready after `refresh(true)`, or on its 5 s reveal budget. `selectRow` now waits for a ready session and retries one refused reveal, and writes `tree-reveal-refused-*.json`; `tree-journey-failure.json` carries `sessionStatus`. Read those first.
+- **Native Quit note observation deadline (`scripts/native-quit-note.mjs:145`, the delivery phase).** First occurrence; not fixed.
+  - First failed: local alpha.23 integration run, 2026-10-22, under machine load. A rerun passed 10/10 blocks and CI native passed.
+  - Suspected cause: the System Events accessibility inspect is slow under load. No alpha.23 change touches quit.
 
-- **Native journey, “Visible detail Reply did not save the exact owner text” (`runRecoveryAcceptance`).** Seen on main since alpha.11; not fixed.
-  - A Send click is lost while the text and Send stay enabled.
+- **Native tree journey, row click refused with “still loading this session's latest changes” (`apps/desktop/tests/e2e/tree.spec.mjs`, `selectRow`).** Fixed in alpha.23 (#179).
+  - First failed: alpha.22 integration CI at 1024×677, 2 of 3 runs. Never on main at 1300 wide. Alpha.22 added a test-side retry in `selectRow`.
+  - Cause: the row click joined a full session re-read inside a 5 s race. It now opens from the loaded data (F1).
+  - Pinned by a held-read vitest and `tests/e2e/tree-layout/row-opens.spec.mts`, both deterministic.
+
+- **Native journey, “Visible detail Reply did not save the exact owner text” (`runRecoveryAcceptance`).** Fixed in alpha.23 (#179); seen on main since alpha.11.
+  - A Send click was lost while the text and Send stayed enabled.
+  - Cause: Send was disabled or refused during each `stale` publish. It now waits for the refresh (F2).
+  - Pinned by the refresh-overlap send test in `readiness.test.tsx`, which is deterministic.
 
 - **`apps/desktop/tests/ui/tree/component.test.tsx`, “waits for a stale session before selecting with click”.** Fixed in #162 (released in alpha.17).
   - First failed: local #162 coverage gate, 2026-10-15. Selection completed and was saved, but the final notice assertion expected zero notices and saw one (then line 647); an unchanged full coverage rerun passed. Second occurrence: the owner's full coverage run on the same working tree, also 2026-10-15 (about 60 s for the file with `--maxWorkers=3`).
