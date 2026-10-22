@@ -2887,6 +2887,34 @@ describe('scrolling the tree', () => {
     expect(css).toMatch(/\.tree-scroll-shell\s*\{[^}]*position: relative/);
   });
 
+  // P11.12: Reveal selected (`.` and the Back-to pill) opens Details on the selected row, in view or not, from what is on screen.
+  it.each([['in view', '3'], ['above the view', '1'], ['below the view', '8']] as const)('opens Details on the selected row with `.` when it is %s: no read, no second scroll', async (_where, id) => {
+    const view = await opened({ props: { selectedId: id } });
+    fireEvent.scroll(scroller());
+    const reads = () => view.transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    const before = reads(), selections = view.calls.selected.length;
+    backToSelected();
+    expect(view.calls.selected).toHaveLength(selections + 1);
+    expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: id }, temporaryExpandedItemIds: [] });
+    expect(view.calls.openedDetail.at(-1)).toBe(true);
+    expect(reads()).toBe(before);
+    // The workspace echoes the reveal back; the row is already placed, so the Map does not scroll again.
+    const box = scroller();
+    let top = box.scrollTop, writes = 0;
+    Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { writes++; top = value; } });
+    view.rerender({ selectedId: id, reveal: view.calls.selected.at(-1)! });
+    expect(writes).toBe(0);
+  });
+  it('carries the selection’s temporary unfolds into the reveal that opens Details', async () => {
+    const view = await opened({ props: { selectedId: '8' } });
+    view.rerender({ selectedId: '8', reveal: { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: ['1'] } });
+    fireEvent.scroll(scroller());
+    const selections = view.calls.selected.length;
+    backToSelected();
+    expect(view.calls.selected).toHaveLength(selections + 1);
+    expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '8' }, temporaryExpandedItemIds: ['1'] });
+  });
+
   it('uses the full selected question for accessibility and distinguishing words before tag truncation', async () => {
     const view = await opened({ configure: transport => {
       const items = transport.sessions.get(route.session_id)!.items;

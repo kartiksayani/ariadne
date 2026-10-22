@@ -1108,6 +1108,13 @@ export function TreeView(props: TreeViewProps) {
     }
     settled.current = true; setAnchor(null); nearest(selectedId, 8); retainReveal(selectedId);
     if (returnFocus) focusRow(selectedId);
+    // Reveal selected also opens Details on the row (owner's pick, 2026-10-22). The reveal is built here from what is on screen:
+    // no read, and `clickedReveal` marks it as this view's own so the selection effect does not scroll a second time.
+    peek?.closeAll();
+    const own = Object.freeze({ kind: 'item' as const, route: Object.freeze({ ...route, item_id: selectedId }), store,
+      temporaryExpandedItemIds: revealId === selectedId && temporary ? temporary : [] });
+    clickedReveal.current = own;
+    onSelected(own, true);
   };
   useLayoutEffect(() => {
     const target = focusRequested.current;

@@ -383,7 +383,18 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       const { graph: current, selectedId: id } = latest.current;
       if (covered || !id || !current) return false;
       peek?.closeAll();
-      if (current.nodes.has(id)) { setScrollTarget({ id, center: false, focus: true }); return true; }
+      if (current.nodes.has(id)) {
+        setScrollTarget({ id, center: false, focus: true });
+        // A drawn node needs no read: Details opens on it from what is on screen. The reveal is marked as this view's own, so
+        // coming back through `reveal` does not centre the node; it carries the selection's temporary unfolds for the Tree.
+        const pending = ownReveal.current;
+        const own: RevealedItem = pending?.kind === 'item' && pending.route.item_id === id ? pending
+          : Object.freeze({ kind: 'item' as const, route: Object.freeze({ ...latest.current.view.session, item_id: id }), store,
+            temporaryExpandedItemIds: itemReveal?.route.item_id === id ? itemReveal.temporaryExpandedItemIds : [] });
+        ownReveal.current = own;
+        latest.current.onReveal(own, true);
+        return true;
+      }
       const call = ++request.current, asked = latest.current.asked;
       const stale = () => !mounted.current || call !== request.current || asked !== latest.current.asked;
       void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {

@@ -27,8 +27,10 @@ interface CompositionProps {
 async function setup(session: Session = graphSession(), view = preferences()) {
   const route = { project_id: session.project_id, session_id: session.id };
   let failReveal = false;
+  const commands: string[] = [];
   const transport: DesktopTransport = {
     async invoke<T>(command: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
+      commands.push(command);
       if (command === 'reveal_item' && failReveal) return { api_version: 1, ok: false,
         error: { code: 'unavailable', message: 'The registered item could not be read.', hint: 'Retry.', retryable: true, field_errors: [] } } as T;
       const request = args.request;
@@ -40,7 +42,7 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   };
   const service = createDesktopService(transport), sessions = new OpenSessions(service); opened.push(sessions);
   const store = sessions.open(route); await store.refresh();
-  const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
+  const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [], revealed: RevealedItem[] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
   function Composition({ reveal = null, outside = 0, hidden, selection, filters, expanded, markers, search, onCommit, onClearFilters, onDismissBanner, covered }: CompositionProps) {
     const [current, setCurrent] = useState(view);
@@ -49,10 +51,10 @@ async function setup(session: Session = graphSession(), view = preferences()) {
       ...(selection ? { selected_item_id: selection } : {}), ...(filters ? { filters: { ...current.filters, ...filters } } : {}),
       ...(expanded ? { expanded_item_ids: expanded } : {}) })} later={new Set()} reveal={reveal} revealAsks={outside} markers={markers} onClearFilters={onClearFilters} onDismissBanner={onDismissBanner} covered={covered}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
-      onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
+      onReveal={(result, openDetail) => { revealed.push(result); if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
     return <MapSearchContext.Provider value={search ?? NO_SEARCH}>{graph}</MapSearchContext.Provider>;
   }
-  return { Composition, store, routes, saved, reveals, route, session,
+  return { Composition, store, routes, saved, reveals, revealed, commands, route, session,
     failReveal: () => { failReveal = true; }, writeWith: (next: typeof write) => { write = next; } };
 }
 /** The Graph's scroller and its nodes, found without CSS classes. */
@@ -552,23 +554,54 @@ describe('session graph view', () => {
     expect(dismissed).not.toHaveBeenCalled();
   });
 
-  // P11.12: `.` is the Tree's Back to: a drawn node is scrolled to and focused with Details left alone; a selection folded away is
-  // revealed through its route and opens Details; a covered Map does nothing.
-  it('goes back to a drawn selection with `.`: scrolls to it and focuses it, without touching Details', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const box = this.closest<HTMLElement>('[data-testid="graph-scroll"]');
-      if (this.dataset.testid === 'graph-scroll') return new DOMRect(0, 0, 400, 300);
-      return new DOMRect(600 - (box?.scrollLeft ?? 0), 500 - (box?.scrollTop ?? 0), 190, 66);
-    });
+  // P11.12: `.` is Reveal selected: a drawn node is scrolled to, focused and opens Details from what is on screen (no read); a
+  // selection folded away is revealed through its route and opens Details; a covered Map does nothing.
+  const nodeAt600x500 = () => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const box = this.closest<HTMLElement>('[data-testid="graph-scroll"]');
+    if (this.dataset.testid === 'graph-scroll') return new DOMRect(0, 0, 400, 300);
+    return new DOMRect(600 - (box?.scrollLeft ?? 0), 500 - (box?.scrollTop ?? 0), 190, 66);
+  });
+  it('goes back to a drawn selection with `.`: scrolls to it, focuses it and opens Details without a read', async () => {
+    nodeAt600x500();
     const value = await setup(undefined, preferences({ selected_item_id: '3' }));
     render(<><button type="button">Elsewhere</button><value.Composition selection="3" /></>);
     const box = scroll();
     box.scrollTop = 0; box.scrollLeft = 0;
     act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
+    const reads = () => value.commands.filter(command => command === 'reveal_item').length, before = reads();
     await act(async () => { expect(dispatchIntent('map.backToSelected')).toBe(true); });
     expect(document.activeElement).toBe(graphNode('3'));
     expect(box.scrollTop).toBeGreaterThan(0);
-    expect(value.reveals).toEqual([]);
+    expect(value.reveals).toEqual([['3', true]]);
+    expect(reads()).toBe(before);
+  });
+
+  it('opens Details with `.` on a node already in view without moving the view, and does not centre it when the reveal comes back', async () => {
+    nodeAt600x500();
+    const value = await setup(undefined, preferences({ selected_item_id: '3' }));
+    const { rerender } = render(<><button type="button">Elsewhere</button><value.Composition selection="3" /></>);
+    const box = scroll();
+    // The node sits whole, off-centre, inside the 400x300 view.
+    box.scrollTop = 300; box.scrollLeft = 450;
+    await act(async () => { expect(dispatchIntent('map.backToSelected')).toBe(true); });
+    expect(value.reveals).toEqual([['3', true]]);
+    expect(document.activeElement).toBe(graphNode('3'));
+    expect({ top: box.scrollTop, left: box.scrollLeft }).toEqual({ top: 300, left: 450 });
+    // Back through `reveal`, the Graph's own reveal is an echo: it is not an outside jump, so nothing centres.
+    rerender(<><button type="button">Elsewhere</button><value.Composition selection="3" reveal={value.revealed[0]} /></>);
+    expect({ top: box.scrollTop, left: box.scrollLeft }).toEqual({ top: 300, left: 450 });
+  });
+
+  it('carries the selection’s temporary unfolds in the reveal `.` sends', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', expanded_item_ids: [] }));
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    expect(reveal?.kind === 'item' && reveal.temporaryExpandedItemIds.length).toBeGreaterThan(0);
+    render(<value.Composition selection="1.1.1" reveal={reveal} outside={1} />);
+    expect(graphNode('1.1.1')).not.toBeNull();
+    await act(async () => { expect(dispatchIntent('map.backToSelected')).toBe(true); });
+    expect(value.reveals).toEqual([['1.1.1', true]]);
+    const sent = value.revealed[0]!;
+    expect(sent.kind === 'item' && sent.temporaryExpandedItemIds).toEqual(reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null);
   });
 
   it('goes back to a selection folded away with `.`: reveals it through its route and opens Details', async () => {
