@@ -604,6 +604,32 @@ describe('session graph view', () => {
     expect(sent.kind === 'item' && sent.temporaryExpandedItemIds).toEqual(reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null);
   });
 
+  it('keeps the earlier reveal’s temporary unfolds when `.` is pressed on a sibling whose own reveal is still in flight', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', expanded_item_ids: [] }));
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    const unfolds = reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : [];
+    expect(unfolds.length).toBeGreaterThan(0);
+    // The sibling's reveal never answers within this test: `.` runs while it is in flight.
+    vi.spyOn(value.routes, 'revealItem').mockReturnValueOnce(new Promise(() => {}));
+    render(<value.Composition reveal={reveal} outside={1} />);
+    act(() => node('1.1.1').focus());
+    await act(async () => { fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' }); });
+    expect(selected()).toBe('1.2');
+    await act(async () => { expect(dispatchIntent('map.backToSelected')).toBe(true); });
+    expect(value.reveals).toEqual([['1.2', true]]);
+    const sent = value.revealed[0]!;
+    expect(sent.kind === 'item' && sent.temporaryExpandedItemIds).toEqual(unfolds);
+  });
+
+  it.each(['drawn', 'folded away'] as const)('closes an open peek with `.` when the selection is %s', async where => {
+    const peek = peekStub();
+    const value = await setup(undefined, preferences(where === 'drawn' ? { selected_item_id: '3' } : { selected_item_id: '1.1.1', expanded_item_ids: [] }));
+    render(<PeekContext.Provider value={peek}><value.Composition selection={where === 'drawn' ? '3' : '1.1.1'} /></PeekContext.Provider>);
+    await act(async () => { expect(dispatchIntent('map.backToSelected')).toBe(true); });
+    expect(peek.closeAll).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(value.reveals).toHaveLength(1));
+  });
+
   it('goes back to a selection folded away with `.`: reveals it through its route and opens Details', async () => {
     const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', expanded_item_ids: [] }));
     render(<value.Composition selection="1.1.1" />);

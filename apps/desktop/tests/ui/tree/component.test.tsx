@@ -26,6 +26,7 @@ import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { peekNames } from '../../../src/ui/peek/names';
+import { PeekContext, type PeekNavigation } from '../../../src/ui/peek/context';
 import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
 import { removeSubject } from '../../../src/ui/remove/model';
 import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
@@ -65,8 +66,18 @@ interface Recorded {
   /** The topics "Reply to topic" and a stuck reply's Edit asked Details to open (alpha.21 E6). */
   topics: string[];
 }
-async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null }: {
+/** A peek that only counts closeAll, for the tests that ask whether a key closes it. */
+function peekStub() {
+  const peek = {
+    open: vi.fn(), close: vi.fn(), reference: () => null,
+    chipProps: () => ({ onClick() {}, onKeyDown() {}, onMouseEnter() {}, onMouseMove() {}, onMouseLeave() {} }),
+    hoverStart: vi.fn(), hoverEnd: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
+  };
+  return peek as typeof peek & PeekNavigation;
+}
+async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null, peek = null }: {
   transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean; removal?: RemovalQueue | null;
+  peek?: PeekNavigation | null;
 } = {}) {
   if (removal) removals.add(removal);
   configure?.(transport);
@@ -81,7 +92,7 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
     const [topic, setTopic] = useState<string | null>(null);
-    return <RemovalContext.Provider value={removal}><LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
+    return <PeekContext.Provider value={peek}><RemovalContext.Provider value={removal}><LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} summaries={[]} now={now}
       onSelected={(result, openDetail = true) => { calls.selected.push(result); calls.openedDetail.push(openDetail); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
@@ -89,7 +100,7 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
       onOpenTopic={topicId => { calls.topics.push(topicId); setTopic(topicId); }}
       onRemove={() => { calls.removed++; }} {...props} {...extra} />
       {/* Details' topic mode, beside the tree: the reply composer the menu opens. */}
-      {topic && <TopicConversation drafts={drafts} store={store} topicId={topic} onOpenItem={() => {}} />}</LinkOpener.Provider></RemovalContext.Provider>;
+      {topic && <TopicConversation drafts={drafts} store={store} topicId={topic} onOpenItem={() => {}} />}</LinkOpener.Provider></RemovalContext.Provider></PeekContext.Provider>;
   }
   const view = render(<Harness />);
   return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
@@ -2913,6 +2924,20 @@ describe('scrolling the tree', () => {
     backToSelected();
     expect(view.calls.selected).toHaveLength(selections + 1);
     expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '8' }, temporaryExpandedItemIds: ['1'] });
+  });
+
+  // `.` closes an open peek whether the row is on screen or folded away (the folded-away path only selects, which does not close it).
+  it.each(['on screen', 'folded away'] as const)('closes an open peek with `.` when the selected row is %s', async where => {
+    const peek = peekStub();
+    const view = await opened({ props: { selectedId: where === 'folded away' ? '1.1' : '3' }, peek });
+    if (where === 'folded away') {
+      fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+      await waitFor(() => expect(row('1.1')).toBeNull());
+    }
+    peek.closeAll.mockClear();
+    backToSelected();
+    expect(peek.closeAll).toHaveBeenCalledTimes(1);
+    if (where === 'folded away') await waitFor(() => expect(view.calls.selected).toHaveLength(1));
   });
 
   it('uses the full selected question for accessibility and distinguishing words before tag truncation', async () => {

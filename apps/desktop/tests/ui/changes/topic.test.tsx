@@ -194,7 +194,7 @@ describe('topic brief and shared catch-up', () => {
     value.rerender(value.element());
     // The newer revision is still unread: it comes back as a changed row the owner can mark.
     fireEvent.keyDown(window, { key: 'Escape' }); open();
-    expect(within(popover()).getByRole('button', { name: 'Mark Updated name A seen' }).hasAttribute('disabled')).toBe(false);
+    expect(within(popover()).getByRole('button', { name: 'Mark Updated name A seen' }).getAttribute('aria-disabled')).toBeNull();
     expect(value.navigation.getSnapshot().error).toBeNull();
   });
   it('keeps an unaccepted Seen action available without showing success or removing its row', async () => {
@@ -205,7 +205,7 @@ describe('topic brief and shared catch-up', () => {
     expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
     expect(screen.queryByRole('button', { name: 'Updated name A is seen' })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-    expect(screen.getByRole('button', { name: 'Mark Updated name A seen' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Mark Updated name A seen' }).getAttribute('aria-disabled')).toBeNull();
     expect(screen.getByRole('button', { name: 'Updated name A' })).toBeTruthy();
   });
   it.each(['implicit', 'bulk'] as const)('keeps an unobserved commit made before %s catch-up unread, with its changed marker', async kind => {

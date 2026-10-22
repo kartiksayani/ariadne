@@ -376,8 +376,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     if (itemReveal?.temporaryExpandedItemIds.includes(node.item.id)) setDismissedReveal(currentReveal);
   };
 
-  // `.` goes back to the selected node, as in the Tree (SPEC 8.5): a drawn node is scrolled into view and focused, and Details stays as
-  // it is. A selection folded or filtered away is revealed through its route, which opens Details on it (the Tree does the same).
+  // `.` goes back to the selected node, as in the Tree (SPEC 8.5): a drawn node is scrolled into view and focused, and Details opens
+  // on it. A selection folded or filtered away is revealed through its route, which opens Details on it (the Tree does the same).
   useIntents({
     'map.backToSelected': () => {
       const { graph: current, selectedId: id } = latest.current;
@@ -390,7 +390,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
         const pending = ownReveal.current;
         const own: RevealedItem = pending?.kind === 'item' && pending.route.item_id === id ? pending
           : Object.freeze({ kind: 'item' as const, route: Object.freeze({ ...latest.current.view.session, item_id: id }), store,
-            temporaryExpandedItemIds: itemReveal?.route.item_id === id ? itemReveal.temporaryExpandedItemIds : [] });
+            temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [] });
         ownReveal.current = own;
         latest.current.onReveal(own, true);
         return true;
