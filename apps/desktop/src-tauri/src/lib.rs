@@ -352,9 +352,10 @@ fn run_native(
                     }
                 }
                 tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                    window
-                        .state::<native::window::NativeWindow>()
-                        .reconcile(window.app_handle().clone(), native::window::Fit::IfNeeded);
+                    // The fit and the events around it are the app's, not the owner's.
+                    let native = window.state::<native::window::NativeWindow>();
+                    native.display_changed();
+                    native.reconcile(window.app_handle().clone(), native::window::Fit::IfNeeded);
                 }
                 tauri::WindowEvent::Focused(true) if !window_quitting.load(Ordering::Acquire) => {
                     // Activation (Cmd+Tab, Dock, a click on the title bar)
