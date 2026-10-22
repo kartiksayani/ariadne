@@ -54,7 +54,7 @@ function mount(body: string, extra: Partial<ItemRowProps> = {}) {
     const [unfolded, setUnfolded] = useState(false);
     const epoch = useTreeFonts();
     return <ItemRefs.Provider value={{ lookup: id => { const value = extra.row?.replacedBy; return value?.id === id ? { label: value.question, name: shortLabel(value), status: value.status } : null; }, onOpenItem: openItem }}><TreeFonts.Provider value={epoch}><LinkOpener.Provider value={openLink}><ItemRow row={row} selected={false} focused={true} note={null}
-      actions={[]} unfolded={unfolded} onUnfold={() => setUnfolded(value => !value)} remember={() => {}}
+      stopped={null} ackDisabled={false} run={() => {}} unfolded={unfolded} onUnfold={() => setUnfolded(value => !value)} remember={() => {}}
       onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} {...extra} /></LinkOpener.Provider></TreeFonts.Provider></ItemRefs.Provider>;
   }
   const view = render(<Harness />);

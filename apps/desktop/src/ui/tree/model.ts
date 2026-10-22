@@ -318,6 +318,8 @@ export interface TreeInput {
   /** Strips in the place of items and topics the session no longer shows (E29). */
   readonly places?: readonly PlaceStrip[];
   readonly now: number;
+  /** The rows of the previous build: a row that is the same again is that same object, so a memoised row does not redraw (F6c). */
+  readonly previous?: readonly Row[];
 }
 export interface TreeModel {
   readonly rows: readonly Row[];
@@ -537,8 +539,9 @@ export function treeModel(input: TreeInput): TreeModel {
     }
     return { ...row, guides } as Row;
   });
-  // The box pass is the last step: each row's branch slot and its slice of every box around it.
-  const rows = withBoxes(withGuides);
+  // The box pass is the last step: each row's branch slot and its slice of every box around it. Then a row equal to the
+  // previous build's row for its key is that row again (F6c), and the list is the previous list when every row is.
+  const rows = reuseRows(input.previous, withBoxes(withGuides));
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && revealIds.some(id => forced.has(id) && !matched.has(id));
@@ -566,6 +569,44 @@ export function treeModel(input: TreeInput): TreeModel {
   }
   return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at),
     search: { hidden: hiddenMatches, collapsed: collapsedMatches, outsideFocus, reveal: { items: [...reveal.items], topics: [...reveal.topics], groups: [...reveal.groups] } } };
+}
+
+// ---------------------------------------------------------------- reuse (F6c)
+
+/**
+ * Row fields compared by identity. A session read that changed nothing in an item keeps the item object (SessionStore's
+ * equality contract), so the same object means the same item; a new revision brings new objects, and those rows redraw.
+ */
+const BY_IDENTITY: ReadonlySet<string> = new Set(['item', 'replacedBy', 'topic']);
+/** Plain values by value; arrays and plain objects of them member by member, two levels down (a guide list, a strip's covers). */
+function sameValue(a: unknown, b: unknown, depth = 2): boolean {
+  if (Object.is(a, b)) return true;
+  if (depth === 0 || typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, at) => sameValue(value, b[at], depth - 1));
+  }
+  const left = a as Record<string, unknown>, right = b as Record<string, unknown>, keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key => key in right && sameValue(left[key], right[key], depth - 1));
+}
+/** Whether two builds of a row draw the same: scalars by value, the domain objects by identity, the nested lists and records by their values. */
+export function sameRow(a: Row, b: Row): boolean {
+  if (a === b) return true;
+  if (a.kind !== b.kind || a.key !== b.key) return false;
+  const left = a as unknown as Record<string, unknown>, right = b as unknown as Record<string, unknown>, keys = Object.keys(left);
+  return keys.length === Object.keys(right).length
+    && keys.every(key => key in right && (BY_IDENTITY.has(key) ? left[key] === right[key] : sameValue(left[key], right[key])));
+}
+/** `rows` with each row that equals the previous build's row for its key replaced by that row; `previous` itself when every row does. */
+export function reuseRows(previous: readonly Row[] | undefined, rows: readonly Row[]): readonly Row[] {
+  if (!previous?.length) return rows;
+  const byKey = new Map(previous.map(row => [row.key, row]));
+  let same = previous.length === rows.length;
+  const next = rows.map((row, at) => {
+    const kept = byKey.get(row.key), value = kept && sameRow(kept, row) ? kept : row;
+    if (value !== previous[at]) same = false;
+    return value;
+  });
+  return same ? previous : next;
 }
 
 /** The row ← moves to: the parent item, or the topic of a root item. */
