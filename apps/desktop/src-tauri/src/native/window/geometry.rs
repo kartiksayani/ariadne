@@ -1,4 +1,5 @@
 use ariadne_core::{CoreError, CoreErrorCode, WindowGeometry};
+use std::time::{Duration, Instant};
 
 /// Trusted native monitor work area in logical pixels, excluding system UI.
 #[derive(Clone, Debug)]
@@ -207,6 +208,114 @@ pub fn clamp_geometry(
         height,
         monitor_id: Some(area.monitor_id.clone()),
     })
+}
+
+/// How long saving stays quiet after the app fits the window or shows it for
+/// the first time: macOS delivers the fit's Resized and Moved events late.
+pub const FIT_QUIET: Duration = Duration::from_secs(1);
+/// How long saving stays quiet after the displays change.
+pub const DISPLAY_QUIET: Duration = Duration::from_secs(2);
+
+/// One monitor as the displays report it. The id is `name@x,y`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MonitorPrint {
+    pub id: String,
+    pub width: u32,
+    pub height: u32,
+    pub scale_milli: i64,
+}
+
+/// What the displays looked like at a window event.
+#[derive(Clone, Debug)]
+pub struct DisplayState {
+    pub monitors: Vec<MonitorPrint>,
+    /// The id of the monitor the window is on, when known.
+    pub current: Option<String>,
+}
+
+/// Decides whether a window move or resize is the owner's, so it may be saved.
+/// The app's own fits, the first show and display changes are never saved: the
+/// gate stays closed for a while after each, and when the displays change.
+#[derive(Debug, Default)]
+pub struct SaveGate {
+    quiet_until: Option<Instant>,
+    fingerprint: Option<Vec<MonitorPrint>>,
+    current: Option<String>,
+}
+
+impl SaveGate {
+    /// Keeps saving quiet until `span` after `now`. A later hush extends an
+    /// earlier one; it never shortens it.
+    pub fn hush(&mut self, now: Instant, span: Duration) {
+        let until = now + span;
+        if self.quiet_until.is_none_or(|current| current < until) {
+            self.quiet_until = Some(until);
+        }
+    }
+
+    /// Records the monitors. The first call only seeds the fingerprint. Later,
+    /// a different set (in any order) hushes for `DISPLAY_QUIET` and returns true.
+    pub fn monitors(&mut self, now: Instant, monitors: &[MonitorPrint]) -> bool {
+        let mut sorted = monitors.to_vec();
+        sorted.sort();
+        let changed = self
+            .fingerprint
+            .as_ref()
+            .is_some_and(|known| *known != sorted);
+        self.fingerprint = Some(sorted);
+        if changed {
+            self.hush(now, DISPLAY_QUIET);
+        }
+        changed
+    }
+
+    /// Records the monitor the window is on. When the one recorded before is no
+    /// longer among `monitors`, hushes for `DISPLAY_QUIET` and returns true.
+    pub fn current_monitor(
+        &mut self,
+        now: Instant,
+        current: Option<String>,
+        monitors: &[MonitorPrint],
+    ) -> bool {
+        let previous = std::mem::replace(&mut self.current, current);
+        let gone = previous.is_some_and(|id| !monitors.iter().any(|monitor| monitor.id == id));
+        if gone {
+            self.hush(now, DISPLAY_QUIET);
+        }
+        gone
+    }
+
+    /// Whether the gate is open at `now`.
+    pub fn allows(&self, now: Instant) -> bool {
+        self.quiet_until.is_none_or(|until| now >= until)
+    }
+
+    /// Records the displays. When the set changed, or the monitor recorded
+    /// before is gone, hushes for `DISPLAY_QUIET` and returns true.
+    pub fn observe(&mut self, now: Instant, display: &DisplayState) -> bool {
+        let changed = self.monitors(now, &display.monitors);
+        let gone = self.current_monitor(now, display.current.clone(), &display.monitors);
+        changed || gone
+    }
+
+    /// Records the displays without hushing: for a window that was hidden, so
+    /// changes made meanwhile do not hush the owner's first move after it shows.
+    pub fn refresh(&mut self, display: &DisplayState) {
+        let mut sorted = display.monitors.clone();
+        sorted.sort();
+        self.fingerprint = Some(sorted);
+        self.current = display.current.clone();
+    }
+
+    /// Whether a window event at `now` may be saved. Not when the displays could
+    /// not be read, when they just changed, or while the gate is hushed.
+    pub fn admit(&mut self, now: Instant, display: Option<DisplayState>) -> bool {
+        let Some(display) = display else {
+            return false;
+        };
+        let changed = self.observe(now, &display);
+        !changed && self.allows(now)
+    }
 }
 
 #[cfg(test)]
