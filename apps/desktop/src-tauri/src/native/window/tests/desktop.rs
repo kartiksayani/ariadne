@@ -1,3 +1,4 @@
+use super::super::geometry::DISPLAY_QUIET;
 use super::*;
 
 fn saved() -> WindowGeometry {
@@ -44,7 +45,8 @@ fn external() -> MonitorPrint {
         id: "Studio@3024,0".into(),
         width: 5120,
         height: 2880,
-        scale_milli: 2000,
+        // A 1x external next to a 2x laptop: dragging across fires a scale change.
+        scale_milli: 1000,
     }
 }
 /// The displays as a window event sees them, with the window on `current`.
@@ -232,19 +234,137 @@ fn an_owner_drag_to_a_monitor_that_is_still_connected_saves() {
 }
 
 #[test]
-fn a_scale_change_hushes_for_the_display_quiet_window() {
-    let window = NativeWindow::default();
-    window.display_changed();
-    let now = Instant::now();
-    assert!(!allows(&window, now));
-    assert!(!allows(
-        &window,
-        now + DISPLAY_QUIET - Duration::from_millis(500)
-    ));
-    assert!(allows(
-        &window,
-        now + DISPLAY_QUIET + Duration::from_millis(500)
-    ));
+fn a_scale_change_from_an_owner_drag_between_displays_does_not_hush() {
+    // The laptop is 2x and the external 1x: the drag fires ScaleFactorChanged,
+    // but the displays are the same and the previous monitor is still there.
+    let base = Instant::now();
+    let window = launched(base);
+    let both = vec![laptop(), external()];
+    assert!(window.admit_move(secs(base, 10.0), display(both.clone(), &laptop())));
+    assert!(!window.display_changed(secs(base, 10.5), display(both.clone(), &external())));
+    assert!(allows(&window, secs(base, 10.5)));
+    // The drop and a resize right after it are saved.
+    assert!(window.admit_move(secs(base, 10.6), display(both.clone(), &external())));
+    assert!(window.admit_move(secs(base, 10.8), display(both, &external())));
+}
+
+#[test]
+fn a_scale_change_from_a_display_change_hushes_for_the_display_quiet_window() {
+    let base = Instant::now();
+    let window = launched(base);
+    // The external display went away: macOS fires the scale change and relocates.
+    assert!(window.display_changed(secs(base, 10.0), display(vec![laptop()], &laptop())));
+    assert!(!allows(&window, secs(base, 10.0)));
+    assert!(!allows(&window, secs(base, 11.9)));
+    assert!(allows(&window, secs(base, 10.0) + DISPLAY_QUIET));
+    // The same set again is not another change.
+    assert!(!window.display_changed(secs(base, 13.0), display(vec![laptop()], &laptop())));
+}
+
+#[test]
+fn a_scale_change_whose_displays_cannot_be_read_does_not_hush() {
+    let base = Instant::now();
+    let window = launched(base);
+    assert!(!window.display_changed(secs(base, 10.0), None));
+    assert!(allows(&window, secs(base, 10.0)));
+}
+
+#[test]
+fn displays_changed_while_the_window_was_hidden_do_not_hush_the_first_drag() {
+    // Tray hide, the external display unplugged, tray Show: the show refreshes
+    // the displays without hushing, so the first drag is the owner's.
+    let base = Instant::now();
+    let window = launched(base);
+    window.refresh_displays(display(vec![laptop()], &laptop()));
+    assert!(allows(&window, base));
+    assert!(window.admit_move(secs(base, 10.0), display(vec![laptop()], &laptop())));
+    // Without the refresh the same drag is taken for a display change.
+    let stale = launched(base);
+    assert!(!stale.admit_move(secs(base, 10.0), display(vec![laptop()], &laptop())));
+}
+
+#[test]
+fn presenting_the_window_refreshes_the_displays_without_hushing() {
+    let app = tauri::test::mock_builder()
+        .manage(NativeWindow::default())
+        .manage(crate::native::routes::NativeRoutes::default())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let native = app.state::<NativeWindow>();
+    let base = Instant::now();
+    native.lock_gate().monitors(base, &[laptop(), external()]);
+    present(&window).unwrap();
+    assert!(allows(&native, Instant::now()));
+    // The mock reports no monitors: the show recorded that, so a first move
+    // with no monitors is not a change.
+    let none = Some(DisplayState {
+        monitors: vec![],
+        current: None,
+    });
+    assert!(native.admit_move(Instant::now(), none));
+}
+
+#[test]
+fn a_move_is_admitted_then_fences_then_queues() {
+    use std::cell::Cell;
+    let base = Instant::now();
+    let window = launched(base);
+    let before = window.owner_movement.load(Ordering::Acquire);
+    let on_laptop = || display(vec![laptop(), external()], &laptop());
+    let at_read = Cell::new(None);
+    let at_queue = Cell::new(None);
+    let queued = Cell::new(0);
+    window.moved_with(
+        secs(base, 10.0),
+        on_laptop(),
+        || {
+            at_read.set(Some(window.owner_movement.load(Ordering::Acquire)));
+            Ok(saved())
+        },
+        |frame| {
+            at_queue.set(Some(window.owner_movement.load(Ordering::Acquire)));
+            queued.set(queued.get() + 1);
+            assert_eq!(frame, saved());
+        },
+    );
+    // The fence was bumped before the save was queued.
+    assert_eq!(at_read.get(), Some(before + 1));
+    assert_eq!(at_queue.get(), Some(before + 1));
+    assert_eq!(queued.get(), 1);
+}
+
+#[test]
+fn a_hushed_or_unreadable_move_neither_fences_nor_queues() {
+    use std::cell::Cell;
+    let base = Instant::now();
+    let window = launched(base);
+    let before = window.owner_movement.load(Ordering::Acquire);
+    let touched = Cell::new(false);
+    let run = |now, display| {
+        window.moved_with(
+            now,
+            display,
+            || {
+                touched.set(true);
+                Ok(saved())
+            },
+            |_| touched.set(true),
+        );
+    };
+    window.hush(base, FIT_QUIET);
+    run(
+        secs(base, 0.5),
+        display(vec![laptop(), external()], &laptop()),
+    );
+    // The displays changed: hushed too.
+    run(secs(base, 10.0), display(vec![laptop()], &laptop()));
+    // The displays could not be read.
+    run(secs(base, 20.0), None);
+    assert!(!touched.get());
+    assert_eq!(window.owner_movement.load(Ordering::Acquire), before);
 }
 
 #[test]

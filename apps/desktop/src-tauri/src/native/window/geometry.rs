@@ -290,15 +290,31 @@ impl SaveGate {
         self.quiet_until.is_none_or(|until| now >= until)
     }
 
+    /// Records the displays. When the set changed, or the monitor recorded
+    /// before is gone, hushes for `DISPLAY_QUIET` and returns true.
+    pub fn observe(&mut self, now: Instant, display: &DisplayState) -> bool {
+        let changed = self.monitors(now, &display.monitors);
+        let gone = self.current_monitor(now, display.current.clone(), &display.monitors);
+        changed || gone
+    }
+
+    /// Records the displays without hushing: for a window that was hidden, so
+    /// changes made meanwhile do not hush the owner's first move after it shows.
+    pub fn refresh(&mut self, display: &DisplayState) {
+        let mut sorted = display.monitors.clone();
+        sorted.sort();
+        self.fingerprint = Some(sorted);
+        self.current = display.current.clone();
+    }
+
     /// Whether a window event at `now` may be saved. Not when the displays could
     /// not be read, when they just changed, or while the gate is hushed.
     pub fn admit(&mut self, now: Instant, display: Option<DisplayState>) -> bool {
         let Some(display) = display else {
             return false;
         };
-        let changed = self.monitors(now, &display.monitors);
-        let gone = self.current_monitor(now, display.current, &display.monitors);
-        !changed && !gone && self.allows(now)
+        let changed = self.observe(now, &display);
+        !changed && self.allows(now)
     }
 }
 

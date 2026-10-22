@@ -352,9 +352,10 @@ fn run_native(
                     }
                 }
                 tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                    // The fit and the events around it are the app's, not the owner's.
+                    // A real display change (and its fit) is the app's, not the
+                    // owner's; a drag between displays of different scale is not.
                     let native = window.state::<native::window::NativeWindow>();
-                    native.display_changed();
+                    native.scale_changed(window);
                     native.reconcile(window.app_handle().clone(), native::window::Fit::IfNeeded);
                 }
                 tauri::WindowEvent::Focused(true) if !window_quitting.load(Ordering::Acquire) => {

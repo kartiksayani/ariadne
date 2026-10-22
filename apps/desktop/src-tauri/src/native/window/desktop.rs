@@ -1,7 +1,5 @@
 use super::{
-    geometry::{
-        DisplayState, MinimumSize, MonitorPrint, SaveGate, WorkArea, DISPLAY_QUIET, FIT_QUIET,
-    },
+    geometry::{DisplayState, MinimumSize, MonitorPrint, SaveGate, WorkArea, FIT_QUIET},
     preferences::WindowPreferenceWrite,
 };
 use crate::commands::DesktopService;
@@ -107,6 +105,11 @@ fn resting<R: tauri::Runtime>(window: &tauri::Window<R>) -> bool {
 /// shortcuts work without a click first.
 pub(crate) fn present<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
     window.show()?;
+    // Displays may have changed while it was hidden: note them without hushing,
+    // so the owner's first drag after the show is saved.
+    if let Some(native) = window.try_state::<NativeWindow>() {
+        native.refresh_displays(display_state(&window.as_ref().window()));
+    }
     window.unminimize()?;
     window.set_focus()?;
     focus_webview(window);
@@ -421,14 +424,31 @@ impl NativeWindow {
         if self.stopped.load(Ordering::Acquire) || !resting(window) {
             return;
         }
-        if !self.admit_move(Instant::now(), display_state(window)) {
+        let service = window.state::<DesktopService>().inner().clone();
+        self.moved_with(
+            Instant::now(),
+            display_state(window),
+            || geometry(window),
+            |geometry| {
+                self.queue_geometry(geometry, service);
+            },
+        );
+    }
+    /// The order of a resting move: the gate admits it, an allowed one fences a
+    /// pending restore, and only then is its save queued.
+    fn moved_with(
+        &self,
+        now: Instant,
+        display: Option<DisplayState>,
+        read_geometry: impl FnOnce() -> Result<WindowGeometry, CoreError>,
+        queue: impl FnOnce(WindowGeometry),
+    ) {
+        if !self.admit_move(now, display) {
             return;
         }
-        let Ok(geometry) = geometry(window) else {
-            return;
-        };
-        let service = window.state::<DesktopService>().inner().clone();
-        self.queue_geometry(geometry, service);
+        if let Ok(geometry) = read_geometry() {
+            queue(geometry);
+        }
     }
     /// Whether a window event may be saved. An allowed one is the owner's: it
     /// fences a pending launch restore, before its save is queued.
@@ -448,9 +468,21 @@ impl NativeWindow {
     pub(crate) fn hush(&self, now: Instant, span: Duration) {
         hush_gate(&self.gate, now, span);
     }
-    /// A display change (a scale change) is under way: its events are not saved.
-    pub(crate) fn display_changed(&self) {
-        self.hush(Instant::now(), DISPLAY_QUIET);
+    /// A scale change fired. It is a display change only when the monitors
+    /// changed or the previous monitor is gone: then its events are not saved
+    /// (returns true). An owner drag between a 2x and a 1x display fires it too,
+    /// and is not hushed. Unreadable displays do not hush: `moved` skips those.
+    pub(crate) fn scale_changed<R: tauri::Runtime>(&self, window: &tauri::Window<R>) -> bool {
+        self.display_changed(Instant::now(), display_state(window))
+    }
+    fn display_changed(&self, now: Instant, display: Option<DisplayState>) -> bool {
+        display.is_some_and(|display| self.lock_gate().observe(now, &display))
+    }
+    /// Notes the displays without hushing (the window was just shown).
+    fn refresh_displays(&self, display: Option<DisplayState>) {
+        if let Some(display) = display {
+            self.lock_gate().refresh(&display);
+        }
     }
     fn lock_gate(&self) -> std::sync::MutexGuard<'_, SaveGate> {
         self.gate.lock().unwrap_or_else(|error| error.into_inner())
