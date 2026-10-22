@@ -3,6 +3,7 @@ import { CoreFailure, ServiceFailure } from './service';
 /**
  * Structural equality for plain data (primitives, arrays, plain objects). The stores use it to keep the previous object
  * when a poll read the same data, so an unchanged poll hands React the very same references and nothing redraws.
+ * For JSON data only: a Map, a Set or a Date has no own enumerable keys, so any two of them compare equal.
  */
 export function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;

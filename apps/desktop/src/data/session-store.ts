@@ -55,6 +55,11 @@ export class SessionStore {
    * nothing and keeps the state, `snapshot` and `presence` objects (and so every `item` inside the snapshot) exactly as
    * they were, by identity. Something real is a new revision, `freshness`, `status`, `error`, or a presence entry whose
    * content changed; each publishes once. Rows built from this state may rely on that identity.
+   *
+   * `snapshot` itself is a new object on more than a new revision: also when `freshness` changes and on the first good
+   * read after a failed one (the recovery), both over the same `snapshot.session`. So derived rows (and anything built
+   * from the items) must key on `snapshot.session` or the items inside it, never on `snapshot`, or they rebuild on a
+   * freshness flip or a recovery that changed none of their data.
    */
   private publish(update: Partial<SessionState>): void {
     if (this.closed || changesNothing(this.state, update)) return;
@@ -174,8 +179,9 @@ export class SessionStore {
         const next = previous && previous.session.revision === revision
           ? previous.freshness === snapshot.freshness && !recovered ? previous : Object.freeze({ session: previous.session, freshness: snapshot.freshness })
           : immutable(snapshot);
-        // A poll that changes nothing publishes nothing, but it is still a good read: re-stamp it.
-        stampRead(next);
+        // A poll that changes nothing publishes nothing. While the read is fresh it is still a good read, so re-stamp it.
+        // A read that stays stale is not: "the last good copy" must not move, or it would jump on an unrelated redraw.
+        if (snapshot.freshness === 'fresh' || next !== previous) stampRead(next);
         this.publish({ snapshot: next, presence, error: null,
           status: revision < this.hintedRevision || snapshot.freshness !== 'fresh' ? 'stale' : 'ready' });
         // Presence is volatile and separate from durable session freshness. A
@@ -216,8 +222,9 @@ export function readAt(snapshot: object): number {
   return at;
 }
 /**
- * Stamps a read now, replacing an earlier stamp. The store calls it for every good read, including a poll that found
+ * Stamps a read now, replacing an earlier stamp. The store calls it for every fresh read, including a poll that found
  * nothing new and so publishes the same snapshot object again: "the last good copy, from 21:24" must name that read.
+ * A read that stays stale, or is new, is stamped only when it publishes a changed state.
  */
 export function stampRead(snapshot: object, at = Date.now()): void {
   readTimes.set(snapshot, at);

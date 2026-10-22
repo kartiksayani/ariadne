@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { PresenceObservation } from '../../../src/generated/domain/models';
 import type { OwnerQueryRequest } from '../../../src/generated/core';
-import { createDesktopService, OpenSessions, ServiceFailure, SessionStore, readAt } from '../../../src/data';
+import { createDesktopService, CoreFailure, OpenSessions, ServiceFailure, SessionStore, readAt } from '../../../src/data';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { connectionView } from '../../../src/components/navigation/WorkspaceTopBar';
@@ -15,8 +15,13 @@ import { AppTransport, route, secondId } from '../app/transport';
 class Transport extends AppTransport {
   freshness: 'fresh' | 'stale' = 'fresh';
   failing = false;
+  /** When set, the session read is refused by core with this code (a different failure from a failed transport). */
+  refusing: string | null = null;
   async invoke<T>(name: string, args: { request: OwnerQueryRequest }): Promise<T> {
     if (name === 'session_get' && this.failing) throw new Error('Read failed');
+    if (name === 'session_get' && this.refusing) {
+      return { api_version: 1, ok: false, error: { code: this.refusing, message: 'Changed', hint: 'Retry.', retryable: true, field_errors: [] } } as T;
+    }
     const answer = await super.invoke<T>(name, args as never);
     if (name === 'session_get' && this.freshness !== 'fresh') {
       (answer as { data: { data: { freshness: string } } }).data.data.freshness = this.freshness;
@@ -140,6 +145,52 @@ describe('SessionStore publishes only real changes (F6a)', () => {
     await store.refresh();
     expect(published.count).toBe(2);
     expect(store.getSnapshot().snapshot).toBe(recovered);
+  });
+
+  it('a different failure replaces the one shown and publishes once; its own repeat publishes nothing', async () => {
+    const { store, transport } = sessionStore();
+    await store.refresh();
+    const published = counter(store.subscribe);
+    transport.failing = true;
+    await store.refresh();
+    const first = store.getSnapshot().error;
+    expect(published.count).toBe(1);
+    expect(first).toBeInstanceOf(ServiceFailure);
+    transport.failing = false; transport.refusing = 'revision_conflict';
+    await store.refresh();
+    const second = store.getSnapshot().error;
+    expect(published.count).toBe(2);
+    expect(second).toBeInstanceOf(CoreFailure); expect(second).not.toBe(first);
+    expect(store.getSnapshot().status).toBe('stale');
+    await store.refresh();
+    expect(published.count).toBe(2);
+    expect(store.getSnapshot().error).toBe(second);
+  });
+
+  it('a read that stays stale does not move the last good copy, and a fresh one does', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T10:00:00.000Z'));
+    const { store, transport } = sessionStore();
+    await store.refresh();
+    transport.freshness = 'stale';
+    await store.refresh();
+    const snapshot = store.getSnapshot().snapshot!, published = counter(store.subscribe);
+    expect(snapshot.freshness).toBe('stale');
+    const stamped = readAt(snapshot);
+    vi.setSystemTime(new Date('2026-10-22T10:05:00.000Z'));
+    await store.refresh(); await store.refresh();
+    expect(published.count).toBe(0);
+    expect(store.getSnapshot().snapshot).toBe(snapshot);
+    expect(readAt(snapshot)).toBe(stamped);
+    transport.freshness = 'fresh';
+    vi.setSystemTime(new Date('2026-10-22T10:06:00.000Z'));
+    await store.refresh();
+    const fresh = store.getSnapshot().snapshot!;
+    expect(published.count).toBe(1);
+    expect(readAt(fresh)).toBe(Date.parse('2026-10-22T10:06:00.000Z'));
+    vi.setSystemTime(new Date('2026-10-22T10:07:00.000Z'));
+    await store.refresh();
+    expect(readAt(fresh)).toBe(Date.parse('2026-10-22T10:07:00.000Z'));
   });
 
   it('a presence change publishes once; the same observation again publishes nothing', async () => {
