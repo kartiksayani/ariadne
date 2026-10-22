@@ -445,8 +445,8 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     await row.locator('.tree-icon').click(); await page.mouse.move(0, 0);
     expect((await title.boundingBox())!.width).toBe(text.width);
     const noActions = page.locator('.tree-item[data-item-id="2"]');
-    await expect(noActions.locator('.tree-actions')).toHaveCount(0);
-    // Every slot keeps its width filled or empty: a row without actions or Ack has the same cluster, except that only a row with an Ack to
+    await expect(noActions.locator('.tree-action-ack')).toHaveCount(0);
+    // Every slot keeps its width filled or empty: a row without an Ack has the same cluster, except that only a row with an Ack to
     // give has the wide Ack slot (owner 2026-10-20: visible Ack target); a row without one keeps 22px.
     const wide = (await row.locator('.tree-ack-slot').boundingBox())!.width;
     expect(wide).toBeGreaterThan(22);

@@ -352,9 +352,11 @@ fn run_native(
                     }
                 }
                 tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                    window
-                        .state::<native::window::NativeWindow>()
-                        .reconcile(window.app_handle().clone(), native::window::Fit::IfNeeded);
+                    // A real display change (and its fit) is the app's, not the
+                    // owner's; a drag between displays of different scale is not.
+                    let native = window.state::<native::window::NativeWindow>();
+                    native.scale_changed(window);
+                    native.reconcile(window.app_handle().clone(), native::window::Fit::IfNeeded);
                 }
                 tauri::WindowEvent::Focused(true) if !window_quitting.load(Ordering::Acquire) => {
                     // Activation (Cmd+Tab, Dock, a click on the title bar)

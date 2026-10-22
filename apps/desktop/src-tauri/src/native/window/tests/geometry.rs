@@ -346,3 +346,148 @@ fn wake_fits_a_frame_below_the_live_minimum_so_it_cannot_grow_off_screen() {
         None
     );
 }
+
+fn print(id: &str, width: u32, height: u32, scale_milli: i64) -> MonitorPrint {
+    MonitorPrint {
+        id: id.into(),
+        width,
+        height,
+        scale_milli,
+    }
+}
+fn laptop() -> MonitorPrint {
+    print("Built-in@0,0", 3024, 1964, 2000)
+}
+fn external() -> MonitorPrint {
+    print("Studio@3024,0", 5120, 2880, 2000)
+}
+fn display(monitors: Vec<MonitorPrint>, current: &str) -> Option<DisplayState> {
+    Some(DisplayState {
+        monitors,
+        current: Some(current.into()),
+    })
+}
+fn secs(base: Instant, seconds: f64) -> Instant {
+    base + Duration::from_secs_f64(seconds)
+}
+
+#[test]
+fn save_gate_is_open_until_hushed_and_closed_until_the_deadline() {
+    let base = Instant::now();
+    let mut gate = SaveGate::default();
+    assert!(gate.allows(base));
+    gate.hush(base, FIT_QUIET);
+    assert!(!gate.allows(base));
+    assert!(!gate.allows(secs(base, 0.999)));
+    assert!(gate.allows(secs(base, 1.0)));
+    assert!(gate.allows(secs(base, 5.0)));
+}
+
+#[test]
+fn a_second_hush_extends_the_quiet_window_and_never_shortens_it() {
+    let base = Instant::now();
+    let mut gate = SaveGate::default();
+    gate.hush(base, FIT_QUIET);
+    // Two fits in a row: the second one starts its own second.
+    gate.hush(secs(base, 0.6), FIT_QUIET);
+    assert!(!gate.allows(secs(base, 1.5)));
+    assert!(gate.allows(secs(base, 1.6)));
+    // A shorter hush inside a longer one changes nothing.
+    gate.hush(base, DISPLAY_QUIET);
+    gate.hush(secs(base, 0.1), FIT_QUIET);
+    assert!(!gate.allows(secs(base, 1.9)));
+    assert!(gate.allows(secs(base, 2.0)));
+}
+
+#[test]
+fn the_first_fingerprint_only_seeds_and_an_unchanged_one_does_not_hush() {
+    let base = Instant::now();
+    let mut gate = SaveGate::default();
+    assert!(!gate.monitors(base, &[laptop(), external()]));
+    assert!(gate.allows(base));
+    assert!(!gate.monitors(secs(base, 3.0), &[laptop(), external()]));
+    assert!(gate.allows(secs(base, 3.0)));
+}
+
+#[test]
+fn a_changed_fingerprint_hushes_and_reports_changed_whatever_the_order() {
+    let base = Instant::now();
+    let mut gate = SaveGate::default();
+    gate.monitors(base, &[laptop(), external()]);
+    // The same monitors in another order are not a change.
+    assert!(!gate.monitors(secs(base, 1.0), &[external(), laptop()]));
+    assert!(gate.allows(secs(base, 1.0)));
+    // Unplugging the external display is.
+    assert!(gate.monitors(secs(base, 2.0), &[laptop()]));
+    assert!(!gate.allows(secs(base, 2.0)));
+    assert!(!gate.allows(secs(base, 3.9)));
+    assert!(gate.allows(secs(base, 4.0)));
+    // The new set is the one that counts now.
+    assert!(!gate.monitors(secs(base, 5.0), &[laptop()]));
+    // So are a different size or scale of the same monitor.
+    assert!(gate.monitors(secs(base, 6.0), &[print("Built-in@0,0", 1512, 982, 2000)]));
+    assert!(gate.monitors(secs(base, 7.0), &[print("Built-in@0,0", 1512, 982, 1000)]));
+    // And a monitor that moved in the arrangement.
+    assert!(gate.monitors(secs(base, 8.0), &[print("Built-in@10,0", 1512, 982, 1000)]));
+}
+
+#[test]
+fn a_current_monitor_that_is_gone_hushes_and_one_still_connected_does_not() {
+    let base = Instant::now();
+    let both = [laptop(), external()];
+    let mut gate = SaveGate::default();
+    assert!(!gate.current_monitor(base, Some(external().id), &both));
+    // The owner drags to the laptop screen; both are still connected.
+    assert!(!gate.current_monitor(secs(base, 1.0), Some(laptop().id), &both));
+    assert!(gate.allows(secs(base, 1.0)));
+    // Back on the external display, which is then unplugged.
+    assert!(!gate.current_monitor(secs(base, 2.0), Some(external().id), &both));
+    assert!(gate.current_monitor(secs(base, 3.0), Some(laptop().id), &[laptop()]));
+    assert!(!gate.allows(secs(base, 4.9)));
+    assert!(gate.allows(secs(base, 5.0)));
+    // An event without a known monitor never counts as a change.
+    assert!(!gate.current_monitor(secs(base, 6.0), None, &[laptop()]));
+    assert!(!gate.current_monitor(secs(base, 7.0), Some(laptop().id), &[laptop()]));
+}
+
+#[test]
+fn an_event_is_admitted_only_with_readable_displays_and_an_open_gate() {
+    let base = Instant::now();
+    let both = vec![laptop(), external()];
+    let mut gate = SaveGate::default();
+    // Seeded at launch.
+    gate.monitors(base, &both);
+    // First owner move, same displays: saved.
+    assert!(gate.admit(secs(base, 10.0), display(both.clone(), &external().id)));
+    // Enumeration failed: skipped, and the gate is untouched.
+    assert!(!gate.admit(secs(base, 11.0), None));
+    assert!(gate.admit(secs(base, 12.0), display(both.clone(), &external().id)));
+    // A fit hushes: skipped until the quiet window ends.
+    gate.hush(secs(base, 13.0), FIT_QUIET);
+    assert!(!gate.admit(secs(base, 13.5), display(both.clone(), &external().id)));
+    assert!(gate.admit(secs(base, 14.0), display(both.clone(), &external().id)));
+}
+
+#[test]
+fn an_unplug_before_any_owner_move_is_hushed_by_the_seeded_fingerprint() {
+    let base = Instant::now();
+    let mut gate = SaveGate::default();
+    gate.monitors(base, &[laptop(), external()]);
+    // macOS relocated the window to the laptop screen: first event after unplug.
+    assert!(!gate.admit(secs(base, 20.0), display(vec![laptop()], &laptop().id)));
+    assert!(!gate.admit(secs(base, 21.9), display(vec![laptop()], &laptop().id)));
+    assert!(gate.admit(secs(base, 22.0), display(vec![laptop()], &laptop().id)));
+}
+
+#[test]
+fn a_monitor_that_vanished_from_the_list_hushes_even_with_the_same_fingerprint() {
+    let base = Instant::now();
+    let mut gate = SaveGate::default();
+    gate.monitors(base, &[laptop()]);
+    assert!(gate.admit(base, display(vec![laptop()], &external().id)));
+    // The previous event's monitor is not in the list now, and the list did not
+    // change since: still a display change.
+    assert!(!gate.admit(secs(base, 1.0), display(vec![laptop()], &laptop().id)));
+    assert!(!gate.admit(secs(base, 2.9), display(vec![laptop()], &laptop().id)));
+    assert!(gate.admit(secs(base, 3.0), display(vec![laptop()], &laptop().id)));
+}

@@ -3,23 +3,30 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { ItemRow, placeActions, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
+import type { Item, ItemStatus } from '../../../src/generated/domain/models';
+import { ItemRow, placeActions, type ItemRowProps } from '../../../src/ui/tree/ItemRow';
+import type { Delivery } from '../../../src/ui/tree/model';
 import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { TopicRow, type TopicAction, type TopicRowProps } from '../../../src/ui/tree/TopicRow';
 
 afterEach(cleanup);
 
-function itemProps(actions: readonly RowAction[]): ItemRowProps {
+/** An item row as the Map draws it; the row builds its Ack and hover bar from its item and these values (F6d). */
+function itemProps({ status = 'open', ack = null, stopped = null, ackDisabled = false, delivery = null, later = false }: {
+  status?: ItemStatus; ack?: Item['ack_to']; stopped?: string | null; ackDisabled?: boolean; delivery?: Delivery | null; later?: boolean;
+} = {}): ItemRowProps {
   const template = (demo as Session).items['1']!;
-  const item = immutable({ ...template, question: 'Choose the orchard planting order', status: 'open' as const,
-    outcome: 'Plant the pear trees first.', ask: null, note: null });
-  return { row: { kind: 'item', key: item.id, item, status: 'open', ack: null, depth: 1, hasKids: false,
-    expanded: false, context: false, guides: [], boxes: [], branch: 0, later: false, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
-    replacedBy: null, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
-  selected: false, focused: true, note: null, actions, unfolded: false,
+  const item = immutable({ ...template, question: 'Choose the orchard planting order', status,
+    outcome: 'Plant the pear trees first.', ask: null, note: null, ack_to: ack });
+  return { row: { kind: 'item', key: item.id, item, status, ack, depth: 1, hasKids: false,
+    expanded: false, context: false, guides: [], boxes: [], branch: 0, later, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
+    replacedBy: null, relatedCount: 2, collapsed: null, delivery, badge: 'Open' },
+  selected: false, focused: true, note: null, stopped, ackDisabled, run: vi.fn(), unfolded: false,
   onUnfold: vi.fn(), remember: vi.fn(), onFocus: vi.fn(), onKeyDown: vi.fn(), onSelect: vi.fn(),
   onToggle: vi.fn() };
 }
+/** The hover bar of an open item, in SPEC 6.2's order. */
+const OPEN_BAR = ['Reply (r)', 'Bring it up (b)', 'Later (z)', 'Drop (d)', 'Hide (h)', 'Remove (⌫)'];
 
 function topicProps(actions: readonly TopicAction[]): TopicRowProps {
   const topic = immutable({ ...Object.values((demo as Session).topics)[0]!, name: 'Orchard plans' });
@@ -32,29 +39,31 @@ function topicProps(actions: readonly TopicAction[]): TopicRowProps {
 
 describe('compact row actions', () => {
   it('has no Focus button and no double-click Focus: the topic band and ⇧F own Focus (D9)', () => {
-    const props = itemProps([]), mounted = render(<ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} />);
+    const props = itemProps(), mounted = render(<ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} />);
     expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
     fireEvent.doubleClick(mounted.container.querySelector('.tree-icon')!);
     expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
   });
 
   // owner 2026-10-20: visible Ack target. Only the Ack names where it leads; the hover bar's buttons stay icons.
-  it.each(['→ Done', '→ Decided', '→ Dropped', '→ Open', '→ In progress'])('shows "%s" after the Ack check and keeps the hover bar icon-only', label => {
-    const props = itemProps([{ title: `Ack ${label}`, label, icon: 'ph ph-check', persistent: true, run: vi.fn() }, { title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+  it.each([['→ Done', 'done'], ['→ Decided', 'decided'], ['→ Dropped', 'dropped'], ['→ Open', 'open'], ['→ In progress', 'in_progress']] as const)('shows "%s" after the Ack check and keeps the hover bar icon-only', (label, target) => {
+    const props = itemProps({ status: target === 'in_progress' ? 'open' : 'in_progress', ack: target });
     const { container } = render(<ItemRow {...props} />);
-    const ack = within(container.querySelector('.tree-ack-slot') as HTMLElement).getByRole('button', { name: `Ack ${label}` });
+    const ack = within(container.querySelector('.tree-ack-slot') as HTMLElement).getByRole('button', { name: /^Ack → / });
     expect(ack.textContent).toBe(label);
     expect(ack.firstElementChild?.className).toContain('ph-check');
     expect(ack.querySelector('.tree-action-label')?.textContent).toBe(label);
-    expect(within(container.querySelector('.tree-actions') as HTMLElement).getByRole('button', { name: 'Reply (r)' }).textContent).toBe('');
+    const bar = within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button');
+    expect(bar).toHaveLength(6);
+    expect(bar.every(button => button.textContent === '')).toBe(true);
     expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
   });
 
   it('keeps the 22px Ack slot on a row with no Ack, and the wide one through the 6 s hold', () => {
-    const bare = render(<ItemRow {...itemProps([])} />);
+    const bare = render(<ItemRow {...itemProps()} />);
     expect(bare.container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(false);
     bare.unmount();
-    const props = itemProps([{ title: 'Ack → Done', label: '→ Done', icon: 'ph ph-check', persistent: true, run: vi.fn() }]);
+    const props = itemProps({ ack: 'done' });
     const { container, rerender } = render(<ItemRow {...props} />);
     expect(container.querySelector('.tree-end')?.classList.contains('tree-end-labelled')).toBe(true);
     // Held: the button is replaced by "Acked · Undo", and the cluster stays as wide so the row does not rewrap until the Ack is saved.
@@ -64,7 +73,7 @@ describe('compact row actions', () => {
   });
 
   it('draws a held Ack over the area left of the Ack slot, hides the Ack button, and Undo cancels it', () => {
-    const undo = vi.fn(), ack = vi.fn(), props = itemProps([{ title: 'Ack → Done', icon: 'ph ph-check', persistent: true, run: ack }]);
+    const undo = vi.fn(), props = itemProps({ ack: 'done' }), ack = props.run;
     const { container, rerender } = render(<ItemRow {...props} />);
     const before = container.querySelector('.tree-ack-slot')!;
     expect(within(before as HTMLElement).getByRole('button', { name: 'Ack → Done' })).toBeTruthy();
@@ -82,30 +91,29 @@ describe('compact row actions', () => {
   });
 
   it('keeps every item action in its existing order with the same names, tab behavior and callbacks', () => {
-    const names = ['Ack → Done', 'Bring it up (b)', 'Reply (r)', 'Drop (d)', 'Later (z)', 'Back to Open (o)', 'Hide (x)', 'Remove (⌫)'];
-    const actions: RowAction[] = names.map((title, index) => ({ title, icon: 'ph ph-check', run: vi.fn(),
-      ...(index === 0 ? { persistent: true } : {}),
-      ...(title === 'Hide (x)' ? { glyph: <svg aria-hidden="true" data-testid="hide-icon" /> } : {}) }));
-    const props = itemProps(actions), { container } = render(<ItemRow {...props} />);
+    const props = itemProps({ ack: 'done' }), { container } = render(<ItemRow {...props} />);
     // The row holds both: the floating hover bar in order, then Ack in its own reserved slot at the end of the cluster.
     const cluster = container.querySelector('.tree-item')!, buttons = within(cluster as HTMLElement).getAllByRole('button');
-    const shown = [...names.slice(1), names[0]!], byTitle = new Map(actions.map(action => [action.title, action]));
+    const shown = [...OPEN_BAR, 'Ack → Done'];
     expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(shown);
     expect(buttons.map(button => button.title)).toEqual(shown);
-    expect(within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title)).toEqual(names.slice(1));
-    expect(buttons.every(button => button.textContent === '')).toBe(true);
-    expect(buttons.map(button => button.tabIndex)).toEqual([-1, -1, -1, -1, -1, -1, -1, 0]);
+    expect(within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title)).toEqual(OPEN_BAR);
+    expect(buttons.slice(0, -1).every(button => button.textContent === '')).toBe(true);
+    expect(buttons.map(button => button.tabIndex)).toEqual([-1, -1, -1, -1, -1, -1, 0]);
     expect(container.querySelectorAll('.tree-ack-slot')).toHaveLength(1);
     expect(container.querySelectorAll('.tree-actions')).toHaveLength(1);
     expect(buttons.at(-1)!.closest('.tree-actions')).toBeNull();
     expect(buttons.at(-1)!.closest('.tree-ack-slot')).not.toBeNull();
-    expect(within(buttons[5]!).getByTestId('hide-icon')).toBeTruthy();
-    for (const button of buttons) {
+    expect(buttons[4]!.querySelector('svg')).not.toBeNull();
+    // Each button runs its command for this row's item through the Map's one dispatcher.
+    const commands = ['reply', 'bring', 'later', 'drop', 'hide', 'remove', 'ack'];
+    buttons.forEach((button, index) => {
       expect(button.getAttribute('type')).toBe('button');
       expect(button.classList.contains('tree-action')).toBe(true);
       fireEvent.click(button);
-      expect(byTitle.get(button.title)!.run).toHaveBeenCalledOnce();
-    }
+      expect(props.run).toHaveBeenLastCalledWith(commands[index], props.row.item.id);
+    });
+    expect(props.run).toHaveBeenCalledTimes(commands.length);
     expect(props.onSelect).not.toHaveBeenCalled();
     expect(container.querySelector('.tree-end-badge')?.textContent).toBe('Open');
     expect(container.querySelector('.tree-related')?.getAttribute('aria-label')).toBe('2 related items');
@@ -114,43 +122,60 @@ describe('compact row actions', () => {
   });
 
   it('preserves disabled Ack and keeps action markup stable when hovering and selecting a row', () => {
-    const ack = vi.fn(), reply = vi.fn(), props = itemProps([
-      { title: 'Ack → Done', icon: 'ph ph-check', persistent: true, disabled: true, run: ack },
-      { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
-    ]);
+    const props = itemProps({ ack: 'done', ackDisabled: true }), run = vi.mocked(props.run);
     const { container, rerender } = render(<ItemRow {...props} />);
     const row = container.querySelector('.tree-item')!, grid = row;
     const markup = () => `${container.querySelector('.tree-actions')!.innerHTML}|${container.querySelector('.tree-end')!.innerHTML}`, before = markup();
     const button = within(grid as HTMLElement).getByRole('button', { name: 'Ack → Done' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    fireEvent.click(button); expect(ack).not.toHaveBeenCalled();
+    fireEvent.click(button); expect(run).not.toHaveBeenCalled();
     fireEvent.mouseEnter(row);
     rerender(<ItemRow {...props} selected />);
     expect(markup()).toBe(before);
     expect(within(grid as HTMLElement).getByRole('button', { name: 'Reply (r)' }).tabIndex).toBe(-1);
     const selections = vi.mocked(props.onSelect).mock.calls.length;
     fireEvent.click(within(grid as HTMLElement).getByRole('button', { name: 'Reply (r)' }));
-    expect(reply).toHaveBeenCalledOnce(); expect(props.onSelect).toHaveBeenCalledTimes(selections);
+    expect(run).toHaveBeenCalledExactlyOnceWith('reply', props.row.item.id); expect(props.onSelect).toHaveBeenCalledTimes(selections);
   });
 
   // The six-slot hover bar can float over the middle of a narrow row. A click there must still select the row, so a greyed
   // slot sits in a titled wrapper that takes the pointer (the button ignores it) and the click bubbles to the row.
   it('lets a click on a greyed hover-bar slot select the row, keeps its tooltip, and never runs it', () => {
-    const later = vi.fn(), reply = vi.fn(), props = itemProps([
-      { title: 'Later: not for Done items', icon: 'ph ph-clock', disabled: true, run: later },
-      { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
-    ]);
+    const props = itemProps({ status: 'done' });
     const { container } = render(<ItemRow {...props} />);
     const bar = container.querySelector('.tree-actions')!;
     const slot = bar.querySelector<HTMLElement>('.tree-action-off')!;
     expect(slot.title).toBe('Later: not for Done items');
     const button = within(slot).getByRole('button', { name: 'Later: not for Done items' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(bar.querySelectorAll('.tree-action-off')).toHaveLength(1);
+    expect([...bar.querySelectorAll<HTMLElement>('.tree-action-off')].map(off => off.title)).toEqual(['Later: not for Done items', 'Drop: not for Done items']);
     fireEvent.click(slot);
     expect(props.onSelect).toHaveBeenCalledWith(props.row.item.id);
-    expect(later).not.toHaveBeenCalled();
-    expect(reply).not.toHaveBeenCalled();
+    expect(props.run).not.toHaveBeenCalled();
+  });
+
+  // A stopped agent or archived session greys slots 1-4 with the reason (D4); a message on its way greys them too. Hide and
+  // Remove stay. The Map passes the reason; the row builds the bar.
+  it.each([
+    ['the agent is not running', { stopped: 'the agent is not running' }, ': the agent is not running'],
+    ['an archived session', { stopped: 'archived' }, ': archived'],
+    ['a message on its way', { delivery: { icon: 'ph ph-paper-plane-tilt', text: 'Sending', color: 'red', failed: false } }, ': a message is on its way'],
+  ] as const)('greys the agent slots for %s', (_name, options, reason) => {
+    const props = itemProps(options), { container } = render(<ItemRow {...props} />);
+    const titles = within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title);
+    expect(titles).toEqual([`Reply${reason}`, `Bring it up${reason}`, `Later${reason}`, `Drop${reason}`, 'Hide (h)', 'Remove (⌫)']);
+    fireEvent.click(within(container).getByRole('button', { name: 'Hide (h)' }));
+    expect(props.run).toHaveBeenCalledExactlyOnceWith('hide', props.row.item.id);
+  });
+
+  it('offers Unpark for a parked item, Follow up and Back to Open for a closed one, and Unhide for a hidden one', () => {
+    const parked = itemProps({ later: true });
+    const { container, rerender } = render(<ItemRow {...parked} />);
+    const titles = () => within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title);
+    expect(titles()).toEqual(['Reply (r)', 'Bring it up (b)', 'Unpark (z)', 'Drop (d)', 'Hide (h)', 'Remove (⌫)']);
+    const done = itemProps({ status: 'done' });
+    rerender(<ItemRow {...done} row={{ ...done.row, hidden: true }} />);
+    expect(titles()).toEqual(['Follow up (r)', 'Back to Open (o)', 'Later: not for Done items', 'Drop: not for Done items', 'Unhide (h)', 'Remove (⌫)']);
   });
 
   // The bar floats above the row unless the sticky band or the top of the Map/window is closer than its reach (24px).
@@ -167,7 +192,7 @@ describe('compact row actions', () => {
     ['a row whose bottom is exactly the bar\'s reach from the Map\'s bottom', { row: 60, band: 80, scroll: 40, height: 516 }, 'below'],
     ['a row whose bottom is a pixel short of the bar\'s reach', { row: 60, band: 80, scroll: 40, height: 517 }, 'inside'],
   ] as const)('puts the hover bar %s: %s', (_name, at, side) => {
-    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const props = itemProps();
     const group = document.createElement('div'), scroller = document.createElement('div');
     group.className = 'tree-topic-group'; scroller.className = 'tree-scroll';
     const height = 'height' in at ? at.height : 30, rect = (top: number) => ({ top, bottom: top + height }) as DOMRect;
@@ -204,7 +229,7 @@ describe('compact row actions', () => {
     ['a dock that leaves the bar\'s reach below the row', 100, 'below'],
     ['a dock that covers the space right under the row', 740, 'inside'],
   ] as const)('counts the dock when it picks the side of the hover bar: %s', (_name, inset, side) => {
-    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const props = itemProps();
     // The window is 768px high in jsdom; the row is at its top (no room above), 30px high, so its bottom edge is at 40.
     const { container } = render(<DockInsetProvider height={inset}><ItemRow {...props} /></DockInsetProvider>);
     const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
@@ -230,7 +255,7 @@ describe('compact row actions', () => {
     ['above: a shallower row above does not push the bar left', 'above', 340, 346, '160px'],
     ['below: a deeper row below', 'below', 340, 322, '178px'],
   ] as const)('ends the hover bar at the end cluster %s', (_name, side, own, neighbour, right) => {
-    const props = itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }]);
+    const props = itemProps();
     const { container } = render(<ItemRow {...props} />);
     const row = container.querySelector<HTMLElement>('.tree-item')!, bar = container.querySelector<HTMLElement>('.tree-actions')!;
     const at = (left: number) => () => ({ left, bottom: 0 }) as DOMRect;
@@ -253,19 +278,15 @@ describe('compact row actions', () => {
     expect(bar.style.right).toBe('');
   });
 
-  it('keeps the hover bar a direct child of the row, not of the end cluster, and a row without actions has none to place', () => {
-    const { container } = render(<ItemRow {...itemProps([{ title: 'Reply (r)', icon: 'ph ph-chat-text', run: vi.fn() }])} />);
+  it('keeps the hover bar a direct child of the row, not of the end cluster', () => {
+    const { container } = render(<ItemRow {...itemProps()} />);
     const row = container.querySelector('.tree-item')!;
     expect(row.querySelector(':scope > .tree-actions')).not.toBeNull();
     expect(row.querySelector('.tree-end .tree-actions')).toBeNull();
-    const none = render(<ItemRow {...itemProps([])} />);
-    fireEvent.mouseEnter(none.container.querySelector('.tree-item')!);
-    expect(none.container.querySelector('.tree-actions')).toBeNull();
   });
 
-  it('retains item metadata without an empty hover bar, and keeps the empty Ack slot so an Ack never rewraps the row', () => {
-    const { container } = render(<ItemRow {...itemProps([])} />);
-    expect(container.querySelector('.tree-actions')).toBeNull();
+  it('retains item metadata, and keeps the empty Ack slot on a row with no Ack so an Ack never rewraps the row', () => {
+    const { container } = render(<ItemRow {...itemProps()} />);
     expect(container.querySelector('.tree-ack-slot')?.childElementCount).toBe(0);
     expect(container.querySelector('.tree-end-marker')?.childElementCount).toBe(0);
     expect(container.querySelector('.tree-end-badge')?.textContent).toBe('Open');

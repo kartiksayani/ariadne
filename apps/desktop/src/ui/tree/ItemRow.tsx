@@ -9,14 +9,21 @@
 // changing never rewraps the row. Selection is a background and the hover bar floats (absolute): just above the row's top
 // edge, right-aligned, or just below the row where nothing is above it, or inside a row taller than the window (alpha.22).
 // It never covers the row's own text.
-import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+//
+// Redraws (alpha.23 F6d): the row is memoised, so it renders only when one of its props changes. Every prop is a value, a row
+// object the model keeps while it draws the same (model.ts `reuseRows`), or a callback that never changes (TreeView passes stable
+// handles that call its latest code). The row builds its own actions from `stopped`, `ackDisabled` and `run`.
+import { memo, useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { TreeFonts } from './fonts';
 import { ItemReference, Markdown, MarkdownHighlight } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
+import { HideIcon } from '../shared/HideIcon';
+import { ackRowLabel, ackTitle } from '../shared/ack';
+import { STATUS } from '../shared/status';
 import { closed, outcomeShown, visual, type ChangeMarker as MarkerKind, type ItemRow as Row } from './model';
-import { useMapSearch } from './mapSearch';
+import type { MatchField } from './mapSearch';
 import { measurePreviewLines } from './clamp';
 import { Guides } from './Guides';
 import { Boxes, branchStyle } from './BoxSlices';
@@ -24,8 +31,43 @@ import { Strip } from './Strip';
 import { ChangeMarker } from '../changes/ChangeMarker';
 import { useDockInset } from '../shell/dockInset';
 
-export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean;
+interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean;
   /** A short word after the icon (the Ack's "→ Done"); the title stays the full tooltip and name. */ readonly label?: string }
+
+/** What a row's buttons ask the Map to do, with the row's item id (TreeView's dispatcher acts on the rows it shows now). */
+export type RowCommand = 'ack' | 'reply' | 'followup' | 'note' | 'reopen' | 'bring' | 'later' | 'drop' | 'hide' | 'remove';
+
+/**
+ * The row's Ack (when it has one) and its hover bar: always the same six slots in SPEC 6.2's order. A slot that does not apply is
+ * greyed and says why; slots 1-4 are all greyed when the agent is not running or the session is archived (D4, `stopped`), and
+ * while a message is on its way to the agent.
+ */
+function rowActions(row: Row, stopped: string | null, ackDisabled: boolean, run: (command: RowCommand, id: string) => void): RowAction[] {
+  const item = row.item, list: RowAction[] = [], go = (command: RowCommand) => () => { run(command, item.id); };
+  if (row.ack) list.push({ icon: 'ph ph-check', title: ackTitle(row.ack, item.status), label: ackRowLabel(row.ack), persistent: true, disabled: ackDisabled, run: go('ack') });
+  const statusLabel = row.later ? 'Later' : STATUS[visual(row.status)].label;
+  const open = item.status === 'open', isClosed = closed(item.status);
+  // A message already on its way to the agent holds the row's other actions, as before.
+  const inFlight = !!row.delivery && !row.delivery.failed && !isClosed;
+  const slot = (action: string, applies: boolean, offer: { icon: string; title: string; run: () => void }): RowAction =>
+    stopped ? { icon: offer.icon, title: `${action}: ${stopped}`, disabled: true, run: () => {} }
+      : !applies ? { icon: offer.icon, title: `${action}: not for ${statusLabel} items`, disabled: true, run: () => {} }
+      : inFlight ? { icon: offer.icon, title: `${action}: a message is on its way`, disabled: true, run: () => {} } : offer;
+  const reply = item.status === 'waiting_on_me' ? { title: 'Answer (r)', command: 'reply' as const } : isClosed ? { title: 'Follow up (r)', command: 'followup' as const }
+    : open ? { title: 'Reply (r)', command: 'reply' as const } : { title: 'Add a note (r)', command: 'note' as const };
+  list.push(
+    slot(reply.title.replace(/ \(r\)$/, ''), true, { icon: 'ph ph-chat-text', title: reply.title, run: go(reply.command) }),
+    isClosed ? slot('Back to Open', item.status !== 'replaced', { icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: go('reopen') })
+      : slot('Bring it up', open, { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: go('bring') }),
+    row.later ? slot('Unpark', true, { icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: go('later') })
+      : slot('Later', open, { icon: 'ph ph-clock', title: 'Later (z)', run: go('later') }),
+    slot('Drop', open, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: go('drop') }));
+  list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (h)' : 'Hide (h)', run: go('hide') });
+  list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: go('remove') });
+  return list;
+}
+
+const NO_TERMS: readonly string[] = Object.freeze([]);
 
 /** How far the hover bar reaches above a row's top edge (tree.css `.tree-actions`): with less room than this above, it floats below. */
 const BAR_ROOM = 24;
@@ -151,7 +193,16 @@ export interface ItemRowProps {
   readonly disabled?: boolean;
   readonly closedReason?: string;
   readonly note: string | null;
-  readonly actions: readonly RowAction[];
+  /** Why the agent's slots are greyed ("archived", "the agent is not running"); null while the agent can be asked. */
+  readonly stopped: string | null;
+  /** The Ack can't be pressed now: a view change or a session action is saving, or this Ack is held. */
+  readonly ackDisabled: boolean;
+  /** Runs a button's command for this row's item. Stable: the Map dispatches it on the rows it shows when pressed. */
+  readonly run: (command: RowCommand, id: string) => void;
+  /** The search's current match, when it is on this row: which field holds it. */
+  readonly current?: MatchField | null;
+  /** The search's words, when this row holds a match: the outcome's highlight marks them. */
+  readonly terms?: readonly string[];
   /** The long preview is shown in full ("Show less" offered) instead of folded to three lines. */
   readonly unfolded: boolean;
   readonly onUnfold: (id: string) => void;
@@ -167,11 +218,11 @@ export interface ItemRowProps {
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
+export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, stopped, ackDisabled, run, current = null, terms = NO_TERMS, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
-  const search = useMapSearch(), current = search.current?.id === item.id ? search.current.field : null;
+  const actions = rowActions(row, stopped, ackDisabled, run);
   const actionButton = (action: RowAction) => {
     const button = <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
       className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
@@ -206,7 +257,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
             data-current={segment.hit && current === 'question' || undefined}>{segment.text}</span>)}
         </div></div>
       </ClampBlock></div>
-      <MarkdownHighlight.Provider value={row.matches.includes('outcome') ? { terms: search.terms, current: current === 'outcome' } : null}>
+      <MarkdownHighlight.Provider value={row.matches.includes('outcome') ? { terms, current: current === 'outcome' } : null}>
         <ClampBlock text={details?.text} open={unfolded} onToggle={() => onUnfold(item.id)}>{details?.node}</ClampBlock>
       </MarkdownHighlight.Provider>
       {delivery(row)}
@@ -237,4 +288,4 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
           onClick={event => { event.stopPropagation(); onUndoAck?.(item.id); }}>Undo</button></span>}
     </div>
   </div>;
-}
+});

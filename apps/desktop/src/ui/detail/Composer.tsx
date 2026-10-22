@@ -24,7 +24,7 @@ const CHIP = { recovered: '↺ Recovered after a restart', taken_back: '✎ Take
 function Bar({ kind, slot, sending, removing, title }: { readonly kind: ComposerKind; readonly slot: Words; readonly sending: boolean; readonly removing: boolean; readonly title: string }) {
   const note = (icon: string | null, text: string) => <span className="detail-box-hint" title={title}>{icon && <i className={icon} aria-hidden="true" />}{text}</span>;
   if (removing) return note(null, 'Being removed · Undo first');
-  if (sending && slot.locked) return note(null, '◌ Sending…');
+  if (sending && slot.locked || slot.waiting) return note(null, '◌ Sending…');
   if (slot.origin === 'recovered') return note(null, '↺ Back as you left it before the restart. Not sent.');
   if (slot.origin === 'taken_back') return note(null, 'Taken back from the queue. It isn’t sent until you send it again.');
   if (slot.text.trim()) return <span className="detail-box-hint" title={title}><i className="ph ph-pencil-simple" aria-hidden="true" />
@@ -78,12 +78,12 @@ export function WordsField({ kind: composer, slot, expanded, sending, removing, 
       {note && <p className="detail-box-note" id={noteId}>{`This will be sent as a ${kindName[sentAs]}, which fits the item now. You wrote it as a ${kindName[slot.kind]}.`}</p>}
       <div className="detail-composer-row">
         <textarea ref={attach} className="input" rows={expanded ? 3 : 2} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
-          placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onFocus={() => setCollapsed(false)}
+          placeholder={text.placeholder} value={slot.text} disabled={slot.locked} readOnly={slot.waiting} aria-busy={slot.waiting || undefined} onFocus={() => setCollapsed(false)}
           onChange={event => { setCollapsed(false); onEdit(event.target.value); }} onKeyDown={event => { if (event.key === 'Escape') setCollapsed(true); onKeyDown(event); }} />
         <div className="detail-composer-bar">
           <Bar kind={composer} slot={slot} sending={sending} removing={removing} title={text.hint} />
           {closable && <button type="button" className="btn btn-ghost detail-cancel" onClick={onCancel}>Cancel</button>}
-          <button type="button" className="btn btn-primary" disabled={sendOff} aria-label={first ? text.button : `${text.button}, another draft`} title="⌘↵ sends" onClick={onSend}>
+          <button type="button" className="btn btn-primary" disabled={sendOff} aria-busy={slot.waiting || undefined} aria-label={first ? text.button : `${text.button}, another draft`} title="⌘↵ sends" onClick={onSend}>
             <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
         </div>
       </div>
