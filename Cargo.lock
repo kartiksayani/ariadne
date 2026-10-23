@@ -69,7 +69,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "ariadne-adapter-claude"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-agent-protocol",
  "ariadne-domain",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-adapter-codex"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-agent-protocol",
  "ariadne-domain",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-agent-protocol"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-domain",
  "jsonschema",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-cli"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-adapter-claude",
  "ariadne-adapter-codex",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-core"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-agent-protocol",
  "ariadne-domain",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-desktop"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-adapter-claude",
  "ariadne-adapter-codex",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-domain"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "chrono",
  "jsonschema",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-mcp"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-core",
  "ariadne-domain",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-runtime"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-adapter-claude",
  "ariadne-adapter-codex",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-store"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-domain",
  "libc",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "ariadne-xtask"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 dependencies = [
  "ariadne-agent-protocol",
  "ariadne-core",
