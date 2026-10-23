@@ -417,8 +417,10 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '13.2': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 218], [31, 39, 398, 218], [0.003, 0.003])],
   // The R4 board's dock path runs to the question itself ("note on workspace keys"), the first file's and the app's to its parent ("which cache keys"): about 0.25% of the dock.
   '14.5': [...topBar(BAR), ...dockOpen(440, 357, [0.004, 0.006])],
-  // The key lists' rows sit a pixel off at some fractional line heights: a few hundred pixels of key caps and legends.
-  '16.1': [...topBar(BAR), ...dockLineEnds(), ...box('help panel', [614, 46, 644, 588], [10, 46, 880, 564], [0.003, 0.003])],
+  // 16.1 holds the panel's head only (title, tabs, close). The list below it has three more lines than the board (alpha.24, asked by the
+  // owner): "Hide" is x, ⌥1–9 "Choose and send" and ⌥↑ ⌥↓ "Scroll Details" are listed, so every row under the first shifts and the panel is
+  // two lines taller; at 900 x 650 it then reaches over the dock line (its max-height caps it and it scrolls), so the narrow frame leaves the dock line out too.
+  '16.1': [...topBar(BAR), ...dockLineEnds().filter(region => region.variants === WIDE), ...box('help panel head', [614, 46, 644, 44], [10, 46, 880, 44], [0.003, 0.003])],
   '16.2': [...topBar(BAR), ...dockLineEnds(), ...box('help panel', [614, 46, 644, 470], [10, 46, 880, 430], [0.001, 0.001])],
   // R4's empty-Map line (clear0) keeps "New questions open here." at 900 wide; its "Nothing waiting" line (15.4) drops it. The app trims both, so 15.3 narrow holds the icon only.
   '15.3': [...topBarUnnamed(BAR), { name: 'dock line text', rect: [0, 760, 700, 40], variants: WIDE }, { name: 'dock line icon (narrow)', rect: [0, 610, 36, 40], variants: NARROW },

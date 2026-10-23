@@ -26,7 +26,7 @@ function itemProps({ status = 'open', ack = null, stopped = null, ackDisabled = 
   onToggle: vi.fn() };
 }
 /** The hover bar of an open item, in SPEC 6.2's order. */
-const OPEN_BAR = ['Reply (r)', 'Bring it up (b)', 'Later (z)', 'Drop (d)', 'Hide (h)', 'Remove (⌫)'];
+const OPEN_BAR = ['Reply (r)', 'Bring it up (b)', 'Later (z)', 'Drop (d)', 'Hide (x)', 'Remove (⌫)'];
 
 function topicProps(actions: readonly TopicAction[]): TopicRowProps {
   const topic = immutable({ ...Object.values((demo as Session).topics)[0]!, name: 'Orchard plans' });
@@ -163,8 +163,8 @@ describe('compact row actions', () => {
   ] as const)('greys the agent slots for %s', (_name, options, reason) => {
     const props = itemProps(options), { container } = render(<ItemRow {...props} />);
     const titles = within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title);
-    expect(titles).toEqual([`Reply${reason}`, `Bring it up${reason}`, `Later${reason}`, `Drop${reason}`, 'Hide (h)', 'Remove (⌫)']);
-    fireEvent.click(within(container).getByRole('button', { name: 'Hide (h)' }));
+    expect(titles).toEqual([`Reply${reason}`, `Bring it up${reason}`, `Later${reason}`, `Drop${reason}`, 'Hide (x)', 'Remove (⌫)']);
+    fireEvent.click(within(container).getByRole('button', { name: 'Hide (x)' }));
     expect(props.run).toHaveBeenCalledExactlyOnceWith('hide', props.row.item.id);
   });
 
@@ -172,10 +172,10 @@ describe('compact row actions', () => {
     const parked = itemProps({ later: true });
     const { container, rerender } = render(<ItemRow {...parked} />);
     const titles = () => within(container.querySelector('.tree-actions') as HTMLElement).getAllByRole('button').map(button => button.title);
-    expect(titles()).toEqual(['Reply (r)', 'Bring it up (b)', 'Unpark (z)', 'Drop (d)', 'Hide (h)', 'Remove (⌫)']);
+    expect(titles()).toEqual(['Reply (r)', 'Bring it up (b)', 'Unpark (z)', 'Drop (d)', 'Hide (x)', 'Remove (⌫)']);
     const done = itemProps({ status: 'done' });
     rerender(<ItemRow {...done} row={{ ...done.row, hidden: true }} />);
-    expect(titles()).toEqual(['Follow up (r)', 'Back to Open (o)', 'Later: not for Done items', 'Drop: not for Done items', 'Unhide (h)', 'Remove (⌫)']);
+    expect(titles()).toEqual(['Follow up (r)', 'Back to Open (o)', 'Later: not for Done items', 'Drop: not for Done items', 'Unhide (x)', 'Remove (⌫)']);
   });
 
   // The bar floats above the row unless the sticky band or the top of the Map/window is closer than its reach (24px).

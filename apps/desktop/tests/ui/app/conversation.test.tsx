@@ -293,13 +293,22 @@ describe('desktop item conversation', () => {
     await waitFor(() => expect(conversation().querySelector(`[data-answer-option="${digit - 1}"]`)?.getAttribute('aria-pressed')).toBe('true'));
     const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: `Note for option ${digit}` } });
-    // ⌥digit no longer picks and sends (SPEC 6.1): it sends nothing; ⌘↵ in the words box sends the picked option.
-    conversation().focus(); alt(conversation(), digit);
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
-    expect(sends(transport)).toHaveLength(0);
+    // ⌘↵ in the words box sends the picked option.
     key(words, 'Enter', { metaKey: true });
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`, text: `Note for option ${digit}` } } });
+    expect(selected(transport)).toBe('4');
+  });
+
+  // ⌥digit is back (alpha.24): it picks that option of the conversation's question and sends it at once, with the typed note.
+  it.each([1, 2, 5, 9])('⌥%i sends that overlay option with the typed note, once, instead of targeting the covered Map item', async digit => {
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
+    fireEvent.change(answerWords(conversation()), { target: { value: `Note for option ${digit}` } });
+    conversation().focus(); alt(conversation(), digit);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`, text: `Note for option ${digit}` } } });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(sends(transport)).toHaveLength(1);
     expect(selected(transport)).toBe('4');
   });
 

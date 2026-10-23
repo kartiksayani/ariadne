@@ -14,7 +14,9 @@ describe('Help keys', () => {
     expect(screen.getAllByRole('region').map(group => group.getAttribute('aria-label'))).toEqual(['Move around the Map', 'Answer and reply', 'On the selected item', 'Find and switch']);
     expect(keyOf('On the selected item', 'Ack')).toEqual(['a']);
     expect(keyOf('On the selected item', 'Drop')).toEqual(['d']);
-    expect(keyOf('On the selected item', 'Hide')).toEqual(['h']);
+    expect(keyOf('On the selected item', 'Hide')).toEqual(['x']);
+    expect(keyOf('Answer and reply', 'Choose and send')).toEqual(['⌥', '1–9']);
+    expect(keyOf('Move around the Map', 'Scroll Details')).toEqual(['⌥', '↑', '↓']);
     expect(keyOf('On the selected item', 'Remove; asks first when items below it would go too')).toEqual(['⌫']);
     expect(keyOf('On the selected item', 'Focus on it, or Unfocus')).toEqual(['⇧', 'F']);
     expect(keyOf('On the selected item', 'Bring it up with the agent')).toEqual(['b']);

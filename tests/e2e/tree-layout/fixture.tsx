@@ -12,6 +12,8 @@ import type { ItemRow as Row } from '../../../apps/desktop/src/ui/tree/model';
 import { Shell } from '../../../apps/desktop/src/ui/shell/Shell';
 import { DetailsColumn } from '../../../apps/desktop/src/ui/shell/DetailsColumn';
 import { DockInsetProvider } from '../../../apps/desktop/src/ui/shell/dockInset';
+import { useWorkspaceKeys } from '../../../apps/desktop/src/ui/keys';
+import { workspaceKeys } from '../../../apps/desktop/src/ui/shell/workspaceKeys';
 import { DetailsColumnProvider } from '../../../apps/desktop/src/state/details/column';
 import '../../../apps/desktop/src/ui/detail/detail.css';
 import { notices } from '../../../apps/desktop/src/ui/pages/notices';
@@ -237,7 +239,7 @@ function ActionGridFixture() {
     collapsed: null, delivery: null, badge: 'Open', branch: 0, boxes: [] };
   // The hover bar's six slots in SPEC 6.2's order, then Ack in its own persistent slot: an open item with an Ack to In progress.
   const titles: Record<RowCommand, string> = { ack: ackTitle('in_progress', 'open'), reply: 'Reply (r)', bring: 'Bring it up (b)', later: 'Later (z)', drop: 'Drop (d)',
-    hide: 'Hide (h)', remove: 'Remove (⌫)', followup: 'Follow up (r)', note: 'Add a note (r)', reopen: 'Back to Open (o)' };
+    hide: 'Hide (x)', remove: 'Remove (⌫)', followup: 'Follow up (r)', note: 'Add a note (r)', reopen: 'Back to Open (o)' };
   const props = { focused: false, note: null, unfolded: false, onUnfold: () => {}, stopped: null, ackDisabled: false,
     run: (command: RowCommand) => setClicked(titles[command]),
     remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onSelect: () => setSelected(true), onToggle: () => {} };
@@ -257,17 +259,19 @@ function ActionGridFixture() {
  */
 function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
   const messages = Array.from({ length: 40 }, (_, index) => <p key={index} className="fixture-message">Message {index + 1} in a long conversation.</p>);
-  return <DockInsetProvider height={dock}><DetailsColumnProvider saved={null}>
-    <Shell topBar={<div style={{ height: 40 }} />} main={<p>Map</p>}
-      legacy={{ conversation: bigger ? <div className="item-conversation" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-        <div className="detail-body" style={{ flex: 1, minHeight: 0 }}>{messages}</div>
+  // The App root's own key handler, so ⌥↑ / ⌥↓ scroll these panels the way they do in the app (details-keys.spec.mts).
+  const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({ focused: () => null, focusOwner: () => {}, quickAnswer: () => false, closeDetail: () => {}, onPage: false }), { scope: 'workspace' });
+  return <DockInsetProvider height={dock}><DetailsColumnProvider saved={null}><div style={{ display: 'contents' }} onKeyDown={keys}>
+    <Shell topBar={<div style={{ height: 40 }} />} main={<button type="button">Map</button>}
+      legacy={{ conversation: bigger ? <div className="item-conversation" data-testid="bigger-view" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+        <div className="detail-body" data-testid="detail-body" style={{ flex: 1, minHeight: 0 }}>{messages}</div>
         <div className="detail-dock" data-testid="bigger-composer"><textarea aria-label="Reply in the bigger view" rows={2} /></div></div> : undefined }}
       side={<DetailsColumn path={<span>Topic / item</span>} rail={<i className="ph ph-check-circle" />}>
-        <div className="item-detail"><div className="detail-body">{messages}</div>
+        <div className="item-detail"><div className="detail-body" data-testid="detail-body">{messages}</div>
           <div className="detail-dock"><textarea aria-label="Reply" rows={2} /><button type="button">Send</button></div></div>
       </DetailsColumn>}
       dock={dock ? <div data-testid="dock" style={{ height: dock, background: 'rgb(200 60 60 / 85%)' }} /> : undefined} />
-  </DetailsColumnProvider></DockInsetProvider>;
+  </div></DetailsColumnProvider></DockInsetProvider>;
 }
 
 const query = new URLSearchParams(window.location.search);

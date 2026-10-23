@@ -62,7 +62,7 @@ function rowActions(row: Row, stopped: string | null, ackDisabled: boolean, run:
     row.later ? slot('Unpark', true, { icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: go('later') })
       : slot('Later', open, { icon: 'ph ph-clock', title: 'Later (z)', run: go('later') }),
     slot('Drop', open, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: go('drop') }));
-  list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (h)' : 'Hide (h)', run: go('hide') });
+  list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (x)' : 'Hide (x)', run: go('hide') });
   list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: go('remove') });
   return list;
 }

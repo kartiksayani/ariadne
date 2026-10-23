@@ -20,6 +20,7 @@ import { viewOf } from './state/navigation/view';
 import { OwnerDraftStore, useOwnerDrafts } from './state/drafts/store';
 import { readFolded } from './state/details/column';
 import { WaitingStore } from './selectors/waiting/store';
+import { displayStatus } from './selectors/waiting/replied';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
@@ -392,6 +393,30 @@ function Workspace({ application }: { application: Application }) {
       if (quickRequests.current.get(identity) === token && (!published || shortcutSequence.current !== token)) quickRequests.current.delete(identity);
     });
   };
+  // ⌥N: open the question and send option N at once. The answer box in Details sends it with its own guards (stale read, item
+  // changed, in flight); this only refuses to start while the session, drafts or a request are not ready.
+  const quickAnswer = (target: ItemRoute, index: number) => {
+    const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
+    const session = current?.snapshot?.session, item = session?.items[target.item_id];
+    const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
+    if (session && item && (current?.status !== 'ready' || current.error)) {
+      notices.push({ id: 'quick-answer-not-ready', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
+        text: "Ariadne is still loading this session's latest changes. Try again." });
+      return true;
+    }
+    notices.dismiss('quick-answer-not-ready');
+    if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
+      || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
+      || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
+      || quickRequests.current.has(JSON.stringify(target))
+      || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
+      || entry?.receipt
+      || !item.options[index]) return false;
+    focusOwner(target, 'answer', index, undefined, 'send', {
+      optionId: item.options[index]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id,
+    });
+    return true;
+  };
   const queueBring = async (target: ItemRoute, onReveal?: (result: RevealedItem) => void) => {
     const identity = JSON.stringify(target);
     if (bringing.current.has(identity)) return;
@@ -625,7 +650,7 @@ function Workspace({ application }: { application: Application }) {
   const hideItem = (itemId: string) => { if (route) toggleHidden({ ...route, item_id: itemId }); };
   const removeItem = (itemId: string) => { if (route) askRemove({ kind: 'item', item: { ...route, item_id: itemId } }); };
   const intentApp: ItemIntentApp = {
-    store: !!store, onPage: viewOf(state).kind !== 'session', toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, queueBring, ack: (target, repeat) => {
+    store: !!store, onPage: viewOf(state).kind !== 'session', toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
