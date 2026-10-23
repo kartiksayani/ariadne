@@ -106,8 +106,3 @@ export function startDetailScroll(direction: ScrollDirection, event: Pick<Keyboa
   run.frame = requestAnimationFrame(frame);
   return true;
 }
-
-/** Whether a scroll started by `direction`'s arrow is still running, so its key-repeat presses can be swallowed. */
-export function scrollingDetails(direction: ScrollDirection): boolean {
-  return run?.direction === direction && run.keyDown;
-}

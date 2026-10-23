@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
@@ -8,7 +8,8 @@ import { goToSession } from './open';
 import { answerWords } from '../answer/words';
 import { closeDetails } from '../shell/closeDetails';
 
-afterEach(() => { stopDetailScroll(); cleanup(); });
+beforeEach(() => { localStorage.clear(); });
+afterEach(() => { stopDetailScroll(); cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 
 const row = (id = '2') => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const detail = () => screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
@@ -115,5 +116,94 @@ describe('⌥↑ / ⌥↓ scroll Details', () => {
     await pause(100);
     expect(scroller.scrollTop).toBe(80);
     expect(selected(transport)).toBe('2');
+  });
+});
+
+// WebKit's own ⌥↓ pages the focused scroller, so a press the workspace accepts is consumed whether or not it scrolls: a held key
+// whose scroll has ended, or never began, must not page the Map under the OS key-repeat.
+describe('⌥↑ / ⌥↓ are always consumed by the workspace', () => {
+  /** Dispatches a real keydown on `target` and says whether the workspace consumed it. */
+  const consumed = (target: Element, name: 'ArrowUp' | 'ArrowDown', repeat: boolean) => {
+    const event = new KeyboardEvent('keydown', { key: name, code: name, altKey: true, repeat, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it('consumes the repeats of a hold whose scroll reached the end, and neither scroller moves', async () => {
+    const { scroller, body } = await open();
+    body.scrollTop = 3600;
+    row().focus(); expect(consumed(row(), 'ArrowDown', false)).toBe(true);
+    await pause(100);
+    expect(body.scrollTop).toBe(3600);
+    for (let count = 0; count < 5; count++) expect(consumed(row(), 'ArrowDown', true)).toBe(true);
+    expect(scroller.scrollTop).toBe(80);
+    expect(body.scrollTop).toBe(3600);
+    up('ArrowDown');
+    // The same at the top, with ⌥↑.
+    body.scrollTop = 0;
+    expect(consumed(row(), 'ArrowUp', false)).toBe(true);
+    await pause(100);
+    expect(consumed(row(), 'ArrowUp', true)).toBe(true);
+    expect(scroller.scrollTop).toBe(80);
+  });
+
+  it('consumes the presses and repeats when Details is closed', async () => {
+    const { scroller } = await open();
+    closeDetails();
+    await waitFor(() => expect(screen.queryByTestId('detail-body')).toBeNull());
+    row().focus();
+    expect(consumed(row(), 'ArrowDown', false)).toBe(true);
+    expect(consumed(row(), 'ArrowDown', true)).toBe(true);
+    expect(consumed(row(), 'ArrowUp', true)).toBe(true);
+    expect(scroller.scrollTop).toBe(80);
+  });
+
+  it('consumes the presses and repeats when Details is folded', async () => {
+    const { scroller } = await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Fold Details' }));
+    await screen.findByRole('button', { name: 'Show Details' });
+    row().focus();
+    expect(consumed(row(), 'ArrowDown', false)).toBe(true);
+    expect(consumed(row(), 'ArrowDown', true)).toBe(true);
+    expect(consumed(row(), 'ArrowUp', true)).toBe(true);
+    expect(scroller.scrollTop).toBe(80);
+  });
+
+  it('consumes the repeats of a held key with reduced motion, which steps once and never creeps', async () => {
+    const { scroller, body } = await open();
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query }));
+    row().focus(); expect(consumed(row(), 'ArrowDown', false)).toBe(true);
+    const stepped = body.scrollTop;
+    expect(stepped).toBe(36);
+    for (let count = 0; count < 5; count++) expect(consumed(row(), 'ArrowDown', true)).toBe(true);
+    await pause(100);
+    expect(body.scrollTop).toBe(stepped);
+    expect(scroller.scrollTop).toBe(80);
+  });
+
+  it('consumes the repeats after the owner wheel-scrolled Details away from a hold', async () => {
+    const { scroller, body } = await open();
+    row().focus(); expect(consumed(row(), 'ArrowDown', false)).toBe(true);
+    await waitFor(() => expect(body.scrollTop).toBeGreaterThan(5));
+    // The wheel moves it somewhere else: the hold gives up, the repeats still must not page the Map.
+    body.scrollTop += 200;
+    await pause(100);
+    const away = body.scrollTop;
+    for (let count = 0; count < 5; count++) expect(consumed(row(), 'ArrowDown', true)).toBe(true);
+    await pause(100);
+    expect(body.scrollTop).toBe(away);
+    expect(scroller.scrollTop).toBe(80);
+  });
+
+  it('still leaves a text field and an open menu their ⌥↑ / ⌥↓', async () => {
+    await open();
+    const words = answerWords(detail());
+    words.focus();
+    expect(consumed(words, 'ArrowDown', false)).toBe(false);
+    expect(consumed(words, 'ArrowDown', true)).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    const menu = await screen.findByRole('menu');
+    expect(consumed(menu, 'ArrowDown', false)).toBe(false);
+    expect(consumed(menu, 'ArrowDown', true)).toBe(false);
   });
 });

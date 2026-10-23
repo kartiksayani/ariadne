@@ -8,6 +8,14 @@ afterEach(cleanup);
 const keyOf = (group: string, text: string) => KEY_GROUPS.find(entry => entry.label === group)!.keys.find(([, line]) => line === text)?.[0];
 
 describe('Help keys', () => {
+  // The final board's 16.1 frame holds every row above these two (design suite), so the added keys come last in their groups.
+  it('lists "Scroll Details" last under Move around the Map and "Choose and send" last under Answer and reply', () => {
+    const last = (group: string) => KEY_GROUPS.find(entry => entry.label === group)!.keys.at(-1)!;
+    expect(last('Move around the Map')).toEqual([['⌥', '↑', '↓'], 'Scroll Details']);
+    expect(last('Answer and reply')).toEqual([['⌥', '1–9'], 'Choose and send']);
+    expect(KEY_GROUPS.find(entry => entry.label === 'Move around the Map')!.keys.at(-2)![1]).toMatch(/^Outline the next unseen item/);
+  });
+
   it('opens on Keys with the four groups, and every key of the approved map', () => {
     render(<HelpPanel narrow={false} onClose={vi.fn()} />);
     expect(screen.getByRole('tab', { name: 'Keys' }).getAttribute('aria-selected')).toBe('true');

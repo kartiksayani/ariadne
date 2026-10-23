@@ -1,12 +1,14 @@
 // The App's share of the keys (C4, converted to intents for C5). Keys that only make sense where focus is
 // (Esc, the option digits) stay key handlers; every other workspace key asks for an intent (ui/keys.ts
 // `keyIntents`), and the App answers the ones that act on the current view's selected item.
+import type { KeyboardEvent } from 'react';
 import type { ItemRoute } from '../../generated/core';
 import type { OwnerFocusRequest } from '../answer/useSubmit';
 import type { RemoveTarget } from '../dialogs/remove';
 import type { Intent, IntentHandler } from '../intents';
 import { intentKeyHandlers, type WorkspaceHandlers } from '../keys';
-import { scrollingDetails, startDetailScroll } from './detailScroll';
+import { peekTargetKey } from '../peek/target';
+import { startDetailScroll } from './detailScroll';
 
 export type TreeRemoveTarget = Extract<RemoveTarget, { kind: 'item' | 'topic' }>;
 export interface FocusedItem { readonly item: { readonly id: string; readonly status: string; readonly topic_id: string }; readonly target: ItemRoute }
@@ -35,6 +37,15 @@ export interface ItemIntentApp {
 export function workspaceKeys(app: Pick<ItemIntentApp, 'focused' | 'focusOwner' | 'quickAnswer' | 'closeDetail' | 'closeConversation' | 'clearFilters' | 'onPage'>): WorkspaceHandlers<HTMLDivElement> {
   // An open menu owns its keys; the answer dock sends its own question, never the Map's selected one.
   const menuOpen = () => !!document.querySelector('[role="menu"]');
+  // WebKit's own ⌥↓ pages the focused scroller (the Map), and a held key repeats it ~30 times a second. So every press the workspace
+  // accepts is consumed whether or not it scrolls Details: a hold whose scroll has ended, Details closed or folded, reduced
+  // motion, or a scroll the wheel interrupted. Only a first press starts a scroll; the OS key-repeat presses never step it.
+  // On a page (Projects, All sessions, Archive) the keys are the page's own.
+  const detailKey = (direction: 'up' | 'down', event: KeyboardEvent<HTMLDivElement>) => {
+    if (app.onPage || menuOpen()) return false;
+    if (!event.repeat) startDetailScroll(direction, event);
+    return true;
+  };
   return {
     ...intentKeyHandlers<HTMLDivElement>(),
     // Esc closes the answer box first (the editor stops it), then detail, then clears filters. On a page it is not the Map's.
@@ -49,12 +60,15 @@ export function workspaceKeys(app: Pick<ItemIntentApp, 'focused' | 'focusOwner' 
       const focused = app.focused();
       if (!focused || focused.item.status !== 'waiting_on_me' || intent.kind !== 'choose-send' || menuOpen()
         || (event.target instanceof Element && event.target.closest('.answer-dock'))) return false;
+      // A hover peek card showing some other item is what the owner is looking at: sending the Map's selection then would answer
+      // a question they are not reading. The key is refused (and consumed), not redirected.
+      const peeked = document.querySelector<HTMLElement>('.item-peek')?.dataset.peekTarget;
+      if (peeked !== undefined && peeked !== peekTargetKey(focused.target)) return true;
       return app.quickAnswer(focused.target, intent.index);
     },
-    // ⌥↑ / ⌥↓: scroll Details while the keys are down; the Map's selection and scroll stay where they are. Key-repeat presses
-    // of a scroll already running are swallowed, never stepped.
-    'details-up': (_intent, event) => event.repeat ? scrollingDetails('up') : !menuOpen() && startDetailScroll('up', event),
-    'details-down': (_intent, event) => event.repeat ? scrollingDetails('down') : !menuOpen() && startDetailScroll('down', event),
+    // ⌥↑ / ⌥↓: scroll Details while the keys are down; the Map's selection and scroll stay where they are.
+    'details-up': (_intent, event) => detailKey('up', event),
+    'details-down': (_intent, event) => detailKey('down', event),
   };
 }
 

@@ -257,16 +257,17 @@ function ActionGridFixture() {
  * The Details column in the real shell, under a stand-in dock of the height in the query (`?details&dock=200`): a long
  * conversation that scrolls above a pinned composer, as the item detail lays them out.
  */
-function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
+function DetailsFixture({ dock, bigger, closed }: { dock: number; bigger: boolean; closed: boolean }) {
   const messages = Array.from({ length: 40 }, (_, index) => <p key={index} className="fixture-message">Message {index + 1} in a long conversation.</p>);
   // The App root's own key handler, so ⌥↑ / ⌥↓ scroll these panels the way they do in the app (details-keys.spec.mts).
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({ focused: () => null, focusOwner: () => {}, quickAnswer: () => false, closeDetail: () => {}, onPage: false }), { scope: 'workspace' });
   return <DockInsetProvider height={dock}><DetailsColumnProvider saved={null}><div style={{ display: 'contents' }} onKeyDown={keys}>
-    <Shell topBar={<div style={{ height: 40 }} />} main={<button type="button">Map</button>}
+    <Shell topBar={<div style={{ height: 40 }} />} main={<div data-testid="map-scroll" style={{ height: '100%', overflow: 'auto' }}>
+      <button type="button">Map</button><div style={{ height: 3000 }} /></div>}
       legacy={{ conversation: bigger ? <div className="item-conversation" data-testid="bigger-view" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
         <div className="detail-body" data-testid="detail-body" style={{ flex: 1, minHeight: 0 }}>{messages}</div>
         <div className="detail-dock" data-testid="bigger-composer"><textarea aria-label="Reply in the bigger view" rows={2} /></div></div> : undefined }}
-      side={<DetailsColumn path={<span>Topic / item</span>} rail={<i className="ph ph-check-circle" />}>
+      side={closed ? undefined : <DetailsColumn path={<span>Topic / item</span>} rail={<i className="ph ph-check-circle" />}>
         <div className="item-detail"><div className="detail-body" data-testid="detail-body">{messages}</div>
           <div className="detail-dock"><textarea aria-label="Reply" rows={2} /><button type="button">Send</button></div></div>
       </DetailsColumn>}
@@ -280,6 +281,6 @@ const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), cha
 (window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
 // The notice stack and the toast, which the Map must never move for (notices-still.spec.mts).
 (window as unknown as { floating: { notices: typeof notices; toasts: typeof toasts } }).floating = { notices, toasts };
-createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
+createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} closed={query.has('closed')} />
   : query.has('grid') ? <ActionGridFixture />
   : <DesktopApp service={createDesktopService(transport)} />);

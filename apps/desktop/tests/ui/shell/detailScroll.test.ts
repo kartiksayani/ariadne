@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { detailBody, scrollingDetails, startDetailScroll, stopDetailScroll } from '../../../src/ui/shell/detailScroll';
+import { detailBody, startDetailScroll, stopDetailScroll } from '../../../src/ui/shell/detailScroll';
 
 const HEIGHT = 500, FRAME = 16;
 
@@ -37,7 +37,6 @@ describe('⌥↑ / ⌥↓ scrolling of Details', () => {
     // At rest: no frame is pending and nothing moves later.
     expect(vi.getTimerCount()).toBe(0);
     expect(run(element, 200).at(-1)).toBe(end);
-    expect(scrollingDetails('down')).toBe(false);
   });
 
   it('keeps a tap under 10% even when frames come slowly', () => {
@@ -62,7 +61,6 @@ describe('⌥↑ / ⌥↓ scrolling of Details', () => {
   it('keeps scrolling smoothly at a slow constant speed while held, with no jump, and stops when the key comes up', () => {
     const element = body();
     startDetailScroll('down', { key: 'ArrowDown' });
-    expect(scrollingDetails('down')).toBe(true);
     const seen = run(element, 1000);
     // About 10% of the visible height per 200 ms once up to speed: 0.5 heights a second, less the ease-in.
     expect(seen.at(-1)!).toBeGreaterThan(0.4 * HEIGHT);
@@ -117,14 +115,6 @@ describe('⌥↑ / ⌥↓ scrolling of Details', () => {
     startDetailScroll('up', { key: 'ArrowUp' });
     expect(run(element, 1000).at(-1)).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('answers only a running scroll of the same direction to swallow key-repeat presses', () => {
-    body();
-    expect(scrollingDetails('down')).toBe(false);
-    startDetailScroll('down', { key: 'ArrowDown' });
-    expect(scrollingDetails('down')).toBe(true);
-    expect(scrollingDetails('up')).toBe(false);
   });
 
   it('has nothing to scroll when Details is closed, folded or hidden', () => {

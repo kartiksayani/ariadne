@@ -181,6 +181,43 @@ describe('quick owner answers from the desktop', () => {
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2' } });
   });
 
+  it('refuses ⌥N while a hover peek shows another item than the Map’s selection, and sends again once it is gone', async () => {
+    const transport = setup(); await openQuestion();
+    const other = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+    fireEvent.mouseEnter(other);
+    const peek = await screen.findByRole('dialog', { name: /^Peek: / }, { timeout: 3000 });
+    expect(peek.getAttribute('data-peek-target')).toContain('"4"');
+    row().focus();
+    // Refused and consumed: nothing is sent, the key does not fall through.
+    expect(alt(row(), 2)).toBe(false);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(sends(transport)).toHaveLength(0);
+    // Plain digits are unchanged: they still pick the option (and send nothing).
+    expect(fireEvent.keyDown(row(), { key: '2' })).toBe(false);
+    expect(sends(transport)).toHaveLength(0);
+    // Without the card the same key sends.
+    fireEvent.mouseLeave(other);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull());
+    row().focus(); alt(row(), 2);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ command: { params: { target: { item_id: '2' }, selected_option_id: 'choice-2' } } });
+  });
+
+  it('refuses ⌥N in topic mode, where Details shows the topic’s conversation, and does not switch Details to the Map’s item', async () => {
+    const transport = setup(); await openQuestion();
+    const band = document.querySelector<HTMLElement>('.tree-topic')!;
+    fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Reply to topic/ }));
+    await waitFor(() => expect(document.querySelector('[data-composer="topic"]')).not.toBeNull());
+    expect(document.querySelector('[data-detail-item-id]')).toBeNull();
+    row().focus();
+    expect(alt(row(), 2)).toBe(false);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(sends(transport)).toHaveLength(0);
+    expect(document.querySelector('[data-detail-item-id]')).toBeNull();
+    expect(document.querySelector('[data-composer="topic"]')).not.toBeNull();
+  });
+
   // The tree row has no inline answer any more (SPEC, Removed): only Details sends from the keyboard on the Map.
   it('keeps the typed note when sending from Details', async () => {
     const transport = setup(); await openQuestion();

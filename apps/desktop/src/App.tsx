@@ -395,7 +395,10 @@ function Workspace({ application }: { application: Application }) {
   };
   // ⌥N: open the question and send option N at once. The answer box in Details sends it with its own guards (stale read, item
   // changed, in flight); this only refuses to start while the session, drafts or a request are not ready.
+  // In topic mode Details shows the topic's conversation, not the Map's selected item: the key is refused (and consumed) there,
+  // so it never switches Details to that item and sends in one go.
   const quickAnswer = (target: ItemRoute, index: number) => {
+    if (topicMode) return true;
     const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
     const session = current?.snapshot?.session, item = session?.items[target.item_id];
     const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');

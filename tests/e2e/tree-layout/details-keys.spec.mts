@@ -21,7 +21,7 @@ async function withFixture(page: Page, query: string, run: () => Promise<void>, 
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?${query}`);
     // The bigger view covers the column (it leaves the accessibility tree), so wait on whichever body shows.
-    await expect(page.getByTestId('detail-body').last()).toBeVisible();
+    await expect((query.includes('closed') ? page.getByTestId('map-scroll') : page.getByTestId('detail-body').last())).toBeVisible();
     await page.evaluate(async () => { await document.fonts.ready; });
     await run();
   } finally { await server.close(); }
@@ -129,5 +129,87 @@ test('⌥↓ stops at the end of a short panel instead of running on', async ({ 
     await page.waitForTimeout(500);
     await page.keyboard.up('ArrowDown'); await page.keyboard.up('Alt');
     expect(await top(scroller)).toBe(end);
+  });
+});
+
+// WebKit's own ⌥↓ pages the focused scroller, here the Map, and a held key repeats it ~30 times a second. Playwright's held key
+// sends no repeats, so the repeats are dispatched explicitly: each must be consumed (defaultPrevented) and the Map must not move,
+// wherever the hold's scroll stands.
+const map = (page: Page) => page.getByTestId('map-scroll');
+/** A ⌥-arrow keydown on the focused element, as the OS key-repeat sends it; whether the workspace consumed it. */
+const keydown = (page: Page, key: 'ArrowUp' | 'ArrowDown', repeat: boolean) => page.evaluate(([name, again]) => {
+  const event = new KeyboardEvent('keydown', { key: name as string, code: name as string, altKey: true, repeat: again as boolean, bubbles: true, cancelable: true });
+  (document.activeElement ?? document.body).dispatchEvent(event);
+  return event.defaultPrevented;
+}, [key, repeat]);
+async function repeatsAreConsumed(page: Page) {
+  const scroller = map(page);
+  expect(await scroller.evaluate(element => element.scrollHeight - element.clientHeight)).toBeGreaterThan(500);
+  for (let count = 0; count < 5; count++) {
+    expect(await keydown(page, 'ArrowDown', true)).toBe(true);
+    expect(await keydown(page, 'ArrowUp', true)).toBe(true);
+  }
+  await page.waitForTimeout(300);
+  expect(await top(scroller)).toBe(0);
+}
+
+test('held ⌥↓ repeats are consumed after the scroll reached the end of Details, and the Map stays', async ({ page }) => {
+  await withFixture(page, 'details', async () => {
+    const scroller = column(page);
+    await page.getByRole('button', { name: 'Map' }).focus();
+    await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    const end = await top(scroller);
+    await page.keyboard.down('Alt'); await page.keyboard.down('ArrowDown');
+    await page.waitForTimeout(400);
+    expect(await keydown(page, 'ArrowDown', false)).toBe(true);
+    await repeatsAreConsumed(page);
+    await page.keyboard.up('ArrowDown'); await page.keyboard.up('Alt');
+    expect(await top(scroller)).toBe(end);
+  });
+});
+
+test('⌥↓ and its repeats are consumed with Details closed, and the Map stays', async ({ page }) => {
+  await withFixture(page, 'details&closed', async () => {
+    await page.getByRole('button', { name: 'Map' }).focus();
+    expect(await keydown(page, 'ArrowDown', false)).toBe(true);
+    await repeatsAreConsumed(page);
+  });
+});
+
+test('⌥↓ and its repeats are consumed with Details folded, and the Map stays', async ({ page }) => {
+  await withFixture(page, 'details', async () => {
+    await page.getByRole('button', { name: 'Fold Details' }).click();
+    await expect(page.getByRole('button', { name: 'Show Details' })).toBeVisible();
+    await page.getByRole('button', { name: 'Map' }).focus();
+    expect(await keydown(page, 'ArrowDown', false)).toBe(true);
+    await repeatsAreConsumed(page);
+  });
+});
+
+test('with reduced motion the repeats of ⌥↓ are consumed, Details moves one step only, and the Map stays', async ({ page }) => {
+  await withFixture(page, 'details', async () => {
+    const scroller = column(page), height = await visible(scroller);
+    await page.getByRole('button', { name: 'Map' }).focus();
+    expect(await keydown(page, 'ArrowDown', false)).toBe(true);
+    await repeatsAreConsumed(page);
+    expect(await top(scroller)).toBe(Math.round(0.09 * height));
+  }, 'reduce');
+});
+
+test('the repeats of a held ⌥↓ are consumed after the wheel scrolled Details away from the hold, and the Map stays', async ({ page }) => {
+  await withFixture(page, 'details', async () => {
+    const scroller = column(page);
+    await page.getByRole('button', { name: 'Map' }).focus();
+    await page.keyboard.down('Alt'); await page.keyboard.down('ArrowDown');
+    await page.waitForTimeout(250);
+    const box = (await scroller.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(600);
+    const away = await top(scroller);
+    expect(away).toBeGreaterThan(300);
+    await repeatsAreConsumed(page);
+    expect(await top(scroller)).toBe(away);
+    await page.keyboard.up('ArrowDown'); await page.keyboard.up('Alt');
   });
 });
