@@ -14,7 +14,9 @@ import { statusColor } from '../shared/status';
 import { useWorkspaceKeys } from '../keys';
 import { useIntents } from '../intents';
 import { useHidden } from '../remove/queue';
-import { visibleSession } from '../remove/model';
+import { subtree, visibleSession } from '../remove/model';
+import { hideViews, selectionAfterHide, type HideMove } from '../tree/hideMove';
+import { useLatest } from '../shared/latest';
 import { filterSignature, type LocalChip } from '../../selectors/tree/filter';
 import { BRANCH_HUES } from '../tree/branch';
 import type { ChangeMarker as MarkerKind } from '../tree/model';
@@ -363,6 +365,41 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       setLocalReveal({ result, asked }); latest.current.onReveal(result, options.openDetail);
     }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold, peek]);
+  // Hide moves on (alpha.24): with the Graph open, it says what a hide selects and shows the move as its own selection, which
+  // rides in the hide's write: no second write, no scroll, no centring (S5).
+  const chooseAfterHide = useLatest((itemId: string, after: Immutable<SessionPreferences>) => {
+    const { shown: base, folds, selectedId: kept } = latest.current;
+    if (!session || column === null) return null;
+    const going = new Set(subtree(session, itemId).map(item => item.id));
+    const stays = (id: string | null | undefined) => id && !going.has(id) ? id : null;
+    const projected = sessionGraph({ session, view: { ...base, hidden_item_ids: after.hidden_item_ids ?? [], focused_item_id: after.focused_item_id },
+      later, local, selectedId: stays(kept), column, temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [],
+      revealedItemId: stays(itemReveal?.route.item_id), filterCollapsedItemIds: folds });
+    return selectionAfterHide(session, itemId, projected.order.filter(id => !projected.nodes.get(id)?.hidden));
+  });
+  const presentMove = useLatest((move: HideMove) => {
+    const box = scroller.current, current = latest.current.graph;
+    if (move.kind === 'hide' && box && current?.nodes.has(move.itemId)) {
+      // The Graph stays where it is, as the Map does (S10): the node drawn before the hidden one holds its place, so nothing above
+      // it moves; with none before it, the scroll position stays.
+      const before = current.order[current.order.indexOf(move.itemId) - 1], above = before ? nodeElement(before) : null;
+      held.current = above ? anchorOn(above, box, current) : null;
+    }
+    if (!move.select) return;
+    const id = move.own?.kind === 'item' ? move.own.route.item_id : null, element = id ? nodeElement(id) : null;
+    if (!id) { setLocalSelection(null); setLocalReveal(null); return; }
+    setLocalSelection({ id, asked: latest.current.asked });
+    setFocusedEntry({ id, selectedId: id });
+    ownReveal.current = move.own;
+    // Focus follows only from a node that goes (R8).
+    const going = session ? subtree(session, move.itemId).map(item => item.id) : [move.itemId];
+    if (going.some(gone => !!nodeElement(gone)?.contains(document.activeElement))) element?.focus({ preventScroll: true });
+  });
+  useEffect(() => {
+    const answer = { route: { project_id: state.route.project_id, session_id: state.route.session_id }, choose: chooseAfterHide, present: presentMove };
+    hideViews.add(answer);
+    return () => { hideViews.delete(answer); };
+  }, [state.route.project_id, state.route.session_id, chooseAfterHide, presentMove]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
     if (node.folded) latest.current.onDismissBanner?.();
@@ -494,18 +531,22 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
 
   // The pointer: one delegated handler for every node. Hover lights the node's related lines and asks for a peek.
   const hovered = useRef<string | null>(null);
+  // The selected node never hover-peeks (D7): asked when the pointer rests and again when the wait ends.
+  const unpeeked = (id: string) => () => latest.current.selectedId === id;
   const pointerOver = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
     const id = element?.dataset.row ?? null;
     if (!element || !id || id === hovered.current) return;
     hovered.current = id; setHoverId(id);
-    peek?.hoverStart({ ...state.route, item_id: id }, element);
+    peek?.hoverStart({ ...state.route, item_id: id }, element, unpeeked(id));
   };
   // A scroll or a search step makes the peek forget the node; resting on it again asks again (the same node is a no-op).
   const pointerMove = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
-    if (element?.dataset.row) peek?.hoverStart({ ...state.route, item_id: element.dataset.row }, element);
+    const id = element?.dataset.row;
+    if (id) peek?.hoverStart({ ...state.route, item_id: id }, element, unpeeked(id));
   };
+  useEffect(() => { if (selectedId) peek?.dropHover({ ...state.route, item_id: selectedId }); }, [selectedId]);
   const pointerOut = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
     if (!element || (event.relatedTarget instanceof globalThis.Node && element.contains(event.relatedTarget))) return;

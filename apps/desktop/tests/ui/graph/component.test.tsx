@@ -260,12 +260,17 @@ describe('session graph view', () => {
       const peek = peekStub(), value = await setup(undefined, preferences({ selected_item_id: '2' }));
       render(<PeekContext.Provider value={peek}><value.Composition /></PeekContext.Provider>);
       fireEvent.mouseOver(node('1.2').querySelector('.graph-node-name')!);
-      expect(peek.hoverStart).toHaveBeenCalledWith({ ...value.route, item_id: '1.2' }, node('1.2'));
+      expect(peek.hoverStart).toHaveBeenCalledWith({ ...value.route, item_id: '1.2' }, node('1.2'), expect.any(Function));
       fireEvent.mouseOver(node('1.2'));
       expect(peek.hoverStart).toHaveBeenCalledTimes(1);
       // Resting again (after a scroll made the peek forget the node) asks again; the peek ignores a repeat.
       fireEvent.mouseMove(node('1.2').querySelector('.graph-node-name')!);
-      expect(peek.hoverStart).toHaveBeenLastCalledWith({ ...value.route, item_id: '1.2' }, node('1.2'));
+      expect(peek.hoverStart).toHaveBeenLastCalledWith({ ...value.route, item_id: '1.2' }, node('1.2'), expect.any(Function));
+      // D7: the selected node's hover is suppressed, another node's is not.
+      expect(peek.hoverStart.mock.lastCall![2]!()).toBe(false);
+      fireEvent.mouseOver(node('2'));
+      expect(peek.hoverStart.mock.lastCall![0]).toEqual({ ...value.route, item_id: '2' });
+      expect(peek.hoverStart.mock.lastCall![2]!()).toBe(true);
       fireEvent.mouseOut(node('1.2'), { relatedTarget: document.body });
       expect(peek.hoverEnd).toHaveBeenCalledTimes(1);
       act(() => node('2').focus());
@@ -991,7 +996,7 @@ function peekStub() {
   const peek = {
     open: vi.fn(), close: vi.fn(), reference: () => null,
     chipProps: () => ({ onClick() {}, onKeyDown() {}, onMouseEnter() {}, onMouseMove() {}, onMouseLeave() {} }),
-    hoverStart: vi.fn(), hoverEnd: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
+    hoverStart: vi.fn(), hoverEnd: vi.fn(), dropHover: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
   };
   return peek as typeof peek & PeekNavigation;
 }

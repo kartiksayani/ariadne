@@ -102,7 +102,7 @@ describe('an idle Map redraws no row (F6)', () => {
 
   it('new workspace callbacks alone redraw nothing', async () => {
     const { rerender } = await mount();
-    expect(await redrawn(() => rerender({ onAct: () => {}, onSelected: () => {}, onDismissReveal: () => {}, onRemove: () => {}, onHid: () => {},
+    expect(await redrawn(() => rerender({ onAct: () => {}, onSelected: () => {}, onDismissReveal: () => {}, onRemove: () => {},
       onResume: () => {}, onClearFilters: () => {}, onShowArchive: () => {}, notices: <p>notice</p> }))).toEqual([]);
   });
 
@@ -238,8 +238,12 @@ describe('treeModel keeps a row that draws the same (F6c)', () => {
 
 describe('a row acts on what it shows now', () => {
   it('Hide then Unhide on the same row: the second press unhides it', async () => {
-    const { transport } = await mount();
+    const { transport, navigation, rerender } = await mount();
     const hidden = () => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.hidden_item_ids ?? [];
+    // The row asks the App, which flips what the saved view holds (App `toggleHidden`); this stands in for it.
+    rerender({ onAct: (intent, target) => {
+      if (intent === 'hide') void navigation.setHidden(target, !hidden().includes(target.item_id), navigation.getSnapshot().preferences!.revision);
+    } });
     fireEvent.click(within(row('4')).getByRole('button', { name: 'Hide (h)' }));
     await waitFor(() => expect(hidden()).toContain('4'));
     // The hidden strip opens, and the row is back with its Unhide.

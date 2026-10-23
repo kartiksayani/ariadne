@@ -546,8 +546,10 @@ test.describe('the filter row never moves the Map', () => {
 // removed), the nearest surviving row below it, else above it, keeps its own window place.
 // The boundaries: at `scrollTop = 0`, content at or above the reading row that shrinks lets the rows below rise into the gap
 // (`rise`: no top spacer); at the bottom a shrink keeps the scroll extent with a spacer, which an owner scroll trims.
+// The owner's own hide differs (S10): the rows above the hidden row keep their window place, and the row below closes the space
+// (`closes`: it takes the hidden row's old window place).
 type Where = 'top' | 'middle' | 'bottom';
-type Expectation = 'held' | 'rise';
+type Expectation = 'held' | 'rise' | 'closes';
 // [name, where, expectation, before, change (given the reading row), done]
 type Hold = readonly [name: string, where: Where, expectation: Expectation, before: (page: Page) => Promise<void>,
   change: (page: Page, reading: string) => Promise<void>, done: (page: Page, reading: string) => Promise<void>];
@@ -586,11 +588,12 @@ const selectTwelve = async (page: Page) => {
 const everywhere = (name: string, expectation: (where: Where) => Expectation, before: Hold[3], change: Hold[4], done: Hold[5]): Hold[] =>
   (['top', 'middle', 'bottom'] as const).map(where => [name, where, expectation(where), before, change, done]);
 const held = (): Expectation => 'held', risesAtTop = (where: Where): Expectation => where === 'top' ? 'rise' : 'held';
+const closesUp = (where: Where): Expectation => where === 'top' ? 'rise' : 'closes';
 const holds: readonly Hold[] = [
   ...everywhere('a new agent row lands above the reading row', held, nothing, page => agent(page, 'add-top'),
     page => expect(row(page, '0')).toHaveCount(1)),
   ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
-  ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
+  ...everywhere('the owner hides the reading row', closesUp, nothing, hide, goes),
   // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
   // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
   ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
@@ -616,7 +619,8 @@ const served = async (page: Page, run: () => Promise<void>) => {
 };
 
 for (const [name, where, expectation, before, change, done] of holds) {
-  const label = expectation === 'rise' ? `top boundary: ${name}, so the rows below rise` : `${name} at the ${where}`;
+  const label = expectation === 'rise' ? `top boundary: ${name}, so the rows below rise`
+    : expectation === 'closes' ? `${name} at the ${where}, and the row below closes the space` : `${name} at the ${where}`;
   test(`the Map holds when ${label}`, ({ page }) => served(page, async () => {
     await before(page);
     await settle(page);
@@ -636,6 +640,11 @@ for (const [name, where, expectation, before, change, done] of holds) {
     if (expectation === 'held') {
       await expect.poll(async () => Math.abs((await windowTop(page, survivor))! - was.get(survivor)!), `${survivor} keeps its window place`)
         .toBeLessThanOrEqual(3);
+    } else if (expectation === 'closes') {
+      await expect.poll(async () => Math.abs((await windowTop(page, survivor))! - was.get(read.key)!), `${survivor} takes ${read.key}'s window place`)
+        .toBeLessThanOrEqual(3);
+      const above = read.keys.slice(0, index).reverse().find(key => present.has(key));
+      if (above) expect(Math.abs((await windowTop(page, above))! - was.get(above)!), `${above} keeps its window place`).toBeLessThanOrEqual(3);
     } else {
       expect(await scrollTopOf(page)).toBe(0);
       const now = (await windowTop(page, survivor))!;

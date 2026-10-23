@@ -150,31 +150,41 @@ describe('owner hide and unhide actions', () => {
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.hidden_item_ids?.includes('4')))).toHaveLength(1);
   });
 
-  it('keeps keyboard focus on the hidden group after h and enters its dimmed rows with Right', async () => {
+  // alpha.24 "Hide moves on" replaces "focus goes to the hidden group": h selects the next row and focus goes with it.
+  it('moves the selection and keyboard focus to the next row after h; the hidden group still opens into its dimmed rows', async () => {
     const { transport } = await mount(); fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
     row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
-    await waitFor(() => expect(document.activeElement).toBe(group()));
-    fireEvent.keyDown(group(), { key: 'ArrowRight' });
+    expect(saved(transport).selected_item_id).toBe('5');
+    expect(row('5')!.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(row('5'));
+    group().focus(); fireEvent.keyDown(group(), { key: 'ArrowRight' });
     expect(group().getAttribute('aria-expanded')).toBe('true'); expect(document.activeElement).toBe(group());
     fireEvent.keyDown(group(), { key: 'ArrowRight' }); expect(document.activeElement).toBe(row('4'));
+    // Unhide never moves the selection (row 14): h on the selected hidden row unhides it and keeps it selected.
+    fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
     fireEvent.keyDown(row('4')!, { key: 'h' });
-    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
+    expect(saved(transport).selected_item_id).toBe('4');
   });
 
-  it('keeps focus on a newly hidden row in an expanded group and unhides it with h', async () => {
+  // alpha.24 replaces "a newly hidden row keeps focus": in an open hidden group the row dims at the group's end, and the
+  // selection and focus move to the next row on its level (Path B).
+  it('moves on from a row newly hidden into an expanded group, and unhides it with h', async () => {
     const { transport } = await mount(); await hide('2'); fireEvent.click(group());
     fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
     row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2', '4'])); await ready();
     expect(group(2).getAttribute('aria-expanded')).toBe('true');
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(true);
-    expect(document.activeElement).toBe(row('4'));
-    fireEvent.keyDown(document.activeElement!, { key: 'h' });
+    expect(saved(transport).selected_item_id).toBe('5');
+    expect(document.activeElement).toBe(row('5'));
+    fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
+    fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2'])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
-    expect(document.activeElement).toBe(row('4'));
+    expect(saved(transport).selected_item_id).toBe('4');
     expect(group().getAttribute('aria-expanded')).toBe('true');
   });
 
@@ -214,14 +224,19 @@ describe('owner hide and unhide actions', () => {
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
-  it('persists hidden preferences through an app restart and offers Unhide in the detail head menu', async () => {
+  // alpha.24 replaces "Details keeps the hidden item": Details Hide moves the selection on, and Details follows it, through a restart.
+  it('persists hidden preferences and the selection Hide moved to through an app restart, and offers Unhide in the detail head menu', async () => {
     const { transport, unmount } = await mount();
     fireEvent.click(row('4')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); await ready();
     pressRow('Hide');
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
-    expect(hasRow('Unhide')).toBe(true);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="5"]' });
+    expect(saved(transport).selected_item_id).toBe('5'); expect(hasRow('Hide')).toBe(true);
     unmount(); await mount(transport);
     expect(saved(transport).hidden_item_ids).toEqual(['4']); expect(group()).toBeTruthy();
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="5"]' });
+    fireEvent.click(group()); fireEvent.click(row('4')!);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); await ready();
     expect(hasRow('Unhide')).toBe(true);
     pressRow('Unhide');
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();

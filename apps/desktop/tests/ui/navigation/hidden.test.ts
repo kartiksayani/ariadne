@@ -8,6 +8,8 @@ import { AppTransport, route } from '../app/transport';
 class ConflictingTransport extends AppTransport {
   beforePatch: (() => void) | null = null;
   holdPatch: Promise<void> | null = null;
+  /** The next patch is refused outright (no conflict, so no retry). */
+  rejectNext = false;
   holdSession: { entered: () => void; release: Promise<void> } | null = null;
   override async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
     const request = args.request;
@@ -21,6 +23,10 @@ class ConflictingTransport extends AppTransport {
     }
     if ('command' in request && request.command.command === 'preferences_patch') {
       if (this.holdPatch) await this.holdPatch;
+      if (this.rejectNext) {
+        this.rejectNext = false;
+        return { api_version: 1, ok: false, error: { code: 'invalid_transition', message: 'Refused.', hint: '', retryable: false, field_errors: [] } } as T;
+      }
       const conflict = this.beforePatch;
       this.beforePatch = null;
       conflict?.();
@@ -52,6 +58,40 @@ async function setup(hidden: string[] = []) {
   await store.opened.open(route).refresh();
   return { transport, store };
 }
+
+describe('a hide carries its own view changes and hook (alpha.24 R1, S1)', () => {
+  it('writes the edit in the same write, on the first view and on its rebase, and hands the hook the publish', async () => {
+    const { transport, store } = await setup();
+    transport.beforePatch = () => { view(transport).expanded_item_ids = ['2']; ++transport.preferences.revision; };
+    const order: string[] = [];
+    const saved = await store.setHidden({ ...route, item_id: '3' }, true, 1, {
+      edit: next => { next.selected_item_id = '4'; },
+      committing: land => {
+        order.push(`before:${store.getSnapshot().preferences?.sessions[0].hidden_item_ids?.join(',') ?? ''}`);
+        land();
+        order.push(`after:${store.getSnapshot().preferences?.sessions[0].hidden_item_ids?.join(',') ?? ''}`);
+      },
+    });
+    expect(saved).toBe(true);
+    expect(transport.mutations.map(request => writtenView(request).selected_item_id)).toEqual(['4', '4']);
+    expect(writtenView(transport.mutations[1]).expanded_item_ids).toEqual(['2']);
+    // The hook runs once, for the write that landed, and its own call publishes.
+    expect(order).toEqual(['before:', 'after:3']);
+    expect(store.getSnapshot().preferences?.sessions[0]).toMatchObject({ hidden_item_ids: ['3'], selected_item_id: '4' });
+  });
+
+  it('publishes after a hook that does not call it, and runs no hook for a rejected write', async () => {
+    const { transport, store } = await setup();
+    let ran = 0;
+    expect(await store.setHidden({ ...route, item_id: '3' }, true, 1, { committing: () => { ++ran; } })).toBe(true);
+    expect(ran).toBe(1);
+    expect(store.getSnapshot().preferences?.sessions[0].hidden_item_ids).toEqual(['3']);
+    transport.rejectNext = true;
+    expect(await store.setHidden({ ...route, item_id: '4' }, true, store.getSnapshot().preferences!.revision, { committing: () => { ++ran; } })).toBe(false);
+    expect(ran).toBe(1);
+    expect(store.getSnapshot().preferences?.sessions[0].hidden_item_ids).toEqual(['3']);
+  });
+});
 
 describe('hidden preference write admission and replay', () => {
   it('reserves the writer synchronously before another toggle or selection save', async () => {

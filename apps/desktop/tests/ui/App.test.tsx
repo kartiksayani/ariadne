@@ -1195,7 +1195,9 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('4'));
     fireEvent.mouseEnter(other); other.focus(); fireEvent.keyDown(other, { key: 'h' });
     await waitFor(() => expect(transport.preferences.sessions[0].hidden_item_ids).toEqual(['4']));
-    expect(transport.preferences.sessions[0].selected_item_id).toBe('4');
+    // alpha.24: the hidden selection moves on to the next item; focus stays on the row that had it.
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('5');
+    expect(document.activeElement).toBe(other);
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
 

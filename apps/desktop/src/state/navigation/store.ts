@@ -36,6 +36,16 @@ type QueuedNavigation = { selection: NavigationSelection; reveal: RevealedItem |
   timer: ReturnType<typeof setTimeout> };
 type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' | 'resolve_unsent_input' }>;
 type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
+/**
+ * Runs once a receipt confirms a write (a retry, or a later Check again, included), handed `land`, which publishes the saved
+ * preferences. The hook calls it where its own changes must land in the same update; it publishes after the hook otherwise.
+ */
+export type Committing = (land: () => void) => void;
+/** A hide's own view changes, made on the view it writes (the first write and every rebase), and its hook. */
+export interface HideWrite {
+  readonly edit?: (view: SessionPreferences) => void;
+  readonly committing?: Committing;
+}
 /** Draft bookkeeping shares seen admission and provenance with navigation. */
 export interface PreferencesWriteCoordination {
   prepare(): { ready: Promise<void>; release(): void };
@@ -529,7 +539,7 @@ export class NavigationStore {
     return structuredClone(this.state.preferences) as PreferencesSnapshot;
   }
   private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}, replay?: ReplayEntries,
-    seenWaited = false, current?: () => boolean, failed?: (failure: Failure) => void, committing?: () => void): Promise<boolean> {
+    seenWaited = false, current?: () => boolean, failed?: (failure: Failure) => void, committing?: Committing): Promise<boolean> {
     const mutation = this.patchMutation(preferences, entries, confirmed, true, replay, current, failed, committing);
     const flight = this.seenFlight;
     if (flight) mutation.prepare = async () => {
@@ -558,8 +568,10 @@ export class NavigationStore {
         hidden_item_ids: entry.preferences.hidden_item_ids.filter(id => !!state.snapshot!.session.items[id]) } };
     });
   }
-  /** `committing` runs once the receipt confirms the write, before its saved preferences publish (see `saveSessionView`). */
-  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries, current?: () => boolean, failed?: (failure: Failure) => void, committing?: () => void): PendingMutation {
+  /**
+   * `committing` runs once the receipt confirms the write and is handed the publish of its saved preferences (see `Committing`).
+   */
+  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries, current?: () => boolean, failed?: (failure: Failure) => void, committing?: Committing): PendingMutation {
     // Keep the owner's original fields for rebasing; cleanup must never replay a
     // stale whole set over a concurrent hide. Only the outgoing write is pruned.
     const written = this.pruneHidden(entries);
@@ -589,11 +601,13 @@ export class NavigationStore {
         throw new ServiceFailure('invalid_response');
       }
       this.preferencesFloor = Math.max(this.preferencesFloor, receipt.preferences_revision);
-      committing?.();
       // The receipt confirms these exact typed view writes. Reflect their saved
       // effect even if the follow-up read fails; an older replay cannot replace
       // a newer authoritative preferences snapshot.
-      if ((this.state.preferences?.revision ?? 0) <= receipt.preferences_revision) {
+      let landed = false;
+      const land = () => {
+        if (landed || (this.state.preferences?.revision ?? 0) > receipt.preferences_revision) { landed = true; return; }
+        landed = true;
         const saved = structuredClone(preferences);
         saved.revision = receipt.preferences_revision;
         for (const entry of written) {
@@ -611,7 +625,8 @@ export class NavigationStore {
         }
         this.seenAdvance = null;
         this.publish({ preferences: immutable(normalizeStatusFilters(saved)) });
-      }
+      };
+      try { committing?.(land); } finally { land(); }
       confirmed();
     } };
   }
@@ -721,7 +736,7 @@ export class NavigationStore {
       // prevents older selection/filter/scroll values overwriting newer views.
       return await this.patch(preferences, [{ kind: 'set_session_view', preferences: {
         ...structuredClone(view), tab_open: current.tab_open, tab_order: current.tab_order,
-      } }], undefined, undefined, false, undefined, undefined, committing);
+      } }], undefined, undefined, false, undefined, undefined, committing && (land => { committing(); land(); }));
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   /** Waiting previews retain their trail without opening a tab or changing navigation. */
@@ -755,8 +770,11 @@ export class NavigationStore {
       return await completion;
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
-  /** Hiding is an owner view preference; no domain mutation reaches the agent. */
-  async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number): Promise<boolean> {
+  /**
+   * Hiding is an owner view preference; no domain mutation reaches the agent. `write.edit` changes the same view write (the
+   * selection the hide moves to rides in it), and `write.committing` runs when the receipt confirms it.
+   */
+  async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number, write: HideWrite = {}): Promise<boolean> {
     ++this.ownerPreparing;
     try {
       if (this.stopped || this.pending) return false;
@@ -774,13 +792,14 @@ export class NavigationStore {
       }
       const replay: ReplayEntries = fresh => {
         const entry = this.hiddenEntry(fresh, item, hidden);
+        if (entry?.kind === 'set_session_view') write.edit?.(entry.preferences);
         return entry ? [entry] : null;
       };
       const entries = replay(preferences);
       if (!entries) throw new ServiceFailure('invalid_response');
       // Reserve the canonical writer before yielding: another x or selection
       // save must see writing=true, never race an extra session_get round trip.
-      return await this.patch(preferences, entries, undefined, replay);
+      return await this.patch(preferences, entries, undefined, replay, false, undefined, undefined, write.committing);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
     finally { --this.ownerPreparing; if (this.seenDue) void this.flushSeen(); }
   }

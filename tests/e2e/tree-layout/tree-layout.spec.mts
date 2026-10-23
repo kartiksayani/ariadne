@@ -208,11 +208,25 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps peeks clear of
     // The click left keyboard focus on the row's own button; the peek below restores focus to the row.
     await root.focus();
 
-    // A press on the row's button opened no card. Off the row and back, a resting pointer previews it; the Map does not move.
+    // A press on the row's button opened no card. The selected row never hover-peeks (alpha.24 D7); another row's resting pointer
+    // previews it, and the Map does not move.
     const scrollBeforeHover = await scroller.evaluate(element => element.scrollTop);
     await expect(page.getByRole('dialog', { name: /^Peek:/ })).toHaveCount(0);
     await page.mouse.move(0, 0); await root.hover();
     const peek = page.getByRole('dialog', { name: /^Peek:/ });
+    await page.waitForTimeout(1300);
+    await expect(peek).toHaveCount(0);
+    // A row already on screen, under the pointer as it is: Playwright's hover() would scroll a row into view first.
+    const other = await scroller.evaluate(box => {
+      const edge = box.getBoundingClientRect();
+      const element = [...box.querySelectorAll<HTMLElement>('.tree-item')].find(item => {
+        const rect = item.getBoundingClientRect();
+        return item.getAttribute('aria-selected') !== 'true' && rect.top > edge.top + 60 && rect.bottom < edge.bottom;
+      })!;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width * 0.4, y: rect.top + Math.min(12, rect.height / 2) };
+    });
+    await page.mouse.move(0, 0); await page.mouse.move(other.x, other.y);
     await expect(peek).toBeVisible();
     expect(await scroller.evaluate(element => element.scrollTop)).toBe(scrollBeforeHover);
     const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-top').boundingBox())!;

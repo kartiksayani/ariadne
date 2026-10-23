@@ -71,7 +71,7 @@ function peekStub() {
   const peek = {
     open: vi.fn(), close: vi.fn(), reference: () => null,
     chipProps: () => ({ onClick() {}, onKeyDown() {}, onMouseEnter() {}, onMouseMove() {}, onMouseLeave() {} }),
-    hoverStart: vi.fn(), hoverEnd: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
+    hoverStart: vi.fn(), hoverEnd: vi.fn(), dropHover: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
   };
   return peek as typeof peek & PeekNavigation;
 }
@@ -360,10 +360,18 @@ describe('session tree rows', () => {
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
 
-  it.each(['row Hide', 'detail Hide'] as const)('ends Focus on %s and does not restore it on Unhide', async source => {
+  // The row's Hide asks the App, which ends Focus in the hide's own write (alpha.24 S4; tests/ui/app/hide-moves.test.tsx row 23).
+  it('asks the App to hide from the row: the Map writes nothing itself', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    if (source === 'row Hide') fireEvent.click(within(row('1')).getByRole('button', { name: 'Hide (h)' }));
-    else await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
+    const before = view.transport.mutations.length;
+    fireEvent.click(within(row('1')).getByRole('button', { name: 'Hide (h)' }));
+    expect(view.calls.acts).toEqual([['hide', { ...route, item_id: '1' }]]);
+    expect(view.transport.mutations).toHaveLength(before);
+  });
+
+  it('ends Focus on a hide saved elsewhere and does not restore it on Unhide', async () => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(viewOf(view.transport).hidden_item_ids).toContain('1');
     await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
