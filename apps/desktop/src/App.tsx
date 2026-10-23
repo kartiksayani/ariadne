@@ -67,6 +67,7 @@ import { nextSelection, subtree, targetSession } from './ui/remove/model';
 import { themeToggle } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
+import { SwipeNavigation } from './ui/shell/SwipeNavigation';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { ackHoldFor, ackTarget, attachAckHolds, flushAckHold, stopAckHolds } from './ui/shared/ack';
@@ -784,6 +785,7 @@ function Workspace({ application }: { application: Application }) {
       if (route && routeKey(target) === key && archived) showView('tree');
     }} />
     <AgentNotRunningHost navigation={navigation} />
+    <SwipeNavigation history={historyControls} />
   </div></RemovalContext.Provider></ItemHistoryContext.Provider></ItemRefSession.Provider></PeekProvider>;
 }
 
