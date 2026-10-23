@@ -3,10 +3,15 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
+/* Every card is as tall as a card with five session rows (alpha.24 P1): the list has a fixed height, so the header, the list and the
+   footer are the same size in every card and the footers line up. A longer list scrolls inside its card. */
 .pj-card {
+  --pj-row: calc(20px * var(--text-scale));
+  --pj-gap: 6px;
+
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -53,6 +58,13 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
+
+  /* One line, like the path: a long name must not make its card taller than the others. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  align-self: flex-start;
 }
 
 .pj-path {
@@ -97,16 +109,30 @@
   width: 270px;
 }
 
+/* Five rows and their gaps, plus the list's own padding. The padding is always there (and pulled back out by the margin) so a row sits
+   in the same place whether or not the list scrolls; only a scrolling list draws its frame. */
 .pj-sessions {
+  box-sizing: border-box;
   display: flex;
+  flex: none;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--pj-gap);
+  height: calc(5 * var(--pj-row) + 4 * var(--pj-gap) + 8px);
+  margin: -4px -6px;
+  padding: 4px 6px;
+  overflow: hidden auto;
+  scrollbar-width: thin;
+  border-radius: 6px;
 }
+
+.pj-sessions[data-scrolls] { box-shadow: inset 0 0 0 1px var(--color-divider); }
 
 .pj-sess {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
+  height: var(--pj-row);
   min-width: 0;
   padding: 0;
   border: 0;
@@ -157,7 +183,11 @@
 }
 
 .pj-foot {
+  margin-top: auto;
   padding-top: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   box-shadow: inset 0 1px 0 var(--color-divider);
   font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 56%, transparent);

@@ -6,13 +6,16 @@ import { PageColumn, PageHead } from './PageHead';
 import type { PageSession, ProjectCardData, ProjectsCardsProps } from './page-types';
 import './projects.css';
 
-const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+/** How many session rows a card shows at once; this is the height of every card (projects.css `.pj-sessions`). Keep the two in step. */
+const VISIBLE_SESSIONS = 5;
+
+const plural =(count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 /** Which "…" is open: the page's, or a project's. */
 type Open = { readonly kind: 'page' } | { readonly kind: 'project'; readonly id: string } | null;
 
 function SessionRow<R>({ session, onOpen }: { readonly session: PageSession<R>; readonly onOpen: () => void }) {
-  return <button type="button" className="pj-sess" onClick={onOpen}>
+  return <button type="button" className="pj-sess" data-testid="project-session" onClick={onOpen}>
     <RunDot run={session.run} />
     <span className={session.run === 'closed' ? 'pj-sess-name pj-sess-closed' : 'pj-sess-name'}>{session.name}</span>
     <span className="pj-sess-meta">{session.run === 'closed' ? 'closed' : session.agent}</span>
@@ -50,7 +53,7 @@ export function ProjectsCards<R>({ back, sub, projects, onOpenProject, onOpenSes
     <div className="pj-grid">
       {projects.map((project: ProjectCardData<R>) => {
         const mine = open?.kind === 'project' && open.id === project.id;
-        return <article key={project.id} className={project.current ? 'pj-card pj-current' : 'pj-card'}
+        return <article key={project.id} className={project.current ? 'pj-card pj-current' : 'pj-card'} data-testid="project-card"
           onClick={event => { if (event.target instanceof Element && !event.target.closest('button, [role="menu"]')) onOpenProject(project); }}>
           <div className="pj-top">
             <i className="ph ph-folder-simple pj-folder" aria-hidden="true" />
@@ -68,11 +71,12 @@ export function ProjectsCards<R>({ back, sub, projects, onOpenProject, onOpenSes
                 items={[{ key: 'remove', icon: 'ph ph-trash', label: 'Remove project…', sub: 'Ariadne forgets it; its files aren’t touched', danger: true, onSelect: () => onRemoveProject(project) }]} />}
             </span>
           </div>
-          <div className="pj-sessions">
+          {/* The list shows five rows; a longer one scrolls inside the card, newest first as the caller ordered it. */}
+          <div className="pj-sessions" data-testid="project-sessions" data-scrolls={project.sessions.length > VISIBLE_SESSIONS || undefined}>
             {project.sessions.map((session, index) => <SessionRow key={`${index}:${session.name}`} session={session} onOpen={() => onOpenSession(project, session)} />)}
             {project.sessions.length === 0 && project.emptyText && <div className="pj-none">{project.emptyText}</div>}
           </div>
-          <div className="pj-foot">{project.footer}</div>
+          <div className="pj-foot" data-testid="project-footer" title={project.footer}>{project.footer}</div>
         </article>;
       })}
     </div>
