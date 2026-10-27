@@ -16,6 +16,7 @@ import { statusKey } from '../shared/status';
 import { ItemRefSession, PEEK_CLOSE_MS, PEEK_OPEN_MS, PeekContext, type PeekNavigation } from './context';
 import { editableSelector } from '../keys';
 import { peekPosition } from './position';
+import { peekTargetKey } from './target';
 import { peekNames } from './names';
 import { peekChange } from './change';
 import { ChangeMarker } from '../changes/ChangeMarker';
@@ -285,7 +286,7 @@ function PeekCard({ shown, drafts, card, navigation, sending, allowAnswer, onClo
       <button type="button" className="peek-button peek-go" onClick={onGoTo}><i className="ph ph-arrow-right" aria-hidden="true" />Go to</button>
     </>}
   </div>;
-  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${title}`} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
+  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${title}`} data-peek-target={peekTargetKey(shown.route)} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
     onKeyDown={event => { if (event.key !== 'F6') event.stopPropagation(); }}
     onMouseDownCapture={onEngage} onKeyDownCapture={event => { if (event.key !== 'Escape') onEngage(); }} onClickCapture={onEngage}
     onMouseEnter={onPointerEnter} onMouseLeave={onPointerLeave}>

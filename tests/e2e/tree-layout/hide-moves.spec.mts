@@ -106,11 +106,11 @@ async function comesBack(page: Page, before: Record<string, number>, rowsAbove: 
 }
 
 test.describe('hide moves on, and the Map stays still', () => {
-  test('row 1: h on the selected middle row selects the next row, in view, with scrollTop unchanged', async ({ page }) => serve(page, async () => {
+  test('row 1: x on the selected middle row selects the next row, in view, with scrollTop unchanged', async ({ page }) => serve(page, async () => {
     await placeUnderBand(page, '10', 4); await settle(page);
     await select(page, '12');
     const before = await tops(page), was = await scrollTop(page), rowsAbove = await above(page, '12'), place = await topOf(page, '12');
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(row(page, '12')).toHaveCount(0);
     await expect(row(page, '13')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('[data-detail-item-id="13"]').first()).toBeVisible();
@@ -121,13 +121,13 @@ test.describe('hide moves on, and the Map stays still', () => {
     await expect(page.getByRole('button', { name: /^Back to “/ })).toHaveCount(0);
   }));
 
-  test('row 2: h on the selected last row of its level selects the previous row; the rows above stay, scrollTop unchanged', async ({ page }) => serve(page, async () => {
+  test('row 2: x on the selected last row of its level selects the previous row; the rows above stay, scrollTop unchanged', async ({ page }) => serve(page, async () => {
     // 7 is topic A's last root: 6 before it takes the selection, and topic B's band below closes 7's space.
     await placeUnderBand(page, '5', 4); await settle(page);
     await select(page, '7');
     const before = await tops(page), was = await scrollTop(page), rowsAbove = await above(page, '7');
     expect(rowsAbove).toContain('6');
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(row(page, '7')).toHaveCount(0);
     await expect(row(page, '6')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('[data-detail-item-id="6"]').first()).toBeVisible();
@@ -151,7 +151,7 @@ test.describe('hide moves on, and the Map stays still', () => {
     await placeUnderBand(page, '10', 4); await quiet(page);
     await select(page, '12');
     const before = await tops(page), was = await scrollTop(page), rowsAbove = await above(page, '12'), place = await topOf(page, '12');
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(row(page, '13')).toHaveAttribute('aria-selected', 'true');
     // 12 is still drawn, dimmed, after the visible rows of its level.
     await expect(row(page, '12')).toHaveCount(1);
@@ -185,11 +185,11 @@ test.describe('hide moves on, and the Map stays still', () => {
     expect(Math.abs((await topOf(page, '14')) - (place - gap)), 'the selected row moves up by the hidden row’s height').toBeLessThanOrEqual(1);
   }));
 
-  test('row 11: Undo of h on the selected row puts it back in its place and selects it again; the rows above stay', async ({ page }) => serve(page, async () => {
+  test('row 11: Undo of x on the selected row puts it back in its place and selects it again; the rows above stay', async ({ page }) => serve(page, async () => {
     await placeUnderBand(page, '10', 4); await settle(page);
     await select(page, '12');
     const before = await tops(page), rowsAbove = await above(page, '12'), place = await topOf(page, '12');
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(row(page, '12')).toHaveCount(0);
     await expect(row(page, '13')).toHaveAttribute('aria-selected', 'true');
     await quiet(page);
@@ -221,7 +221,7 @@ test.describe('hide moves on, and the Map stays still', () => {
     await select(page, '1.1');
     await placeUnderBand(page, '1.1', 0); await quiet(page);
     const before = await tops(page), was = await scrollTop(page);
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(row(page, '1.1')).toHaveCount(0);
     await expect(row(page, '1')).toHaveAttribute('aria-selected', 'true');
     await quiet(page);
@@ -258,14 +258,14 @@ test.describe('hide moves on, and the Map stays still', () => {
     await scroller(page).evaluate(box => { box.scrollTop = box.scrollHeight; }); await quiet(page);
     expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop)).toBeLessThan(1);
     const before = await tops(page), rowsAbove = await above(page, '17'), place = await topOf(page, '17');
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(row(page, '17')).toHaveCount(0);
     await expect(row(page, '18')).toHaveAttribute('aria-selected', 'true');
     await quiet(page);
     await closesFromBelow(page, before, rowsAbove, '17', '18', place);
   }));
 
-  test('row 10: the Graph’s h moves its selection without centring or scrolling', async ({ page }) => serve(page, async () => {
+  test('row 10: the Graph’s x moves its selection without centring or scrolling', async ({ page }) => serve(page, async () => {
     await page.getByRole('button', { name: 'Graph' }).click();
     const graph = page.getByTestId('graph-scroll'), node = (id: string) => graph.locator(`[role="treeitem"][data-item-id="${id}"]`);
     await expect(node('12')).toBeVisible();
@@ -277,7 +277,7 @@ test.describe('hide moves on, and the Map stays still', () => {
     const at = () => graph.evaluate(element => Object.fromEntries([...element.querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')]
       .map(value => [value.dataset.itemId!, Math.round(value.getBoundingClientRect().top * 2) / 2])));
     const was = await graph.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft })), before = await at();
-    await page.keyboard.press('h');
+    await page.keyboard.press('x');
     await expect(node('12')).toHaveCount(0);
     await expect(node('13')).toHaveAttribute('aria-selected', 'true');
     await settle(page); await page.waitForTimeout(250);
@@ -298,7 +298,7 @@ test('row 23: Focus on a root that is hidden ends in the same write: one layout 
   const band = page.getByRole('treeitem', { name: 'Continued context', exact: true }), was = (await band.boundingBox())!.y;
   const place = await topOf(page, '12');
   await row(page, '12').focus();
-  await page.keyboard.press('h');
+  await page.keyboard.press('x');
   await expect(row(page, '13')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('button', { name: /^Unfocus/ })).toHaveCount(0);
   await settle(page);
@@ -333,7 +333,7 @@ test('row 4: hiding the only root of a topic selects nothing and the Map stays',
   await select(page, '8');
   const topic = page.getByRole('treeitem', { name: 'Continued context', exact: true });
   const was = (await topic.boundingBox())!.y;
-  await page.keyboard.press('h');
+  await page.keyboard.press('x');
   await expect(row(page, '8')).toHaveCount(0);
   await expect(selected(page)).toHaveCount(0);
   await expect(page.locator('[data-detail-item-id]')).toHaveCount(0);

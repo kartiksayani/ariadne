@@ -540,7 +540,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
   }, route: id => ({ project_id: session.project_id, session_id: session.id, item_id: id }), onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className={`item-detail${expanded ? ' item-conversation' : ''}`} data-detail-item-id={itemId} data-item-revision={item.revision} data-status={model.status} aria-label={`Detail of ${item.question}`}>
-    <div className="detail-body" ref={body} onScroll={event => {
+    <div className="detail-body" data-testid="detail-body" ref={body} onScroll={event => {
       const pane = event.currentTarget;
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
       atEnd.current = nearEnd(pane);

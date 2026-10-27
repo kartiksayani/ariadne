@@ -8,13 +8,23 @@ afterEach(cleanup);
 const keyOf = (group: string, text: string) => KEY_GROUPS.find(entry => entry.label === group)!.keys.find(([, line]) => line === text)?.[0];
 
 describe('Help keys', () => {
+  // The final board's 16.1 frame holds every row above these two (design suite), so the added keys come last in their groups.
+  it('lists "Scroll Details" last under Move around the Map and "Choose and send" last under Answer and reply', () => {
+    const last = (group: string) => KEY_GROUPS.find(entry => entry.label === group)!.keys.at(-1)!;
+    expect(last('Move around the Map')).toEqual([['⌥', '↑', '↓'], 'Scroll Details']);
+    expect(last('Answer and reply')).toEqual([['⌥', '1–9'], 'Choose and send']);
+    expect(KEY_GROUPS.find(entry => entry.label === 'Move around the Map')!.keys.at(-2)![1]).toMatch(/^Outline the next unseen item/);
+  });
+
   it('opens on Keys with the four groups, and every key of the approved map', () => {
     render(<HelpPanel narrow={false} onClose={vi.fn()} />);
     expect(screen.getByRole('tab', { name: 'Keys' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getAllByRole('region').map(group => group.getAttribute('aria-label'))).toEqual(['Move around the Map', 'Answer and reply', 'On the selected item', 'Find and switch']);
     expect(keyOf('On the selected item', 'Ack')).toEqual(['a']);
     expect(keyOf('On the selected item', 'Drop')).toEqual(['d']);
-    expect(keyOf('On the selected item', 'Hide')).toEqual(['h']);
+    expect(keyOf('On the selected item', 'Hide')).toEqual(['x']);
+    expect(keyOf('Answer and reply', 'Choose and send')).toEqual(['⌥', '1–9']);
+    expect(keyOf('Move around the Map', 'Scroll Details')).toEqual(['⌥', '↑', '↓']);
     expect(keyOf('On the selected item', 'Remove; asks first when items below it would go too')).toEqual(['⌫']);
     expect(keyOf('On the selected item', 'Focus on it, or Unfocus')).toEqual(['⇧', 'F']);
     expect(keyOf('On the selected item', 'Bring it up with the agent')).toEqual(['b']);

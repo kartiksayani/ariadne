@@ -1149,7 +1149,7 @@ describe('ordinary desktop composition', () => {
   it('leaves removed chrome shortcuts unbound, including while typing', async () => {
     const { transport } = setup(); await openSession();
     const root = document.querySelector('.product-app')!, before = JSON.stringify(transport.preferences.global);
-    for (const key of ['w', 'e', 'l', 'x']) fireEvent.keyDown(root, { key });
+    for (const key of ['w', 'e', 'l', 'h']) fireEvent.keyDown(root, { key });
     fireEvent.keyDown(root, { key: 'j', metaKey: true });
     fireEvent.keyDown(await searchBox(), { key: 'w' });
     await act(async () => { await Promise.resolve(); });
@@ -1166,12 +1166,12 @@ describe('ordinary desktop composition', () => {
     expect(within(help).getByRole('tab', { name: 'Keys' }).getAttribute('aria-selected')).toBe('true');
     // The selected item's seen mark may land at any moment on a slow machine; it is not an item action.
     const before = ownerWrites(transport).length;
-    for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'c', 'z']) fireEvent.keyDown(selected, { key });
+    for (const key of ['a', 'd', 'x', 'Backspace', 'Delete', 'c', 'z']) fireEvent.keyDown(selected, { key });
     expect(ownerWrites(transport)).toHaveLength(before);
     fireEvent.keyDown(document.body, { key: '?' }); expect(screen.queryByRole('dialog', { name: 'Help: keys and markers' })).toBeNull();
     fireEvent.keyDown(document.body, { key: 'o', metaKey: true });
     await screen.findByRole('dialog', { name: 'Switch session or project' });
-    for (const key of ['d', 'h', 'Backspace', 'Delete', 'z']) fireEvent.keyDown(selected, { key });
+    for (const key of ['d', 'x', 'Backspace', 'Delete', 'z']) fireEvent.keyDown(selected, { key });
     expect(ownerWrites(transport)).toHaveLength(before);
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Switch session or project' })).toBeNull();
@@ -1193,7 +1193,7 @@ describe('ordinary desktop composition', () => {
     const other = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
     fireEvent.click(selected);
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('4'));
-    fireEvent.mouseEnter(other); other.focus(); fireEvent.keyDown(other, { key: 'h' });
+    fireEvent.mouseEnter(other); other.focus(); fireEvent.keyDown(other, { key: 'x' });
     await waitFor(() => expect(transport.preferences.sessions[0].hidden_item_ids).toEqual(['4']));
     // alpha.24: the hidden selection moves on to the next item; focus stays on the row that had it.
     expect(transport.preferences.sessions[0].selected_item_id).toBe('5');

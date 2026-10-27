@@ -244,15 +244,15 @@ describe('a row acts on what it shows now', () => {
     rerender({ onAct: (intent, target) => {
       if (intent === 'hide') void navigation.setHidden(target, !hidden().includes(target.item_id), navigation.getSnapshot().preferences!.revision);
     } });
-    fireEvent.click(within(row('4')).getByRole('button', { name: 'Hide (h)' }));
+    fireEvent.click(within(row('4')).getByRole('button', { name: 'Hide (x)' }));
     await waitFor(() => expect(hidden()).toContain('4'));
     // The hidden strip opens, and the row is back with its Unhide.
     await waitFor(() => expect(screen.getByRole('treeitem', { name: /hidden/i })).toBeTruthy());
     fireEvent.click(screen.getByRole('treeitem', { name: /hidden/i }));
-    const unhide = await waitFor(() => within(row('4')).getByRole('button', { name: 'Unhide (h)' }));
+    const unhide = await waitFor(() => within(row('4')).getByRole('button', { name: 'Unhide (x)' }));
     fireEvent.click(unhide);
     await waitFor(() => expect(hidden()).not.toContain('4'));
-    await waitFor(() => expect(within(row('4')).getByRole('button', { name: 'Hide (h)' })).toBeTruthy());
+    await waitFor(() => expect(within(row('4')).getByRole('button', { name: 'Hide (x)' })).toBeTruthy());
   });
 
   it('a fold takes the children away, and the unfold brings them back', async () => {

@@ -73,7 +73,7 @@ describe('hover peek skips the selected item', { timeout: 15_000 }, () => {
     const transport = await mount();
     await select(transport, '3');
     fireEvent.mouseEnter(row('4')); fireEvent.mouseMove(row('4'));
-    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'h' });
+    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'x' });
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
     await sleep(PEEK_OPEN_MS + 100);
     expect(card()).toBeNull();
@@ -84,7 +84,7 @@ describe('hover peek skips the selected item', { timeout: 15_000 }, () => {
     await select(transport, '3');
     await rest('4');
     expect(card()).not.toBeNull();
-    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'h' });
+    row('3').focus(); fireEvent.keyDown(row('3'), { key: 'x' });
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
     await waitFor(() => expect(card()).toBeNull());
   });
@@ -99,7 +99,7 @@ describe('hover peek skips the selected item', { timeout: 15_000 }, () => {
     expect(card()).toBeNull();
     // The pointer rests on 5 and its wait runs; hiding 4 selects 5 before the wait ends, so no card opens when it does.
     fireEvent.mouseOver(node('5')!); await sleep(PEEK_OPEN_MS / 2);
-    node('4')!.focus(); fireEvent.keyDown(node('4')!, { key: 'h' });
+    node('4')!.focus(); fireEvent.keyDown(node('4')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('5'));
     await sleep(PEEK_OPEN_MS);
     expect(card()).toBeNull();

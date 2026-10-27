@@ -81,8 +81,8 @@ async function select(transport: AppTransport, id: string) {
   await waitFor(() => expect(detailOf()).toBe(id));
   await ready();
 }
-const pressH = (id: string) => { row(id)!.focus(); fireEvent.keyDown(row(id)!, { key: 'h' }); };
-const hoverHide = (id: string) => fireEvent.click(within(row(id)!).getByRole('button', { name: 'Hide (h)' }));
+const pressX = (id: string) => { row(id)!.focus(); fireEvent.keyDown(row(id)!, { key: 'x' }); };
+const hoverHide = (id: string) => fireEvent.click(within(row(id)!).getByRole('button', { name: 'Hide (x)' }));
 async function hidden(transport: AppTransport, id: string) {
   await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toContain(id)); await ready();
 }
@@ -97,7 +97,7 @@ describe('hide moves on to the next item on the same level', () => {
   ])('row $row: hiding $case selects $next in the same write, and Details follows', async ({ selected, hide, next }) => {
     const transport = await mount();
     await select(transport, selected);
-    if (hide === selected) pressH(hide); else hoverHide(hide);
+    if (hide === selected) pressX(hide); else hoverHide(hide);
     await hidden(transport, hide);
     expect(saved(transport).selected_item_id).toBe(next);
     expect(selectedRows()).toEqual([next]);
@@ -118,7 +118,7 @@ describe('hide moves on to the next item on the same level', () => {
     });
     watch.observe(document.body, { childList: true, subtree: true, attributes: true });
     probe.commits = [];
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     await waitFor(() => expect(detailOf()).toBe('4'));
     watch.disconnect();
@@ -133,7 +133,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 3: hiding an only child selects its parent', async () => {
     const transport = await mount(transport => { delete transport.sessions.get(route.session_id)!.items['1.2']; });
     await select(transport, '1.1');
-    pressH('1.1');
+    pressX('1.1');
     await hidden(transport, '1.1');
     expect(saved(transport).selected_item_id).toBe('1');
     await waitFor(() => expect(detailOf()).toBe('1'));
@@ -142,7 +142,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 4: hiding the only root of a topic selects nothing, closes Details and focuses the topic row', async () => {
     const transport = await mount();
     await select(transport, '8');
-    pressH('8');
+    pressX('8');
     await hidden(transport, '8');
     expect(saved(transport).selected_item_id).toBeNull();
     expect(selectedRows()).toEqual([]);
@@ -153,7 +153,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 5: a next sibling already hidden is skipped', async () => {
     const transport = await mount(transport => { saved(transport).hidden_item_ids = ['5']; });
     await select(transport, '4');
-    pressH('4');
+    pressX('4');
     await hidden(transport, '4');
     expect(saved(transport).selected_item_id).toBe('6');
   });
@@ -181,13 +181,13 @@ describe('hide moves on to the next item on the same level', () => {
     await waitFor(() => expect(detailOf()).toBe('4'));
   });
 
-  it('row 10: the Graph’s h moves its selection by the same rule', async () => {
+  it('row 10: the Graph’s x moves its selection by the same rule', async () => {
     const transport = await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await waitFor(() => expect(node('3')).not.toBeNull());
     fireEvent.click(node('3')!);
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('3')); await ready();
-    node('3')!.focus(); fireEvent.keyDown(node('3')!, { key: 'h' });
+    node('3')!.focus(); fireEvent.keyDown(node('3')!, { key: 'x' });
     await hidden(transport, '3');
     expect(saved(transport).selected_item_id).toBe('4');
     await waitFor(() => expect(node('4')!.getAttribute('aria-selected')).toBe('true'));
@@ -198,7 +198,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 11: Undo right after unhides the item and selects it again, with Details', async () => {
     const transport = await mount();
     await select(transport, '3');
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     expect(saved(transport).selected_item_id).toBe('4');
     act(() => toasts.runUndo(toasts.current()!.id));
@@ -214,7 +214,7 @@ describe('hide moves on to the next item on the same level', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: /^Close Details/ }));
     await waitFor(() => expect(detailOf()).toBeNull());
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     expect(saved(transport).selected_item_id).toBe('4');
     expect(detailOf()).toBeNull();
@@ -228,7 +228,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 23: Undo of a hide that ended Focus puts the Focus back with the selection, in the unhide’s one write', async () => {
     const transport = await mount(transport => { saved(transport).focused_item_id = '3'; saved(transport).selected_item_id = '3'; });
     await waitFor(() => expect(selectedRows()).toEqual(['3']));
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     expect(saved(transport).focused_item_id).toBeUndefined();
     expect(row('8')).not.toBeNull();
@@ -243,7 +243,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 23 / 12: Undo after the owner selected something else leaves Focus ended', async () => {
     const transport = await mount(transport => { saved(transport).focused_item_id = '3'; saved(transport).selected_item_id = '3'; });
     await waitFor(() => expect(selectedRows()).toEqual(['3']));
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     const toast = toasts.current()!;
     await select(transport, '6');
@@ -256,7 +256,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 12: Undo after the owner selected something else unhides and leaves that selection', async () => {
     const transport = await mount();
     await select(transport, '3');
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     const toast = toasts.current()!;
     await select(transport, '6');
@@ -269,7 +269,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 12: moving away and back again before Undo still counts as a newer choice', async () => {
     const transport = await mount();
     await select(transport, '3');
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     const toast = toasts.current()!;
     await select(transport, '6'); await select(transport, '4');
@@ -281,19 +281,19 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 14: Unhide on a selected hidden row keeps it selected', async () => {
     const transport = await mount(transport => { saved(transport).hidden_item_ids = ['4']; saved(transport).selected_item_id = '4'; });
     await waitFor(() => expect(row('4')).not.toBeNull());
-    pressH('4');
+    pressX('4');
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
     expect(saved(transport).selected_item_id).toBe('4');
   });
 
-  it('row 15: Enter selects by key and h moves on by key; the focus ring stays on the new row', async () => {
+  it('row 15: Enter selects by key and x moves on by key; the focus ring stays on the new row', async () => {
     const transport = await mount();
     const tree = screen.getByRole('region', { name: 'Session tree' });
     row('3')!.focus(); fireEvent.keyDown(row('3')!, { key: 'Enter' });
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('3')); await ready();
     expect(tree.hasAttribute('data-kbd')).toBe(true);
     expect(document.activeElement).toBe(row('3'));
-    fireEvent.keyDown(row('3')!, { key: 'h' });
+    fireEvent.keyDown(row('3')!, { key: 'x' });
     await hidden(transport, '3');
     expect(saved(transport).selected_item_id).toBe('4');
     expect(document.activeElement).toBe(row('4'));
@@ -324,7 +324,7 @@ describe('hide moves on to the next item on the same level', () => {
   it('row 23: hiding the focused root ends Focus in the same write and selects the next root', async () => {
     const transport = await mount(transport => { saved(transport).focused_item_id = '3'; saved(transport).selected_item_id = '3'; });
     await waitFor(() => expect(selectedRows()).toEqual(['3']));
-    pressH('3');
+    pressX('3');
     await hidden(transport, '3');
     expect(saved(transport).focused_item_id).toBeUndefined();
     expect(saved(transport).selected_item_id).toBe('4');
@@ -334,10 +334,10 @@ describe('hide moves on to the next item on the same level', () => {
     expect(row('8')).not.toBeNull();
   });
 
-  it('row 24: h with focus on another row hides the selected item by the rule and leaves focus where it is', async () => {
+  it('row 24: x with focus on another row hides the selected item by the rule and leaves focus where it is', async () => {
     const transport = await mount();
     await select(transport, '4');
-    row('2')!.focus(); fireEvent.keyDown(row('2')!, { key: 'h' });
+    row('2')!.focus(); fireEvent.keyDown(row('2')!, { key: 'x' });
     await hidden(transport, '4');
     expect(saved(transport).selected_item_id).toBe('5');
     expect(document.activeElement).toBe(row('2'));
@@ -384,7 +384,7 @@ describe('a hide that is not saved moves nothing', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Filter by status/ }));
     fireEvent.click(within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Open \d+$/ }));
     await waitFor(() => expect(transport.held).toBe(1));
-    pressH('3');
+    pressX('3');
     expect(selectedRows()).toEqual(['3']); expect(detailOf()).toBe('3');
     await act(async () => { transport.release(); });
     await ready();
@@ -396,7 +396,7 @@ describe('a hide that is not saved moves nothing', () => {
     const transport = await mount();
     await select(transport, '3');
     transport.reject = true;
-    pressH('3');
+    pressX('3');
     await screen.findByText('The hidden items preference could not be saved. Try again.');
     await ready();
     expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
@@ -410,7 +410,7 @@ describe('a hide that is not saved moves nothing', () => {
     const transport = await mount();
     await select(transport, '3');
     transport.failNext = 'preferences_patch';
-    pressH('3');
+    pressX('3');
     const line = await screen.findByRole('status', { name: 'Connection' });
     expect(selectedRows()).toEqual(['3']); expect(detailOf()).toBe('3'); expect(row('3')).not.toBeNull();
     await act(async () => { fireEvent.click(within(line).getByRole('button', { name: 'Try again' })); });
@@ -440,7 +440,7 @@ describe('a hide that is not saved moves nothing', () => {
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('3')); await ready();
     const states = await shown(async () => {
       transport.hold();
-      node('3')!.focus(); fireEvent.keyDown(node('3')!, { key: 'h' });
+      node('3')!.focus(); fireEvent.keyDown(node('3')!, { key: 'x' });
       await waitFor(() => expect(transport.held).toBe(1));
       // The click's reveal answers after the hide lands: until then the App still has 3 selected.
       transport.holdReveals();
@@ -468,7 +468,7 @@ describe('a hide that is not saved moves nothing', () => {
     await select(transport, '3');
     const states = await shown(async () => {
       transport.hold();
-      pressH('3');
+      pressX('3');
       await waitFor(() => expect(transport.held).toBe(1));
       fireEvent.mouseDown(row('6')!); fireEvent.click(row('6')!);
       await act(async () => { transport.release(); });

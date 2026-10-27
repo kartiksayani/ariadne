@@ -66,7 +66,7 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
   };
   const showBox = reply.entry !== undefined;
   return <article className="item-detail item-topic" data-detail-topic-id={topicId} aria-label={`Topic: ${topic.name}`}>
-    <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
+    <div className="detail-body" data-testid="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
       <div className="detail-topic-head">
         <div className="detail-status">
           <span className="detail-badge detail-badge-topic"><i className="ph ph-tree-structure" aria-hidden="true" />Topic</span>

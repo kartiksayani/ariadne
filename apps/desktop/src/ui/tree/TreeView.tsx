@@ -378,7 +378,7 @@ export function TreeView(props: TreeViewProps) {
   };
   /** A hidden strip opens or closes every hidden run under its parent. */
   const toggleStrip = (row: StripRow) => toggleHiddenGroup(hiddenGroupKey(row.topicId, row.parent));
-  /** Hide or Unhide (`h`, the row's button): the App runs every hide path through one rule (alpha.24), asking this view (below). */
+  /** Hide or Unhide (`x`, the row's button): the App runs every hide path through one rule (alpha.24), asking this view (below). */
   const hideItem = (row: ItemRowModel) => { onAct('hide', { ...route, item_id: row.item.id }); };
   /**
    * The Map's rows as it will show `after` (the saved view a hide or its Undo writes), with `selected` and `revealed` as given: the
@@ -749,7 +749,7 @@ export function TreeView(props: TreeViewProps) {
   const remember = useRef((key: string, element: HTMLDivElement | null) => {
     if (element) elements.current.set(key, element); else elements.current.delete(key);
   }).current;
-  // A selection the keyboard made (`h`, `.`, Enter) keeps the focus ring; one the pointer made clears it (D6, R9).
+  // A selection the keyboard made (`x`, `.`, Enter) keeps the focus ring; one the pointer made clears it (D6, R9).
   useEffect(() => { if (selectedId) { if (!keyboardIntent.current) setKbd(false); setFocusKey(selectedId); } }, [selectedId]);
   // Hover peek never shows on the selected row (D7): a card waiting for the row the selection lands on, or open on it, goes.
   useEffect(() => { if (selectedId) peek?.dropHover({ ...route, item_id: selectedId }); }, [selectedId]);

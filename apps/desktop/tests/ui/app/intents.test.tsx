@@ -10,6 +10,7 @@ import { AppTransport, route } from './transport';
 afterEach(() => { cleanup(); notices.clear(); });
 
 const view = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
+const hiddenIds = (transport: AppTransport) => view(transport).hidden_item_ids ?? [];
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 
 async function setup(selected = '4') {
@@ -59,6 +60,32 @@ describe('C5 intents in the Tree, the Graph and the bigger view', () => {
       fireEvent.keyDown(await enter(where, '4'), { key: 'c' });
       expect(await screen.findByRole('dialog', { name: 'Continue “Delivery decisions” in another session' })).toBeTruthy();
     });
+  });
+
+  // alpha.24: Hide is `x` again; `h` is no key. The bigger view covers the Map, so Hide waits there as before.
+  describe.each(['tree', 'graph', 'bigger'] as const)('Hide key in the %s', where => {
+    it(where === 'bigger' ? 'x and h do not hide the covered Map item' : 'x hides the current item, and h does nothing', async () => {
+      const transport = await setup('4');
+      const target = await enter(where, '4');
+      fireEvent.keyDown(target, { key: 'h' });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+      expect(hiddenIds(transport)).not.toContain('4');
+      fireEvent.keyDown(target, { key: 'x' });
+      if (where === 'bigger') {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+        expect(hiddenIds(transport)).not.toContain('4');
+      } else await waitFor(() => expect(hiddenIds(transport)).toContain('4'));
+    });
+  });
+
+  it('x hides the selected item from focus inside Details', async () => {
+    const transport = await setup('4');
+    const control = within(screen.getByRole('complementary', { name: 'Item detail' })).getByRole('button', { name: 'More actions' });
+    control.focus(); fireEvent.keyDown(control, { key: 'h' });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(hiddenIds(transport)).not.toContain('4');
+    fireEvent.keyDown(control, { key: 'x' });
+    await waitFor(() => expect(hiddenIds(transport)).toContain('4'));
   });
 
   it('in the bigger view, ⇧F, c and r act on its item, not on what the Map selected meanwhile', async () => {
