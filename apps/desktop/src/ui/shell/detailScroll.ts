@@ -5,7 +5,7 @@
 // scrolls some other way. Speed is one velocity that ramps up and down, so a tap and a hold are the same motion: a tap is a
 // hold that is let go early and still carries on to its distance. OS key-repeat keydowns are ignored by the caller.
 const BODY = '.detail-body';
-const UNREACHABLE = '[inert],[aria-hidden="true"]';
+const UNREACHABLE = '[inert],[aria-hidden="true"],[hidden]';
 /** A tap's distance, as a share of the visible height. Kept under 10% so ending the ease never overshoots it. */
 const TAP = 0.09;
 /** The speed of a hold, in visible heights per second (10% per 200 ms). */
@@ -28,6 +28,8 @@ export function detailBody(page: ParentNode = document): HTMLElement | null {
 
 interface Run {
   readonly body: HTMLElement;
+  /** Where the body was found; each frame asks it again what Details shows. */
+  readonly page: ParentNode;
   readonly direction: ScrollDirection;
   /** The arrow that started it; its key-up lets go. */
   readonly key: string;
@@ -65,7 +67,9 @@ function frame(now: number) {
   const current = run;
   if (!current) return;
   const { body } = current;
-  if (!body.isConnected || Math.abs(body.scrollTop - current.position) > MOVED_AWAY) { stopDetailScroll(); return; }
+  // Every frame asks what Details shows now: a folded column keeps its body mounted (inert, aria-hidden), and switching to or from the
+  // bigger view changes the scroller; in either case the run is over, so a hidden body never scrolls on and a reopened one is where it was left.
+  if (detailBody(current.page) !== body || Math.abs(body.scrollTop - current.position) > MOVED_AWAY) { stopDetailScroll(); return; }
   const gap = current.last === null ? 0 : Math.min((now - current.last) / 1000, MAX_FRAME);
   current.last = now;
   const height = Math.max(1, body.clientHeight), top = SPEED * height, accel = top / RAMP;
@@ -99,7 +103,7 @@ export function startDetailScroll(direction: ScrollDirection, event: Pick<Keyboa
     body.scrollTop += direction === 'up' ? -step : step;
     return true;
   }
-  run = { body, direction, key: event.key, keyDown: true, speed: 0, traveled: 0, position: body.scrollTop, last: null, frame: 0 };
+  run = { body, page, direction, key: event.key, keyDown: true, speed: 0, traveled: 0, position: body.scrollTop, last: null, frame: 0 };
   window.addEventListener('keyup', letGo, true);
   window.addEventListener('blur', stopDetailScroll);
   document.addEventListener('focusin', focusMoved, true);

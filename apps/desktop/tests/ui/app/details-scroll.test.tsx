@@ -107,6 +107,22 @@ describe('⌥↑ / ⌥↓ scroll Details', () => {
     expect(selected(transport)).toBe('2');
   });
 
+  it('stops when Details is folded mid-hold, and unfolding shows the position at the fold', async () => {
+    const { body } = await open();
+    row().focus(); down(row(), 'ArrowDown');
+    await waitFor(() => expect(body.scrollTop).toBeGreaterThan(20));
+    fireEvent.click(screen.getByRole('button', { name: 'Fold Details' }));
+    await screen.findByRole('button', { name: 'Show Details' });
+    const atFold = body.scrollTop;
+    // The key is still down and the body is still mounted at full size, but it is out of reach: it must stay put.
+    await pause(400);
+    expect(body.scrollTop).toBe(atFold);
+    up('ArrowDown');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Details' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Show Details' })).toBeNull());
+    expect(within(detail()).getByTestId('detail-body').scrollTop).toBe(atFold);
+  });
+
   it('does nothing, and does not fail, when Details is closed', async () => {
     const { transport, scroller } = await open();
     closeDetails();

@@ -127,6 +127,43 @@ describe('⌥↑ / ⌥↓ scrolling of Details', () => {
     expect(detailBody()).toBeNull();
   });
 
+  it.each([
+    ['inert (a folded column)', 'inert', ''],
+    ['aria-hidden', 'aria-hidden', 'true'],
+    ['hidden', 'hidden', ''],
+  ])('stops a running scroll when its panel turns %s, and shows the same position when it comes back', (_name, attribute, value) => {
+    const aside = document.body.appendChild(document.createElement('aside'));
+    const element = body(5000, aside);
+    startDetailScroll('down', { key: 'ArrowDown' });
+    run(element, 400);
+    const folded = element.scrollTop;
+    expect(folded).toBeGreaterThan(0);
+    aside.setAttribute(attribute, value);
+    // The body stays mounted with its dimensions, the key is still down; it must not move another pixel.
+    expect(run(element, 600).every(seen => seen === folded)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    aside.removeAttribute(attribute);
+    expect(element.scrollTop).toBe(folded);
+    expect(run(element, 400).every(seen => seen === folded)).toBe(true);
+  });
+
+  it('stops a running scroll on the column when the bigger view opens over it, and a bigger view\'s when it closes', () => {
+    const column = body();
+    startDetailScroll('down', { key: 'ArrowDown' });
+    run(column, 300);
+    const stopped = column.scrollTop;
+    const view = document.body.appendChild(document.createElement('div')); view.className = 'item-conversation';
+    const bigger = body(5000, view);
+    expect(run(column, 300).every(seen => seen === stopped)).toBe(true);
+    expect(bigger.scrollTop).toBe(0);
+    startDetailScroll('down', { key: 'ArrowDown' });
+    run(bigger, 300);
+    const reading = bigger.scrollTop;
+    expect(reading).toBeGreaterThan(0);
+    view.remove();
+    expect(run(bigger, 300).every(seen => seen === reading)).toBe(true);
+  });
+
   it('scrolls the bigger view\'s body rather than the Details column behind it', () => {
     const column = body();
     const view = document.body.appendChild(document.createElement('div')); view.className = 'item-conversation';
