@@ -79,8 +79,11 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   }
   const filters = page.getByRole('group', { name: 'Filter items' });
   if (await filters.count()) {
-    // The chip row (SPEC 6.10): toggle buttons named "<status> <count>", no menu button and no combobox.
-    await expect(filters.getByRole('button', { name: /\d$/ }).first()).toBeVisible();
+    // The chip row (SPEC 6.10): toggle buttons named "<status> <count>" (alpha.24: "<status> 0, N more hidden" when items hide behind
+    // the chip), no menu button and no combobox. A session with nothing to filter says so instead of drawing an empty strip.
+    const chips = filters.getByRole('button', { name: /\d( more hidden)?$/ });
+    if (await chips.count()) await expect(chips.first()).toBeVisible();
+    else await expect(filters).toContainText('Nothing to filter');
     await expect(filters.getByRole('button', { name: /^Filter/ })).toHaveCount(0);
     await expect(filters.getByRole('combobox')).toHaveCount(0);
   }
@@ -518,6 +521,53 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
     for (const id of hidden) expect(route, `${id} is hidden and drawn only on the selected route`).toContain(id);
     await noOverlap(page);
     await testInfo.attach(`graph-hidden-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+// The chip strip with every item hidden (the alpha.23 bug: no status buttons, only "Pick a status"), and with no items at all.
+for (const theme of ['dark', 'light'] as const) {
+  test(`The chip strip counts hidden items behind each status, fits its width, and offers Show them (filter-all-hidden, ${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('filter-all-hidden'), theme });
+    await page.getByRole('button', { name: /^Filter by status/ }).click();
+    const strip = page.getByRole('group', { name: 'Filter items' });
+    await expect(strip).toBeVisible();
+    const chips = strip.getByRole('button', { name: /more hidden$/ });
+    expect(await chips.count(), 'a chip for each status the hidden items hold').toBeGreaterThan(2);
+    await expect(strip.getByRole('button', { name: /^(Open|Done|In progress) 0, \d+ more hidden$/ }).first()).toBeVisible();
+    const height = (await strip.boundingBox())!.height;
+    await strip.getByRole('button', { name: /^Open 0, \d+ more hidden$/ }).click();
+    await expect(strip.getByRole('button', { name: 'Show them' })).toBeVisible();
+    await expect(strip).toContainText(/\+\d+ hidden match/);
+    await settle(page);
+    await testInfo.attach(`filter-all-hidden-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    const before = await page.locator('[data-item-id]').count();
+    await strip.getByRole('button', { name: 'Show them' }).click();
+    await expect(strip.getByRole('button', { name: 'Hide them' })).toBeVisible();
+    expect(await page.locator('[data-item-id]').count(), 'Show them draws the hidden matches').toBeGreaterThan(before);
+    await expect(page.locator('.tree-item-hidden').first()).toBeVisible();
+    await settle(page);
+    // The strip wraps its chips rather than clipping or scrolling: nothing runs past its edge, and the note's actions stay inside it.
+    const fit = await strip.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return { overflow: element.scrollWidth - element.clientWidth, outside: [...element.querySelectorAll('button, .tree-filter-summary')]
+        .filter(child => { const rect = child.getBoundingClientRect(); return rect.left < box.left - 1 || rect.right > box.right + 1; }).map(child => child.textContent) };
+    });
+    expect(fit.overflow, 'the strip does not scroll sideways').toBeLessThanOrEqual(1);
+    expect(fit.outside, 'every chip and action stays inside the strip').toEqual([]);
+    expect((await strip.boundingBox())!.height, 'the strip is at most two lines of chips').toBeLessThanOrEqual(height * 2);
+    await testInfo.attach(`filter-all-hidden-shown-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await strip.getByRole('button', { name: 'Hide them' }).click();
+    await expect(page.locator('.tree-item-hidden')).toHaveCount(0);
+  });
+
+  test(`An empty session's chip strip says "Nothing to filter" and draws no chip (filter-empty, ${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('filter-empty'), theme });
+    await page.getByRole('button', { name: /^Filter by status/ }).click();
+    const strip = page.getByRole('group', { name: 'Filter items' });
+    await expect(strip).toContainText('Nothing to filter');
+    await expect(strip.getByRole('button')).toHaveCount(0);
+    await expect(strip).not.toContainText('Pick a status');
+    await testInfo.attach(`filter-empty-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
 

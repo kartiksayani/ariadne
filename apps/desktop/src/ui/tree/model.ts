@@ -299,6 +299,8 @@ export interface TreeInput {
   readonly search: string;
   /** What "Show them" opened for the search (in memory, never saved). */
   readonly searchShown?: SearchReveal | null;
+  /** What the filter strip's "Show them" opened for the hidden matches (in memory, never saved); the search's reveal is separate. */
+  readonly filterShown?: SearchReveal | null;
   readonly later: ReadonlySet<string>;
   readonly expandedHiddenGroups?: ReadonlySet<string>;
   readonly collapsedTopics: ReadonlySet<string>;
@@ -332,6 +334,12 @@ export interface TreeModel {
   readonly empty: boolean;
   /** Matching items the rows do not show: in hidden items, and inside folded items or topics; and what shows them. */
   readonly search: { readonly hidden: number; readonly collapsed: number; readonly outsideFocus: number; readonly reveal: SearchReveal };
+  /**
+   * The hidden items the filter matches, in the live items of the shown topics: `remaining` are not drawn and lie inside the Focus,
+   * `shown` are drawn because of the filter's own reveal (not by hand, search or selection), `outside` lie outside the Focus.
+   * `reveal` is what "Show them" opens for the remaining ones. All zero while no filter is active.
+   */
+  readonly filterHidden: { readonly remaining: number; readonly shown: number; readonly outside: number; readonly reveal: SearchReveal };
 }
 
 function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summaries: readonly Immutable<SessionSummary>[], now: number) {
@@ -380,6 +388,11 @@ export function treeModel(input: TreeInput): TreeModel {
   revealIds.forEach(id => hiddenGroupsFor(session, explicitHidden, id).forEach(key => hiddenGroups.add(key)));
   const shownBySearch = input.searchShown ?? NO_REVEAL;
   shownBySearch.groups.forEach(key => hiddenGroups.add(key));
+  // The filter's reveal is its own set beside the search's (it applies only while a filter is active). `openElsewhere` is every hidden
+  // group open for another reason, so the tally below can tell what only the filter's reveal keeps open.
+  const shownByFilter = filter.active ? input.filterShown ?? NO_REVEAL : NO_REVEAL;
+  const openElsewhere = new Set(hiddenGroups);
+  shownByFilter.groups.forEach(key => hiddenGroups.add(key));
   const terms = searchTerms(input.search);
   const attentionTopic = input.attentionRevealId ? session.items[input.attentionRevealId]?.topic_id : null;
   // Focus keeps one top item and its topic; a stale or non-top id focuses nothing.
@@ -411,6 +424,8 @@ export function treeModel(input: TreeInput): TreeModel {
   revealIds.forEach(id => ancestors(id).forEach(id => expanded.add(id)));
   shownBySearch.items.forEach(id => expanded.add(id));
   shownBySearch.topics.forEach(id => revealTopics.add(id));
+  shownByFilter.items.forEach(id => expanded.add(id));
+  shownByFilter.topics.forEach(id => revealTopics.add(id));
   const kids = (id: string | null) => indexes.childrenByParent.get(id) ?? [];
   const rootsOf = (topicId: string) => kids(null).filter(item => item.topic_id === topicId);
 
@@ -550,9 +565,9 @@ export function treeModel(input: TreeInput): TreeModel {
   // A match the focus leaves out is counted apart ("N outside the focus"); "Show them" then leaves the focus too.
   let hiddenMatches = 0, collapsedMatches = 0, outsideFocus = 0;
   const reveal = { items: new Set<string>(), topics: new Set<string>(), groups: new Set<string>() };
+  const shownIds = new Set(rows.flatMap(row => row.kind === 'item' ? [row.key] : []));
+  const rootOf = (id: string) => { const chain = ancestors(id); return chain.at(-1) ?? id; };
   if (terms.length) {
-    const shownIds = new Set(rows.flatMap(row => row.kind === 'item' ? [row.key] : []));
-    const rootOf = (id: string) => { const chain = ancestors(id); return chain.at(-1) ?? id; };
     for (const item of live) {
       if (shownIds.has(item.id) || filtering && !include.has(item.id)) continue;
       // The same gate as the rows: an outcome counts only where the row would show it.
@@ -567,8 +582,31 @@ export function treeModel(input: TreeInput): TreeModel {
       reveal.topics.add(item.topic_id);
     }
   }
+  // The filter's hidden matches (the strip's note): the same split as the search's, but over the items the filter matches, and "shown"
+  // keeps apart what only the filter's own reveal holds open from what the owner, the search or a selection opened.
+  let remaining = 0, shownByReveal = 0, outsideFilter = 0;
+  const wanted = { items: new Set<string>(), topics: new Set<string>(), groups: new Set<string>() };
+  if (filtering) {
+    for (const item of live) {
+      if (!matched.has(item.id) || !hidden.has(item.id)) continue;
+      if (focusRootId && rootOf(item.id) !== focusRootId) { outsideFilter++; continue; }
+      const keys = hiddenGroupsFor(session, explicitHidden, item.id), above = ancestors(item.id);
+      const foldedAbove = above.filter(id => input.filterCollapsedItemIds?.has(id)), topicFolded = !!input.filterCollapsedTopicIds?.has(item.topic_id);
+      if (shownIds.has(item.id)) {
+        const heldByFilter = keys.some(key => shownByFilter.groups.includes(key) && !openElsewhere.has(key))
+          || foldedAbove.some(id => shownByFilter.items.includes(id)) || (topicFolded && shownByFilter.topics.includes(item.topic_id));
+        if (heldByFilter) shownByReveal++;
+        continue;
+      }
+      remaining++;
+      keys.forEach(key => wanted.groups.add(key));
+      foldedAbove.forEach(id => wanted.items.add(id));
+      if (topicFolded) wanted.topics.add(item.topic_id);
+    }
+  }
   return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at),
-    search: { hidden: hiddenMatches, collapsed: collapsedMatches, outsideFocus, reveal: { items: [...reveal.items], topics: [...reveal.topics], groups: [...reveal.groups] } } };
+    search: { hidden: hiddenMatches, collapsed: collapsedMatches, outsideFocus, reveal: { items: [...reveal.items], topics: [...reveal.topics], groups: [...reveal.groups] } },
+    filterHidden: { remaining, shown: shownByReveal, outside: outsideFilter, reveal: { items: [...wanted.items], topics: [...wanted.topics], groups: [...wanted.groups] } } };
 }
 
 // ---------------------------------------------------------------- reuse (F6c)

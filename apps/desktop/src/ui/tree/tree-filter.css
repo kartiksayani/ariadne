@@ -2,6 +2,7 @@
 .tree-filter-row {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -14,7 +15,7 @@
 
 .tree-filter-chips {
   display: flex;
-  flex: 1;
+  flex: 1 1 120px;
   flex-wrap: wrap;
   align-items: center;
   min-width: 0;
@@ -55,12 +56,30 @@
   opacity: .58;
 }
 
+/* What hides behind a chip (alpha.24): the chip's own count stays the visible one. */
+.tree-filter-behind {
+  font-variant-numeric: tabular-nums;
+  opacity: .58;
+}
+
 .tree-filter-end {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
   gap: 6px;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+/* "· +2 hidden match · Show them": the note and its action stay together on one line. */
+.tree-filter-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .tree-filter-summary {

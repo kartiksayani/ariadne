@@ -38,10 +38,11 @@ import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
 import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { Banner } from './Banner';
-import { FilterRow, chipLabel } from './FilterRow';
+import { FilterRow, chipLabel, type HiddenNote } from './FilterRow';
+import { sessionGraph } from '../graph/model';
 import { useLocalChips } from './useLocalChips';
 import { useArchiveBridge } from './archiveBridge';
-import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
+import { chipCounts, filterActive, filterOf, filterSignature, hiddenChipCounts, hiddenMatchIds, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ConnectionLineShown } from '../shared/connection';
 import { UnreadableMap } from './UnreadableMap';
@@ -159,7 +160,8 @@ export function TreeView(props: TreeViewProps) {
   // The composed graph reads saved statuses; both views must share the same fold scope during writes.
   const localChips = useLocalChips(route.session_id);
   const foldView = graph ? savedView : view;
-  const filterFolds = useFilterFolds(navigation.routes, route, foldView ? filterSignature({ view: foldView, local: localChips.chips }) : undefined);
+  const filterKey = foldView ? filterSignature({ view: foldView, local: localChips.chips }) : undefined;
+  const filterFolds = useFilterFolds(navigation.routes, route, filterKey);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const focusDisabled = viewBusy && !navigation.isRecentPending();
   const archivedMode = view?.filters.archived ?? false;
@@ -179,6 +181,10 @@ export function TreeView(props: TreeViewProps) {
   const searchScroll = useRef<string | null>(null);
   useLayoutEffect(() => { setSearchCurrent(null); if (!termsKey) setSearchShown(null); }, [termsKey]);
   useLayoutEffect(() => { setSearchCurrent(null); setSearchShown(null); }, [route.project_id, route.session_id]);
+  // The filter strip's "Show them" (alpha.24) opens the way to hidden matches in memory, as the search does, but in a set of its own
+  // so neither clears the other. It ends with the session, any change of the filter (picked chips, owners, hide-later, archive) and Clear.
+  const [filterShown, setFilterShown] = useState<SearchReveal | null>(null);
+  useLayoutEffect(() => { setFilterShown(null); }, [route.project_id, route.session_id, filterKey]);
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
   const [nextTarget, setNextTarget] = useState<{ readonly id: string; readonly step: number } | null>(null);
   const [nextRevealId, setNextRevealId] = useState<string | null>(null);
@@ -275,10 +281,10 @@ export function TreeView(props: TreeViewProps) {
   };
   // The last rows drawn: a rebuilt row that draws the same is that row again, so its memoised ItemRow does not redraw (F6c).
   const drawnRows = useRef<readonly Row[]>(NO_ROWS);
-  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
+  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, filterShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places, previous: drawnRows.current }) : null,
-  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
+  [session, view, filter, focusedId, ackHeld, query, searchShown, filterShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
@@ -363,12 +369,15 @@ export function TreeView(props: TreeViewProps) {
     });
   }, [session?.id, selectedId, reveal, props.historyReveal]);
   /** Folding a row "Show them" opened folds it: it leaves the search's in-memory reveal too. */
-  const unshow = (kind: keyof SearchReveal, id: string) => setSearchShown(previous => previous?.[kind].includes(id)
-    ? { ...previous, [kind]: previous[kind].filter(value => value !== id) } : previous);
+  const unshow = (kind: keyof SearchReveal, id: string) => {
+    const without = (previous: SearchReveal | null) => previous?.[kind].includes(id)
+      ? { ...previous, [kind]: previous[kind].filter(value => value !== id) } : previous;
+    setSearchShown(without); setFilterShown(without);
+  };
   const toggleHiddenGroup = (key: string) => {
     setNextRevealId(null);
     onDismissReveal();
-    const open = expandedHiddenGroups.has(key) || !!searchShown?.groups.includes(key);
+    const open = expandedHiddenGroups.has(key) || !!searchShown?.groups.includes(key) || !!filterShown?.groups.includes(key);
     if (open) unshow('groups', key);
     setExpandedHiddenGroups(previous => {
       const next = new Set(previous);
@@ -389,7 +398,7 @@ export function TreeView(props: TreeViewProps) {
     const next: Immutable<SessionPreferences> = { ...view ?? after, hidden_item_ids: after.hidden_item_ids ?? [], focused_item_id: after.focused_item_id };
     const focus = after.focused_item_id ? session.items[after.focused_item_id] : undefined;
     return treeModel({ session, view: next, filter: filterOf({ session, view: next, later, local: localChips.chips }),
-      focusRootId: focus && !focus.parent && !itemRemoved(session, focus.id) ? focus.id : null, ackHeld, search: query, searchShown, later,
+      focusRootId: focus && !focus.parent && !itemRemoved(session, focus.id) ? focus.id : null, ackHeld, search: query, searchShown, filterShown, later,
       collapsedTopics: closedTopics, selectedId: selected, revealId: revealed, filterCollapsedItemIds: filterFolds.items,
       filterCollapsedTopicIds: filterFolds.topics, attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [],
       presence, health, summaries, now: minute, places }).rows;
@@ -640,6 +649,7 @@ export function TreeView(props: TreeViewProps) {
     setNextRevealId(null);
     onDismissReveal();
     localChips.set([]);
+    setFilterShown(null);
     const filters = view?.filters;
     if (filters && (filters.statuses.length || filters.owners.length || filters.hide_later)) {
       void saveView(next => { next.filters.statuses = []; next.filters.owners = []; next.filters.hide_later = false; });
@@ -1432,10 +1442,29 @@ export function TreeView(props: TreeViewProps) {
   const lineShown = useContext(ConnectionLineShown);
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const graphShown = !!graph && !loading && !unreadable;
-  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
-    [scope, filtersShown]);
-  const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
-    disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips} />;
+  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), hidden: hiddenChipCounts(scope), matches: hiddenMatchIds(scope),
+    picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null, [scope, filtersShown]);
+  // The Graph draws no hidden node except on the route to the selected or revealed item (graph/model.ts): the strip's note counts the
+  // hidden matches it does not draw (G16), and offers no reveal.
+  const graphDrawn = useMemo(() => graphShown && session && view && scope && chips?.matches.length
+    ? sessionGraph({ session, view, later, local: localChips.chips, selectedId, temporaryExpandedItemIds: temporary ?? [], revealedItemId: revealId,
+      filterCollapsedItemIds: filterFolds.items }).nodes : null,
+  [graphShown, session, view, scope, chips, later, localChips.chips, selectedId, temporary, revealId, filterFolds.items]);
+  const filterHidden = model?.filterHidden;
+  const revealHeld = !!filterShown && (filterShown.items.length > 0 || filterShown.topics.length > 0 || filterShown.groups.length > 0);
+  const hiddenNote: HiddenNote | null = !chips?.active ? null : graphShown
+    ? { remaining: chips.matches.filter(id => !graphDrawn?.has(id)).length, shown: 0, outside: 0, owned: false }
+    : filterHidden ? { remaining: filterHidden.remaining, shown: filterHidden.shown, outside: filterHidden.outside, owned: revealHeld } : null;
+  /** "Show them": opens, in memory only, what the hidden matches inside the Focus need. Neither the saved view nor the Focus changes. */
+  const showHidden = () => {
+    const reveal = model?.filterHidden.reveal;
+    if (!reveal || !model?.filterHidden.remaining) return;
+    const join = (a: readonly string[] = [], b: readonly string[]) => [...new Set([...a, ...b])];
+    setFilterShown(previous => ({ items: join(previous?.items, reveal.items), topics: join(previous?.topics, reveal.topics), groups: join(previous?.groups, reveal.groups) }));
+  };
+  const filterRow = chips && <FilterRow counts={chips.counts} hidden={chips.hidden} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
+    note={hiddenNote} disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips}
+    onShowHidden={graphShown ? undefined : showHidden} onHideShown={graphShown ? undefined : () => setFilterShown(null)} />;
   let body: ReactNode;
   if (loading) {
     body = <div className="tree-loading" aria-busy="true">

@@ -5,7 +5,7 @@ import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { isBlocked } from '../../../src/selectors/tree/blocked';
 import {
-  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, loadLocalChips, pickedChips, saveLocalChips, savedChipEdit, setSavedChip, toggleLocalChip, toggleSavedChip,
+  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, hiddenChipCounts, hiddenMatchIds, loadLocalChips, pickedChips, saveLocalChips, savedChipEdit, setSavedChip, toggleLocalChip, toggleSavedChip,
   type Chip, type FilterScope, type LocalChip,
 } from '../../../src/selectors/tree/filter';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -162,6 +162,81 @@ describe('chip counts', () => {
     expect(chipCounts(scope(session)).blocked).toBe(1);
     session.items['3']!.status = 'done';
     expect(chipCounts(scope(session)).blocked).toBe(0);
+  });
+});
+
+describe('chips with hidden items (alpha.24 G3, G8)', () => {
+  const everyId = (session: Session) => Object.values(session.items).filter(item => !!item).map(item => item!.id);
+  const zero = Object.fromEntries(CHIP_ORDER.map(chip => [chip, 0])) as Record<Chip, number>;
+  /** The demo with a Blocked, a To-ack and a Later item, so every chip has something to count. */
+  const rich = () => {
+    const session = seed();
+    session.items['4']!.depends_on = ['3'];
+    session.items['3']!.ack_to = 'in_progress';
+    return session;
+  };
+
+  it('moves every count but Waiting on me from the visible to the hidden side when every item is hidden', () => {
+    const session = rich(), open = scope(session, {}, [], ['8']), all = scope(session, {}, [], ['8'], everyId(session));
+    const before = chipCounts(open), visible = chipCounts(all), hidden = hiddenChipCounts(all);
+    for (const chip of CHIP_ORDER) {
+      if (chip === 'waiting') { expect(visible.waiting).toBe(before.waiting); expect(hidden.waiting).toBe(0); continue; }
+      expect(visible[chip], `${chip} visible`).toBe(0);
+      expect(hidden[chip], `${chip} hidden`).toBe(before[chip]);
+    }
+    expect(Object.values(hidden).some(count => count > 0)).toBe(true);
+  });
+
+  it('counts a mix: the visible and hidden sides of a chip add up to its count with nothing hidden', () => {
+    const session = rich(), none = chipCounts(scope(session, {}, [], ['8']));
+    const mixed = scope(session, {}, [], ['8'], ['2', '4', '8']), visible = chipCounts(mixed), hidden = hiddenChipCounts(mixed);
+    for (const chip of CHIP_ORDER.filter(value => value !== 'waiting')) expect(visible[chip] + hidden[chip], chip).toBe(none[chip]);
+    expect(hidden.open).toBeGreaterThan(0); expect(visible.open).toBeGreaterThan(0);
+  });
+
+  it('counts an item hidden only by its hidden parent', () => {
+    const session = seed(), child = session.items['1.1']!;
+    expect(child.parent).toBe('1');
+    const parentHidden = scope(session, {}, [], [], ['1']);
+    const byAncestor = hiddenChipCounts(parentHidden), explicit = hiddenChipCounts(scope(session, {}, [], [], ['1', '1.1']));
+    expect(byAncestor).toEqual(explicit);
+    // Item 1 is done and its child 1.1 is open: the child counts although only its parent was hidden.
+    expect(byAncestor.done).toBe(1); expect(byAncestor.open).toBe(1);
+  });
+
+  it('follows the saved owners and leaves out removed items and archived topics', () => {
+    const session = seed(), hide = everyId(session);
+    const mine = hiddenChipCounts(scope(session, { owners: [{ kind: 'me' }] }, [], [], hide));
+    const anyone = hiddenChipCounts(scope(session, {}, [], [], hide));
+    expect(mine.open).toBe(chipCounts(scope(session, { owners: [{ kind: 'me' }] })).open);
+    expect(hiddenChipCounts(scope(session, { owners: [{ kind: 'other', name: 'nobody' }] }, [], [], hide))).toEqual(zero);
+    expect(hiddenChipCounts(scope(session, { archived: true }, [], [], hide))).toEqual(zero);
+    session.items['8']!.removed_at = session.updated_at;
+    expect(hiddenChipCounts(scope(session, {}, [], [], hide)).open).toBe(anyone.open - 1);
+  });
+
+  it.each<[LocalChip]>([['toack'], ['sent'], ['blocked'], ['later']])('counts the local chip %s the same way', chip => {
+    const session = rich();
+    answered(session, 'handled');
+    const open = chipCounts(scope(session, {}, [], ['8'])), all = scope(session, {}, [], ['8'], everyId(session));
+    expect(chipCounts(all)[chip]).toBe(0);
+    expect(hiddenChipCounts(all)[chip]).toBe(open[chip]);
+    expect(open[chip]).toBeGreaterThan(0);
+  });
+
+  it('hiddenMatchIds lists the hidden items the filter matches, once each, OR across the picked chips', () => {
+    const session = rich(), hide = everyId(session);
+    expect(hiddenMatchIds(scope(session, {}, [], [], hide))).toEqual([]);
+    const open = hiddenMatchIds(scope(session, { statuses: ['open'] }, [], [], hide));
+    const done = hiddenMatchIds(scope(session, { statuses: ['done'] }, [], [], hide));
+    const both = hiddenMatchIds(scope(session, { statuses: ['open', 'done'] }, [], [], hide));
+    expect(open.length).toBe(hiddenChipCounts(scope(session, {}, [], [], hide)).open);
+    expect(new Set(open).size).toBe(open.length);
+    expect([...both].sort()).toEqual([...new Set([...open, ...done])].sort());
+    expect(hiddenMatchIds(scope(session, { statuses: ['open'] }, [], [], []))).toEqual([]);
+    // A hidden item matching two picked chips counts once.
+    const twice = hiddenMatchIds(scope(session, { statuses: ['open'] }, ['blocked'], [], hide));
+    expect(new Set(twice).size).toBe(twice.length);
   });
 });
 

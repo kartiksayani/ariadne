@@ -150,6 +150,15 @@ const triggers: readonly Trigger[] = [
   ['a new agent row below the reading row', 'still', null, nothing, page => agent(page, 'add-below'), page => expect(row(page, '40')).toHaveCount(1)],
   ['Show them reveals a folded match above', 'held', null, page => search(page, 'receipt'),
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],
+  // alpha.24: the filter strip's own Show them / Hide them open and close hidden matches in memory; rows above the reading row come
+  // and go, and the reading row holds its place.
+  ['the filter\'s Show them reveals a hidden match above', 'held', null, hiddenMatchAbove,
+    page => chipRow(page).getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '9')).toHaveCount(1)],
+  ['the filter\'s Hide them puts the revealed match away', 'held', null, async page => {
+    await hiddenMatchAbove(page);
+    await chipRow(page).getByRole('button', { name: 'Show them' }).click();
+    await expect(row(page, '9')).toHaveCount(1); await settle(page);
+  }, page => chipRow(page).getByRole('button', { name: 'Hide them' }).click(), page => expect(row(page, '9')).toHaveCount(0)],
   ['Show more on the reading row', 'held', '10', nothing, page => press(row(page, '10').getByRole('button', { name: 'Show more' })),
     page => expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
   // The rows below change what is above the reading row, which is out of view: the owner's click is a DOM click.
@@ -314,12 +323,21 @@ const scrollerOf = (view: View) => view === 'Tree' ? '.tree-scroll' : '.graph-sc
 const cellOf = (view: View, id: string) => view === 'Tree' ? `.tree-item[data-item-id="${id}"]` : `.graph-node[data-item-id="${id}"]`;
 const funnel = (page: Page) => page.getByRole('button', { name: /^Filter by status/ });
 const chipRow = (page: Page) => page.getByRole('group', { name: 'Filter items' });
-const chipButton = (page: Page, label: string) => chipRow(page).getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
+const chipButton = (page: Page, label: string) => chipRow(page).getByRole('button', { name: new RegExp(`^${label} \\d+(, \\d+ more hidden)?$`) });
 const chipLabel: Readonly<Record<string, string>> = { open: 'Open', done: 'Done', in_progress: 'In progress', waiting_on_me: 'Waiting on me', decided: 'Decided', replaced: 'Replaced' };
 const statusOf = (page: Page, id: string) => page.evaluate(wanted => {
   const transport = (window as unknown as { treeLayout: { sessions: Map<string, { items: Record<string, { status: string }> }> } }).treeLayout;
   return [...transport.sessions.values()][0]!.items[wanted]!.status;
 }, id);
+
+/** Item 9 (above the reading row) is hidden, and the chips of 9 and 10 are picked: 9 is a hidden match the strip offers to show. */
+async function hiddenMatchAbove(page: Page) {
+  await click(row(page, '9').getByRole('button', { name: /^Hide/, includeHidden: true }));
+  await expect(row(page, '9')).toHaveCount(0);
+  await openRow(page);
+  for (const label of new Set([chipLabel[await statusOf(page, '9')]!, chipLabel[await statusOf(page, '10')]!])) await pick(page, label);
+  await expect(chipRow(page).getByRole('button', { name: 'Show them' })).toBeVisible();
+}
 
 /** Every item whole in view, in reading order: top to bottom, then left to right. The sticky band covers the Tree's first pixels. */
 const wholeCells = (page: Page, view: View): Promise<Cell[]> => page.evaluate(({ scroller, kind }) => {
