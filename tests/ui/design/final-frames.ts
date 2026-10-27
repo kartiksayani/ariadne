@@ -441,7 +441,14 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '14.2': [...band('sessions page above the rows', [0, 123], [0, 123], [0.0002, 0.0001]),
     ...box('sessions page, group headings and names', [0, 123, 500, 677], [0, 123, 340, 527], [0.0001, 0.0001]),
     ...box('sessions page, right of the boxes', [1144, 123, 136, 677], [870, 123, 30, 527], [0.0001, 0.0001]),
-    ...band('sessions page below the last box', [458, 342], [458, 192], [0.0001, 0.0001])]
+    ...band('sessions page below the last box', [458, 342], [458, 192], [0.0001, 0.0001])],
+  // The owner asked (2026-10-23, alpha.24) for project cards of one size: every card is as tall as a card with five session rows, so a card
+  // with fewer rows keeps blank space above its footer, the footers sit lower than the board's, the second row of cards moves down, and the
+  // list's rows (a fixed height each) sit a fraction of a pixel off the board's. The board draws each card as tall as its own rows. What is
+  // held to the board: the top bar, the page head and the first row of cards down to their headers (folder, name, path, tag, pill, "…").
+  // The rows, the footers, the second row of cards and the note under the cards are held by tests/e2e/tree-layout/projects-cards.spec.mts.
+  '14.1': [...topBar(BAR), ...band('projects page head and card headers', [40, 110], [40, 110])],
+  '14.4': [...topBar(BAR), ...band('projects page head and card headers', [40, 110], [40, 110])]
 };
 
 /**
