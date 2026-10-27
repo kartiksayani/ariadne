@@ -385,7 +385,8 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
       filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
       scroll: null,
-      ...(current && spec.foldedItems ? { hidden_item_ids: [...spec.foldedItems] } : {}) };
+      ...(current && spec.foldedItems ? { hidden_item_ids: [...spec.foldedItems] } : {}),
+      ...(current && spec.allHidden ? { hidden_item_ids: Object.values(session.items).flatMap(value => value ? [value.id] : []) } : {}) };
   });
   // 1y continues t5 from yesterday's codex session here; 1ad answers 5.3 in that session, whose agent isn't running (Ariadne.dc.html:955-957).
   const topicIn = (session: string, proto: string) => {

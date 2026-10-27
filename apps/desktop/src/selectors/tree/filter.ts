@@ -111,12 +111,13 @@ function shownItems(scope: FilterScope): readonly Immutable<Item>[] {
 const hiddenOf = (scope: FilterScope) => hiddenItems(scope.session, new Set(scope.view.hidden_item_ids ?? []));
 
 /** "Showing N of M items": the matching items over every item of the shown topics, hidden items left out of both. */
-export function summaryCounts(scope: FilterScope): { readonly shown: number; readonly total: number } {
-  const hidden = hiddenOf(scope), filter = filterOf(scope), live = shownItems(scope).filter(item => !hidden.has(item.id));
-  return { shown: live.filter(item => filter.matches(item)).length, total: live.length };
+export function summaryCounts(scope: FilterScope): { readonly shown: number; readonly total: number; readonly hiddenTotal: number } {
+  const hidden = hiddenOf(scope), filter = filterOf(scope), all = shownItems(scope), live = all.filter(item => !hidden.has(item.id));
+  return { shown: live.filter(item => filter.matches(item)).length, total: live.length, hiddenTotal: all.length - live.length };
 }
 
-/** Counts inside today's scope; hidden items are left out, except in Waiting on me, which never loses a question (D14). */
+/** Counts inside today's scope; hidden items are left out, except in Waiting on me, which never loses a question (D14). The hidden
+ * items are counted apart, by `hiddenChipCounts`. */
 export function chipCounts(scope: FilterScope): Record<Chip, number> {
   const hidden = hiddenOf(scope);
   const items = shownItems(scope).filter(item => inside(scope, item)), counts = {} as Record<Chip, number>;
@@ -125,6 +126,26 @@ export function chipCounts(scope: FilterScope): Record<Chip, number> {
     counts[chip] = items.filter(item => (chip === 'waiting' || !hidden.has(item.id)) && test(item)).length;
   }
   return counts;
+}
+
+/** The hidden side of `chipCounts`: per chip, the distinct live hidden items it matches (hidden by themselves or by a hidden ancestor),
+ * session-wide inside the same scope. Waiting on me has none: it already counts hidden questions as visible (D14). */
+export function hiddenChipCounts(scope: FilterScope): Record<Chip, number> {
+  const hidden = hiddenOf(scope);
+  const items = shownItems(scope).filter(item => hidden.has(item.id) && inside(scope, item)), counts = {} as Record<Chip, number>;
+  for (const chip of CHIP_ORDER) {
+    const test = predicate(scope, chip);
+    counts[chip] = chip === 'waiting' ? 0 : items.filter(test).length;
+  }
+  return counts;
+}
+
+/** The hidden live items the filter matches (any picked chip, inside the owners and hide-later), each once; none while no filter is active. */
+export function hiddenMatchIds(scope: FilterScope): readonly string[] {
+  const filter = filterOf(scope);
+  if (!filter.active) return [];
+  const hidden = hiddenOf(scope);
+  return shownItems(scope).filter(item => hidden.has(item.id) && filter.matches(item)).map(item => item.id);
 }
 
 // A legacy saved `dropped` still matches (D14); Clear removes it.

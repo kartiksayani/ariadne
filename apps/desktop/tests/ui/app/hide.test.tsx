@@ -18,7 +18,7 @@ const filterRow = () => {
   if (!screen.queryByRole('group', { name: 'Filter items' })) fireEvent.click(screen.getByRole('button', { name: /^Filter by status/ }));
   return screen.getByRole('group', { name: 'Filter items' });
 };
-const chip = (name: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${name} \\d+$`) });
+const chip = (name: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${name} \\d+(, \\d+ more hidden)?$`) });
 async function ready() {
   await waitFor(() => expect(screen.getByRole('button', { name: /^Switch session or project/ })).toBeTruthy());
   await waitFor(() => expect(screen.getByRole('button', { name: /^Filter by status/ }).hasAttribute('disabled')).toBe(false));
@@ -280,7 +280,8 @@ describe('owner hide and unhide actions', () => {
 
   it('names hidden search matches in the top bar and leaves the ordinary status chip counts alone', async () => {
     await mount(); await hide('1.1');
-    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    // alpha.24 (G3): the visible count is unchanged; the chip now also says what hides behind it.
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');
     // The top bar's search box opens from its "Search the Map" button.
     fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
@@ -288,7 +289,7 @@ describe('owner hide and unhide actions', () => {
     await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
     expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
     expect(row('1.1')).toBeNull();
-    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');
     fireEvent.click(chip('Open'));
     expect(await screen.findByText('Showing 2 of 8 items')).toBeTruthy();
     await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches'));
@@ -299,7 +300,8 @@ describe('owner hide and unhide actions', () => {
   it('explains hidden matches for a status chip without search and clears that filter', async () => {
     const { transport } = await mount(); await hide('1.1'); fireEvent.click(chip('Open'));
     expect(await screen.findByText('Showing 2 of 8 items')).toBeTruthy();
-    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');
+    expect(within(filterRow()).getByText('+1 hidden match')).toBeTruthy();
     expect(group()).toBeTruthy();
     fireEvent.click(within(filterRow()).getByRole('button', { name: 'Clear' }));
     // Clear empties the saved chips and closes the row.

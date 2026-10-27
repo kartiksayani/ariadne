@@ -21,7 +21,7 @@ function fixture() {
     const model = shimTree({ ...input, ...extra, view: hidden });
     return selectionAfterHide(immutable(session), id, shownItems(model.rows));
   };
-  return { session: session as Session, view, after };
+  return { session: session as Session, view, after, input };
 }
 
 describe('the item selected once an item is hidden', () => {
@@ -58,6 +58,22 @@ describe('the item selected once an item is hidden', () => {
     view.hidden_item_ids = ['5', '6', '7'];
     const groups = new Set([hiddenGroupKey(session.items['4']!.topic_id, null)]);
     expect(after('4', { expandedHiddenGroups: groups })).toBe('3');
+  });
+  it('review 6: with the filter\'s reveal open the rule reads the Map as it draws it: the revealed context row is a candidate, the dimmed row is not', () => {
+    const { view, input, after } = fixture();
+    // Open only: 1.1 (hidden), 1.2 and 1.3 are open children of 1, which the owner folded under this filter. 1.1 is a hidden match,
+    // so "Show them" unfolds 1, and 1.2 and 1.3 are drawn beside the dimmed 1.1.
+    view.filters.statuses = ['open']; view.hidden_item_ids = ['1.1'];
+    const folded = { filterCollapsedItemIds: new Set(['1']) };
+    const reveal = shimTree({ ...input, ...folded }).filterHidden.reveal;
+    expect(reveal.items).toEqual(['1']);
+    // Hiding 1.2 with 1 still folded: 1.3 is not drawn, so the selection falls back to the parent.
+    expect(after('1.2', folded)).toBe('1');
+    // With the reveal the Map draws 1.3, so the rule hands over to it; the dimmed 1.1 is no candidate.
+    expect(after('1.2', { ...folded, filterShown: reveal })).toBe('1.3');
+    const model = shimTree({ ...input, ...folded, view: { ...view, hidden_item_ids: ['1.1', '1.2', '1.3'] }, filterShown: reveal });
+    expect(model.rows.find(row => row.kind === 'item' && row.key === '1.1')).toMatchObject({ hidden: true });
+    expect(shownItems(model.rows)).not.toContain('1.1');
   });
   it('row 6: an ancestor is the subject: its own siblings take over', () => {
     expect(fixture().after('1')).toBe('2');
