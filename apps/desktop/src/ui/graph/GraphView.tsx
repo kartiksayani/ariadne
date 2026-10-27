@@ -28,6 +28,7 @@ import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
 import { scrollIntoViewIfHidden } from '../shared/scroll';
+import { keyStopsLanding, landingMoves, startLanding, wheelScrolls, type Landing, type Offset } from '../shared/landing';
 import { useDockInset } from '../shell/dockInset';
 
 export interface GraphViewProps {
@@ -61,6 +62,11 @@ export interface GraphViewProps {
 
 /** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
 const RING_ROOM = 8;
+/** How far the scroller is from centring `element`. A centred node sits mid-view, clear of the legend card: only the dock shortens the area it is centred in. */
+function centring(scroller: HTMLElement, element: Element, dockInset = 0): Offset {
+  const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
+  return { top: (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - dockInset) / 2), left: (b.left + b.width / 2) - (a.left + a.width / 2) };
+}
 /**
  * Scrolls `element` into the scroller: centred (opening, links) or just into view (keys, search steps).
  * The visible area ends above the floating dock and the legend card (`bottomInset`), so a node under either counts as hidden.
@@ -68,9 +74,9 @@ const RING_ROOM = 8;
 function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, bottomInset = 0, dockInset = 0) {
   const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
   if (center) {
-    // A centred node sits mid-view, clear of the legend card: only the dock shortens the area it is centred in.
-    scroller.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - dockInset) / 2);
-    scroller.scrollLeft += (b.left + b.width / 2) - (a.left + a.width / 2);
+    const by = centring(scroller, element, dockInset);
+    scroller.scrollTop += by.top;
+    scroller.scrollLeft += by.left;
     return;
   }
   scrollIntoViewIfHidden(scroller, element, { top: 8, bottom: 8, bottomInset });
@@ -172,7 +178,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     if (!error) { notices.dismiss(errorNoticeId); return; }
     notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: error });
   }, [errorNoticeId, error]);
-  const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
+  /** `land`: centred over a few eased frames (a reveal from outside: ⌘[ / ⌘], a link), as the Tree lands (alpha.24 P3). */
+  const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean; land?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
   const offered = localReveal && localReveal.asked === revealAsks ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
@@ -205,6 +212,10 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
    */
   const held = useRef<{ readonly id: string; readonly x: number; readonly y: number; readonly top: number; readonly left: number; readonly graph: SessionGraph } | null>(null);
   const nodeElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null;
+  /** The landing on its way (alpha.24 P3): a node a reveal from outside is centring over a few frames. */
+  const landing = useRef<Landing | null>(null);
+  const stopLanding = () => { landing.current?.cancel(); landing.current = null; };
+  useEffect(() => stopLanding, []);
   /** The legend card hangs over the scroller's bottom edge; a node must land above it as well as above the dock. */
   const legendInset = useRef(0);
   const bottomInset = () => latest.current.dockInset + legendInset.current;
@@ -328,7 +339,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   // A selection's reveal comes back through `reveal` and must not scroll again.
   const ownReveal = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); held.current = null; }, [store]);
+  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); held.current = null; stopLanding(); }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
   useEffect(() => {
@@ -378,6 +389,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     return selectionAfterHide(session, itemId, projected.order.filter(id => !projected.nodes.get(id)?.hidden));
   });
   const presentMove = useLatest((move: HideMove) => {
+    // Any hide or Undo stops a landing first, with a selection change or without one: the Graph stays where it is (Q8).
+    stopLanding();
     const box = scroller.current, current = latest.current.graph;
     if (move.kind === 'hide' && box && current?.nodes.has(move.itemId)) {
       // The Graph stays where it is, as the Map does (S10): the node drawn before the hidden one holds its place, so nothing above
@@ -520,7 +533,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       // owner's click, its write and its answer are still in flight. A jump asked for since the click needs no clearing: the held
       // state is stamped with the ask count and stops applying the moment it moves.
       if (echo) { setLocalReveal(null); setLocalSelection(null); }
-      if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true };
+      if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true, land: true };
     }
     const initial = !!graph && opened.current !== store;
     if (initial) {
@@ -530,7 +543,19 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     const box = scroller.current;
     const element = target ? nodeElement(target.id) : null;
     if (box && element && target) {
-      scrollToNode(box, element, target.center, bottomInset(), dockInset);
+      // A new target: the landing on its way stops where it is. The Graph's opening placement never lands.
+      stopLanding();
+      if (target.land && !initial && landingMoves()) {
+        const id = target.id;
+        let run: Landing | null = null;
+        run = startLanding({
+          remaining: () => { const node = scroller.current === box ? nodeElement(id) : null; return node ? centring(box, node, latest.current.dockInset) : null; },
+          move: by => { box.scrollTop += by.top; box.scrollLeft += by.left; },
+          screen: () => ({ top: box.clientHeight, left: box.clientWidth }),
+          landed: () => { if (run && landing.current === run) landing.current = null; },
+        });
+        if (run.running()) landing.current = run;
+      } else scrollToNode(box, element, target.center, bottomInset(), dockInset);
       if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
     } else if (initial) box?.focus({ preventScroll: true });
     remember();
@@ -567,6 +592,9 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   const current = search.current?.id ?? null;
   return <div className="graph-view">
     <div ref={scroller} className="graph-scroll" data-testid="graph-scroll" tabIndex={-1} onScroll={remember}
+      // The owner's wheel, press or key stops a landing where it is (Q3).
+      onWheelCapture={event => { if (wheelScrolls(event, event.currentTarget)) stopLanding(); }} onPointerDownCapture={stopLanding}
+      onKeyDownCapture={event => { if (keyStopsLanding(event)) stopLanding(); }}
       onFocus={event => {
         const element = event.target instanceof Element ? event.target.closest('[data-row]') : null;
         focusedRow.current = element?.getAttribute('data-row') ?? null;

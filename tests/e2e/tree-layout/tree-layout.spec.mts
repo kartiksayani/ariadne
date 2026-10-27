@@ -42,16 +42,13 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     });
     expect(attention.contrast, 'small New text remains readable, including while the row pulses').toBeGreaterThanOrEqual(4.5);
     for (const status of attention.statuses) expect(attention.text).not.toEqual(status);
-    await expect(child).toHaveCSS('outline-color', markerColour);
-    // D21: a dashed 1.5px outline, which the browser computes as 1px.
-    await expect(child).toHaveCSS('outline-style', 'dashed');
-    await expect(child).toHaveCSS('outline-width', '1px');
+    // D21 (alpha.24 P5: on the item, not across the Map): a dashed 1.5px box, which the browser computes as 1px.
+    await expectDashedBox(child, markerColour);
     await expect(child).toHaveAttribute('aria-selected', 'false');
     await expect(child).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
     await expect(child.getByTestId('change-marker')).toBeVisible();
-    await expect(child).toHaveCSS('outline-width', '1px');
-    await expect(child).toHaveCSS('outline-color', markerColour);
+    await expectDashedBox(child, markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     const changed = page.locator('.tree-item[data-item-id="2"]');
     await page.keyboard.press('n');
@@ -67,8 +64,7 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(last).toHaveAttribute('data-next-unseen', 'true');
     await expectRevealedRow(last);
     await expect(last).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
-    await expect(last).toHaveCSS('outline-width', '1px');
-    await expect(last).toHaveCSS('outline-color', markerColour);
+    await expectDashedBox(last, markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     await page.keyboard.press('n');
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
@@ -104,6 +100,15 @@ async function openTree(page: Page, origin: string, query = '') {
   await expect(page.locator('[data-popover-trigger="connection"]')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
+}
+
+/** The `n` target's box: a dashed line in `colour` on the item (its ::after), and no outline across the Map's width. */
+async function expectDashedBox(row: Locator, colour: string) {
+  await expect(row).toHaveCSS('outline-style', 'none');
+  expect(await row.evaluate(element => {
+    const style = getComputedStyle(element, '::after');
+    return { style: style.borderTopStyle, width: style.borderTopWidth, colour: style.borderTopColor };
+  })).toEqual({ style: 'dashed', width: '1px', colour });
 }
 
 async function expectRevealedRow(row: Locator) {

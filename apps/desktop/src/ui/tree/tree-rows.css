@@ -24,6 +24,25 @@
   pointer-events: none;
 }
 
+/* The keyboard focus (alpha.24 P4) and the next unseen target (`n`, P5) draw their line on the item where the selected box draws its
+   ring: the selected box's place grown by the ring's 1.5px, so the line covers the ring's place. Focus is a soft dotted ring; the `n`
+   target a dashed one in the attention colour. Precedence: `n` > selected > focus. No outline goes round the item's whole width (the
+   page's focus-visible one). A topic band or a strip keeps its focus ring (tree.css). */
+.tree-item:focus-visible {
+  outline: none;
+}
+
+.tree-column[data-kbd] .tree-item:focus:not([aria-selected="true"], [data-next-unseen])::before,
+.tree-item[data-next-unseen]::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 1.5px calc(10.5px + (var(--depth) - 1) * 6px) 1.5px calc(var(--tree-x) - 11.5px);
+  border: 1.5px dotted color-mix(in srgb, var(--color-accent) 70%, transparent);
+  border-radius: 7.5px;
+  pointer-events: none;
+}
+
 .tree-heading {
   display: flex;
   align-items: flex-start;
@@ -194,13 +213,17 @@
   }
 }
 
-/* The next unseen target (n): a dashed 1.5px outline, kept after its arrival pulse. */
-.tree-item[data-next-unseen] {
-  outline: 1.5px dashed var(--attention);
-  outline-offset: -2px;
+/* The next unseen target (n): its dashed box (placed with the focus box above), kept after its arrival pulse. Hovered, the box
+   keeps its place and takes the hover wash; on a selected row the selected box keeps its wash and the dashed line is its ring. */
+.tree-item[data-next-unseen]::after {
+  border: 1.5px dashed var(--attention);
 }
 
-.tree-item[data-next-unseen-pulse] {
+.tree-item[data-next-unseen] .tree-selected-box {
+  box-shadow: var(--shadow-sm);
+}
+
+.tree-item[data-next-unseen-pulse]::after {
   animation: tree-unseen-arrival .9s ease-out;
 }
 
@@ -209,7 +232,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tree-item[data-next-unseen-pulse] { animation: none; }
+  .tree-item[data-next-unseen-pulse]::after { animation: none; }
 }
 
 .tree-unseen-announcement {
