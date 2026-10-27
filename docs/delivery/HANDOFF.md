@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-23
+# Ariadne handoff — 2026-10-27
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,9 +21,10 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `37cdfc69` (#179). Alpha.23 released as
-[`v0.1.0-alpha.23`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.23)**
-(tag at `37cdfc69`). Alpha.22 is `v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
+**Main: `6aa66024` (#181). Alpha.24 released as
+[`v0.1.0-alpha.24`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.24)**
+(tag at `6aa66024`). Alpha.23 is `v0.1.0-alpha.23` (tag at `37cdfc69`, #179), alpha.22 is
+`v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
 `v0.1.0-alpha.21` (tag at `8ed87b66`, #173), alpha.20 is
 `v0.1.0-alpha.20` (tag at `c5c8f6a9`, #171), alpha.19 is
 `v0.1.0-alpha.19` (tag at `c87909da`, #169), alpha.18 is
@@ -33,6 +34,17 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.24 released
+
+[#181](https://github.com/kartiksayani/ariadne/pull/181), `6aa66024`, "Hide moves on": hiding an item now moves the selection on and keeps the Map still, with the keys and navigation the owner asked for. The release is a pre-release with the asset `ariadne-0.1.0-alpha.24-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.24` on 2026-10-27. What changed for the owner:
+
+- Hiding the selected item selects the next item on the same level, or the previous one if it was the last, or its parent if it was the only one. The Map stays where it is. Undo puts the item back, selects it again and keeps the Map still. Hovering the selected item no longer opens a peek card; Space still does.
+- Keys: `x` hides and unhides again (it was `h`). ⌥1–9 picks that option and sends it at once, with the same checks as Send; it does nothing in text boxes, in topic view, or while a peek card shows another item. ⌥↑ / ⌥↓ scroll Details (a tap moves a tenth of the panel, holding scrolls slowly and smoothly; the Map does not move). The keyboard focus ring stays visible after `x`, `.` and Enter, which was the alpha.23 follow-up.
+- Getting around: a two-finger swipe goes back or forward, like ⌘[ / ⌘], and a small arrow follows the swipe. ⌘[ / ⌘], the swipe and `n` glide to the item instead of jumping. The focused item shows a soft dotted blue border and the `n` item a dashed red border, drawn on the item.
+- Filter: the status filter counts hidden items. A "+2 hidden" button shows when hidden items match, and "Show them" opens those items, dimmed; nothing is saved. When every item is hidden, the strip says "All items are hidden".
+- Projects: every project card is the same size and lists up to 5 sessions, newest activity first; the rest scroll inside the card.
+- A second occurrence of the "Native Quit note observation deadline" flake (details under Known flakes).
 
 ## Alpha.23 released
 
@@ -193,10 +205,11 @@ built.
 
 ## Next steps
 
-Alpha.23 closed the alpha.22 follow-ups list (the native tree row click and the native Reply flake are fixed; the saved window size over an external display is fixed by F4, with the owner hardware check below) and finished P11.12 (Reveal selected opens Details in both views). Item 1 is the follow-ups carried to the next release (alpha.24); the owner picks the order.
+Alpha.24 fixed the alpha.23 follow-up about the keyboard focus ring hiding after `.` or Enter (it now stays visible after `x`, `.` and Enter). Item 1 is the follow-ups carried to the next release (alpha.25); the owner picks the order.
 
 1. **Follow-ups carried to the next release** (none blocks it).
-   - After `.` or Enter, the keyboard focus ring hides: in `TreeView.tsx` the selection effect runs `setKbd(false)` on the view's own reveal echo. Decide whether keyboard selection should keep the ring.
+   - Native "Quit note observation" failed once locally and passed on rerun: a second occurrence (alpha.23, alpha.24), so investigate before the next merge (see Known flakes).
+   - Owner checks for alpha.24: the two-finger swipe direction and feel on a real trackpad, the width of the dashed `n` box on depth-1 items, and its colour in the light theme.
    - `ui/tree/model.ts` `sameValue` treats Sets, Maps and Dates as equal. This is latent, since no row field holds one today. Recurse only into arrays and plain objects.
    - Owner hardware check for F4: put the window on the external display, unplug it, wait more than 2 s, quit, replug and relaunch; it should open on the external display at the owner's size. Also drag the window between a 2x and a 1x display and relaunch.
    - After install, check whether `/reload-plugins` alone loads the new plugin and whether it fires `session.end`. Pending the owner's report.
@@ -225,8 +238,9 @@ Refresh this page, tasks.json and the roadmap chart using
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
 
-- **Native Quit note observation deadline (`scripts/native-quit-note.mjs:145`, the delivery phase).** First occurrence; not fixed.
+- **Native Quit note observation deadline (`scripts/native-quit-note.mjs:145`, the delivery phase).** Second occurrence; not fixed. Investigate before the next merge.
   - First failed: local alpha.23 integration run, 2026-10-22, under machine load. A rerun passed 10/10 blocks and CI native passed.
+  - Second occurrence: a local alpha.24 run failed once and passed on rerun.
   - Suspected cause: the System Events accessibility inspect is slow under load. No alpha.23 change touches quit.
 
 - **Native tree journey, row click refused with “still loading this session's latest changes” (`apps/desktop/tests/e2e/tree.spec.mjs`, `selectRow`).** Fixed in alpha.23 (#179).
