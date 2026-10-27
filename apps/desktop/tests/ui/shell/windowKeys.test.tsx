@@ -37,7 +37,7 @@ describe('window-level workspace keys', () => {
     const overlay = document.body.appendChild(document.createElement('div'));
     if (kind === 'dialog') overlay.setAttribute('role', 'dialog');
     else overlay.setAttribute('data-workspace-overlay', kind);
-    for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'c', 'f', 'g', 'ArrowDown', '?']) press(document.body, key);
+    for (const key of ['a', 'd', 'x', 'Backspace', 'Delete', 'c', 'f', 'g', 'ArrowDown', '?']) press(document.body, key);
     expect(onKey).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(document.body);
   });
@@ -125,17 +125,17 @@ describe('window-level workspace keys', () => {
     act(() => { field.focus(); });
     // A save starts: the field is disabled and focus falls to <body>.
     field.disabled = true; field.blur();
-    expect(press(document.body, 'h').defaultPrevented).toBe(false);
+    expect(press(document.body, 'x').defaultPrevented).toBe(false);
     expect(onKey).not.toHaveBeenCalled();
     // Clicking elsewhere is a deliberate move: keys on <body> are shortcuts again.
     act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
-    expect(press(document.body, 'h').defaultPrevented).toBe(true);
+    expect(press(document.body, 'x').defaultPrevented).toBe(true);
     expect(onKey).toHaveBeenCalled();
     // A field that is enabled again, or gone, no longer holds the keys back.
     onKey.mockClear();
     act(() => { field.disabled = false; field.focus(); field.disabled = true; field.blur(); });
     field.remove();
-    expect(press(document.body, 'h').defaultPrevented).toBe(true);
+    expect(press(document.body, 'x').defaultPrevented).toBe(true);
   });
 
   /** A text field outside the app root that the owner is typing in, then a save disables it (focus falls to <body>). */
@@ -280,7 +280,7 @@ describe('window-level workspace keys', () => {
     press(document.body, 'd');
     field.remove();
     // The keys went with the field: a later field gets none of them, and keys are shortcuts again.
-    expect(press(document.body, 'h').defaultPrevented).toBe(true);
+    expect(press(document.body, 'x').defaultPrevented).toBe(true);
     expect(onKey).toHaveBeenCalled();
     const later = document.body.appendChild(document.createElement('textarea'));
     act(() => { later.focus(); });

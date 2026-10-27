@@ -20,6 +20,8 @@ export interface FrameSpec {
   readonly reconnecting?: boolean;
   /** Items hidden by the saved view only, with their text untouched. */
   readonly foldedItems?: readonly string[];
+  /** Every item of the session is hidden by the saved view (the chip strip's all-hidden state, alpha.24). */
+  readonly allHidden?: boolean;
   /** Compact states of the Details composer are app-only, independent of immutable handoff comparisons. */
   readonly dockState?: 'open' | 'pending';
   /** Compare a stopped turn after delivery with a rejection before delivery. */
@@ -57,6 +59,9 @@ const specs: readonly FrameSpec[] = [
   // The Graph over a view with hidden items: only the selected route's hidden items are drawn (SPEC 1.3).
   { ...base, ...narrow, id: 'graph-hidden', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
   { ...base, width: 900, height: 650, id: 'graph-hidden-small', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
+  // The chip strip (alpha.24): a session whose every item is hidden, and a session with no items at all.
+  { ...base, ...narrow, id: 'filter-all-hidden', allHidden: true },
+  { ...base, ...narrow, id: 'filter-empty', state: 'empty' },
 ];
 
 export const dockFrameIds: readonly string[] = specs.filter(spec => spec.dockState !== undefined).map(spec => spec.id);

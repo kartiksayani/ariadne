@@ -292,7 +292,7 @@ describe('local acknowledgement', () => {
 
   it('keeps a hidden Ack item hidden and counted, and acknowledges from the dock without unhiding it', async () => {
     const transport = await mount();
-    fireEvent.click(within(row()).getByRole('button', { name: 'Hide (h)' }));
+    fireEvent.click(within(row()).getByRole('button', { name: 'Hide (x)' }));
     await waitFor(() => expect(row()).toBeNull());
     expect(screen.getByText('Ack all (1)')).toBeTruthy();
     const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;

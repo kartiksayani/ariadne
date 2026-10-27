@@ -62,7 +62,7 @@ function rowActions(row: Row, stopped: string | null, ackDisabled: boolean, run:
     row.later ? slot('Unpark', true, { icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: go('later') })
       : slot('Later', open, { icon: 'ph ph-clock', title: 'Later (z)', run: go('later') }),
     slot('Drop', open, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: go('drop') }));
-  list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (h)' : 'Hide (h)', run: go('hide') });
+  list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (x)' : 'Hide (x)', run: go('hide') });
   list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: go('remove') });
   return list;
 }
@@ -242,7 +242,7 @@ export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMar
     onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { placeActions(event.currentTarget, bar.current, dockInset); onPeekHover?.(item.id, event); }}
     onMouseMove={event => { placeActions(event.currentTarget, bar.current, dockInset); onPeekHover?.(item.id, event); }} onMouseLeave={() => onPeekLeave?.()}>
     <Boxes boxes={row.boxes} />
-    {selected && <span aria-hidden="true" className="tree-selected-box" />}
+    {selected && <span aria-hidden="true" className="tree-selected-box" data-testid="selected-box" />}
     <Guides guides={row.guides} />
     {row.hasKids
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"

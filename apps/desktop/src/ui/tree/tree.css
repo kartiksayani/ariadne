@@ -126,7 +126,8 @@
   outline: none;
 }
 
-.tree-column[data-kbd] .tree-row:focus {
+/* A topic band's or a strip's keyboard focus. An item's is a dotted ring on the item itself (tree-rows.css, alpha.24 P4). */
+.tree-column[data-kbd] .tree-row:not(.tree-item):focus {
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 

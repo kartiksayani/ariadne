@@ -7,10 +7,10 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 // banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
-import type { ItemRoute } from '../../generated/core';
+import type { ItemRoute, SessionPreferences } from '../../generated/core';
 import type { SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useViewEdits, viewEditsFor, type ViewChange, type ViewSubject } from '../../state/navigation/viewEdits';
@@ -38,10 +38,11 @@ import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
 import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { Banner } from './Banner';
-import { FilterRow, chipLabel } from './FilterRow';
+import { FilterRow, chipLabel, type HiddenNote } from './FilterRow';
+import { DrawnHiddenContext } from '../graph/drawnHidden';
 import { useLocalChips } from './useLocalChips';
 import { useArchiveBridge } from './archiveBridge';
-import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
+import { chipCounts, filterActive, filterOf, filterSignature, hiddenChipCounts, hiddenMatchIds, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ConnectionLineShown } from '../shared/connection';
 import { UnreadableMap } from './UnreadableMap';
@@ -49,6 +50,7 @@ import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop, type BackPill } from './scroll';
+import { keyStopsLanding, landingMoves, reachable, startLanding, WheelStream, type Landing } from '../shared/landing';
 import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -56,7 +58,8 @@ import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
 import { RemovalContext, useHidden } from '../remove/queue';
-import { hiddenKey, placeStrips, visibleSession } from '../remove/model';
+import { hiddenKey, placeStrips, subtree, visibleSession } from '../remove/model';
+import { hideViews, selectionAfterHide, shownItems, type HideMove } from './hideMove';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
@@ -96,8 +99,6 @@ export interface TreeViewProps {
   readonly onOpenItem?: (itemId: string) => void;
   /** "Reply to topic" and an Edit on a stuck topic reply open Details on the topic (alpha.21 E6). */
   readonly onOpenTopic?: OpenTopicInDetails;
-  /** An item was hidden from the Map (saved): App says so with an Undo toast. */
-  readonly onHid?: (itemId: string) => void;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
@@ -160,16 +161,18 @@ export function TreeView(props: TreeViewProps) {
   // The composed graph reads saved statuses; both views must share the same fold scope during writes.
   const localChips = useLocalChips(route.session_id);
   const foldView = graph ? savedView : view;
-  const filterFolds = useFilterFolds(navigation.routes, route, foldView ? filterSignature({ view: foldView, local: localChips.chips }) : undefined);
+  const filterKey = foldView ? filterSignature({ view: foldView, local: localChips.chips }) : undefined;
+  const filterFolds = useFilterFolds(navigation.routes, route, filterKey);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const focusDisabled = viewBusy && !navigation.isRecentPending();
   const archivedMode = view?.filters.archived ?? false;
+  // The strip is on screen (Archive mode and the closed funnel suppress it); the filter's reveal lives only while it is.
+  const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const savedLater = preferences?.later;
   const later = useMemo(() => new Set(savedLater?.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
     .map(item => item.item_id) ?? []), [savedLater, route.project_id, route.session_id]);
   const savedFolds = view?.collapsed_topic_ids;
   const closedTopics = useMemo(() => new Set(savedFolds ?? []), [savedFolds]);
-  const hiddenFocus = useRef<string | null>(null);
   const [expandedHiddenGroups, setExpandedHiddenGroups] = useState<ReadonlySet<string>>(new Set());
   // Search in place (SPEC §6.9). "Show them" opens the way to hidden and folded matches in memory until the search clears;
   // the current match is the first until the owner steps (or shows them), then the one stepped to.
@@ -181,6 +184,14 @@ export function TreeView(props: TreeViewProps) {
   const searchScroll = useRef<string | null>(null);
   useLayoutEffect(() => { setSearchCurrent(null); if (!termsKey) setSearchShown(null); }, [termsKey]);
   useLayoutEffect(() => { setSearchCurrent(null); setSearchShown(null); }, [route.project_id, route.session_id]);
+  // The filter strip's "Show them" (alpha.24) opens the way to hidden matches in memory, as the search does, but in a set of its own
+  // so neither clears the other. It ends with the session, any change of the filter (picked chips, owners, hide-later, archive), Clear
+  // and the strip closing (its "Hide them" goes with it).
+  const [filterShown, setFilterShown] = useState<SearchReveal | null>(null);
+  useLayoutEffect(() => { setFilterShown(null); }, [route.project_id, route.session_id, filterKey, filtersShown]);
+  // The hidden items the Graph draws, as it reports them (drawnHidden.ts): the strip's Graph note leaves them out.
+  const [graphHidden, setGraphHidden] = useState<ReadonlySet<string> | null>(null);
+  const reportGraphHidden = useCallback((ids: readonly string[] | null) => setGraphHidden(ids ? new Set(ids) : null), []);
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
   const [nextTarget, setNextTarget] = useState<{ readonly id: string; readonly step: number } | null>(null);
   const [nextRevealId, setNextRevealId] = useState<string | null>(null);
@@ -190,6 +201,15 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
+  /** The owner's last move here was a key, not the pointer: a selection it causes keeps the focus ring (R9). */
+  const keyboardIntent = useRef(false);
+  useEffect(() => {
+    // A press or click anywhere is the pointer's: Details' links and the Graph's nodes included. (A row's Enter is a key, no click.)
+    const pointer = () => { keyboardIntent.current = false; };
+    document.addEventListener('mousedown', pointer, true);
+    document.addEventListener('click', pointer, true);
+    return () => { document.removeEventListener('mousedown', pointer, true); document.removeEventListener('click', pointer, true); };
+  }, []);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -226,6 +246,20 @@ export function TreeView(props: TreeViewProps) {
   /** A row the app brought into view, held at `offset` below the reading edge while the scroller stays at `scrollTop` (or moves only by the hold's own correction). */
   const revealedAnchor = useRef<{ readonly key: string; readonly offset: number; readonly scrollTop: number } | null>(null);
   const focusRequested = useRef<string | null>(null);
+  /** Set by a hide's move (or its Undo's) for the commit that shows it: nothing in that commit scrolls or takes focus for it. */
+  const hideMove = useRef(false);
+  /**
+   * The hide commit's hold (S10): the nearest row above the hidden row, at its offset below the reading edge, so the rows above
+   * stay still and the hidden row's space closes from below. A null key keeps the scroll position (nothing above it). `window`:
+   * the offset is a window top instead (a hide that ends Focus, see `presentMove`).
+   */
+  const hideHold = useRef<{ readonly key: string | null; readonly offset: number; readonly window?: boolean } | null>(null);
+  /** The landing on its way (alpha.24 P3): the row ⌘[ / ⌘] or `n` is bringing into view over a few frames (see `land`). */
+  const landing = useRef<{ readonly key: string; readonly run: Landing } | null>(null);
+  /** Stops a landing where it is: it retains nothing (Q7). */
+  const stopLanding = () => { const current = landing.current; landing.current = null; current?.run.cancel(); };
+  /** The wheel events over the Map, so a swipe's own trailing momentum never stops the landing the swipe started. */
+  const wheels = useRef(new WheelStream()).current;
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
@@ -260,10 +294,10 @@ export function TreeView(props: TreeViewProps) {
   };
   // The last rows drawn: a rebuilt row that draws the same is that row again, so its memoised ItemRow does not redraw (F6c).
   const drawnRows = useRef<readonly Row[]>(NO_ROWS);
-  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
+  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, filterShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places, previous: drawnRows.current }) : null,
-  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
+  [session, view, filter, focusedId, ackHeld, query, searchShown, filterShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute, places]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
@@ -348,12 +382,15 @@ export function TreeView(props: TreeViewProps) {
     });
   }, [session?.id, selectedId, reveal, props.historyReveal]);
   /** Folding a row "Show them" opened folds it: it leaves the search's in-memory reveal too. */
-  const unshow = (kind: keyof SearchReveal, id: string) => setSearchShown(previous => previous?.[kind].includes(id)
-    ? { ...previous, [kind]: previous[kind].filter(value => value !== id) } : previous);
+  const unshow = (kind: keyof SearchReveal, id: string) => {
+    const without = (previous: SearchReveal | null) => previous?.[kind].includes(id)
+      ? { ...previous, [kind]: previous[kind].filter(value => value !== id) } : previous;
+    setSearchShown(without); setFilterShown(without);
+  };
   const toggleHiddenGroup = (key: string) => {
     setNextRevealId(null);
     onDismissReveal();
-    const open = expandedHiddenGroups.has(key) || !!searchShown?.groups.includes(key);
+    const open = expandedHiddenGroups.has(key) || !!searchShown?.groups.includes(key) || !!filterShown?.groups.includes(key);
     if (open) unshow('groups', key);
     setExpandedHiddenGroups(previous => {
       const next = new Set(previous);
@@ -363,19 +400,108 @@ export function TreeView(props: TreeViewProps) {
   };
   /** A hidden strip opens or closes every hidden run under its parent. */
   const toggleStrip = (row: StripRow) => toggleHiddenGroup(hiddenGroupKey(row.topicId, row.parent));
-  const hideItem = (row: ItemRowModel) => {
-    const current = navigation.getSnapshot();
-    if (!current.preferences || current.writing || current.pendingOperationId !== null) return;
-    onDismissReveal();
-    const element = elements.current.get(row.key);
-    const groupKey = hiddenGroupKey(row.item.topic_id, row.item.parent);
-    if (!row.hidden && !expandedHiddenGroups.has(groupKey) && element?.contains(document.activeElement)) hiddenFocus.current = groupKey;
-    void navigation.setHidden({ ...route, item_id: row.item.id }, !row.hidden, current.preferences.revision).then(saved => {
-      if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
-        text: 'The hidden items preference could not be saved. Try again.' }); }
-      else if (!row.hidden) props.onHid?.(row.item.id);
-    });
+  /** Hide or Unhide (`x`, the row's button): the App runs every hide path through one rule (alpha.24), asking this view (below). */
+  const hideItem = (row: ItemRowModel) => { onAct('hide', { ...route, item_id: row.item.id }); };
+  /**
+   * The Map's rows as it will show `after` (the saved view a hide or its Undo writes), with `selected` and `revealed` as given: the
+   * view on screen with `after`'s hidden items and Focus, or `after` itself for a session with no view yet.
+   */
+  const projectRows = (after: Immutable<SessionPreferences>, selected: string | null, revealed: string | null): readonly Row[] | null => {
+    if (!session) return null;
+    const next: Immutable<SessionPreferences> = { ...view ?? after, hidden_item_ids: after.hidden_item_ids ?? [], focused_item_id: after.focused_item_id };
+    const focus = after.focused_item_id ? session.items[after.focused_item_id] : undefined;
+    return treeModel({ session, view: next, filter: filterOf({ session, view: next, later, local: localChips.chips }),
+      focusRootId: focus && !focus.parent && !itemRemoved(session, focus.id) ? focus.id : null, ackHeld, search: query, searchShown, filterShown, later,
+      collapsedTopics: closedTopics, selectedId: selected, revealId: revealed, filterCollapsedItemIds: filterFolds.items,
+      filterCollapsedTopicIds: filterFolds.topics, attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [],
+      presence, health, summaries, now: minute, places }).rows;
   };
+  /** The Map as it will show once `itemId` is hidden (`after`: the saved view with the hide), and the item the rule selects in it. */
+  const chooseAfterHide = useLatest((itemId: string, after: Immutable<SessionPreferences>) => {
+    if (!session) return null;
+    const going = new Set(subtree(session, itemId).map(item => item.id));
+    const stays = (id: string | null | undefined) => id && !going.has(id) ? id : null;
+    const rows = projectRows(after, stays(selectedId), stays(revealId));
+    return rows && selectionAfterHide(session, itemId, shownItems(rows));
+  });
+  /** The nearest row above `itemId`'s, at its offset below the reading edge, while the row is on screen below the band. */
+  const holdAbove = (itemId: string): { readonly key: string | null; readonly offset: number } | null => {
+    const box = scroller.current, element = elements.current.get(itemId), rect = element?.getBoundingClientRect();
+    if (!box || !rect) return null;
+    const top = readingTop();
+    // A row above the window (a Details or Graph hide) or below it changes nothing on screen: the reading row holds, as before.
+    if (rect.bottom <= top + READING_EDGE_CLEARANCE || rect.top >= visibleBottom(box)) return null;
+    const list = latest.current.rows, at = list.findIndex(row => row.key === itemId);
+    for (let index = at - 1; index >= 0; index--) {
+      const row = list[index]!, above = row.kind === 'topic' ? undefined : elements.current.get(row.key);
+      if (above) return { key: row.key, offset: above.getBoundingClientRect().top - top };
+    }
+    return { key: null, offset: 0 };
+  };
+  /**
+   * Where an unhidden item comes back (`rows`: the Map once it shows again): the nearest row on screen above that place holds its
+   * offset below the reading edge, so the rows above stay and the rows below make room. A place above or below the window changes
+   * nothing on screen: the reading row holds, as before. With no row above it, the scroll position stays at the top.
+   */
+  const holdBack = (itemId: string, rows: readonly Row[]): { readonly key: string | null; readonly offset: number } | null => {
+    const box = scroller.current, at = rows.findIndex(row => row.key === itemId);
+    if (!box || at < 0) return null;
+    const top = readingTop();
+    for (let index = at - 1; index >= 0; index--) {
+      const row = rows[index]!, above = row.kind === 'topic' ? undefined : elements.current.get(row.key);
+      if (!above) continue;
+      const rect = above.getBoundingClientRect();
+      return rect.bottom <= top + READING_EDGE_CLEARANCE || rect.top >= visibleBottom(box) ? null : { key: row.key, offset: rect.top - top };
+    }
+    return box.scrollTop < 1 ? { key: null, offset: 0 } : null;
+  };
+  /** A hide's move (or its Undo's), in the update that publishes its write: the reveal is this view's own, so nothing scrolls. */
+  const presentMove = useLatest((move: HideMove) => {
+    // Any hide or Undo stops a landing first, with a selection change or without one: the Map stays where it is (Q8).
+    stopLanding();
+    const next = move.own?.kind === 'item' ? move.own.route.item_id : null;
+    const going = session ? subtree(session, move.itemId).map(item => item.id) : [move.itemId];
+    const topic = session?.items[move.itemId]?.topic_id;
+    if (move.kind === 'hide') {
+      // A hide that ends Focus draws the other roots and topics again: the row it selects takes the hidden row's window place
+      // (what comes back goes above it, off-screen), or with none selected the topic's band keeps its place.
+      const ending = !!focusedId && going.includes(focusedId), place = elements.current.get(move.itemId)?.getBoundingClientRect().top;
+      const band = topic ? elements.current.get(topic)?.getBoundingClientRect().top : undefined;
+      hideHold.current = !ending ? holdAbove(move.itemId)
+        : move.select && next && place !== undefined ? { key: next, offset: place, window: true }
+        : topic && band !== undefined ? { key: topic, offset: band, window: true } : null;
+    } else if (move.after) {
+      // An Undo that brings Focus back is the hide's way back: the item takes the window place of the row its hide selected, or with
+      // none selected the topic's band keeps its place. Any other unhide keeps the rows above where the item comes back still.
+      const restoring = !!move.after.focused_item_id && move.after.focused_item_id !== focusedId;
+      const place = restoring && selectedId ? elements.current.get(selectedId)?.getBoundingClientRect().top : undefined;
+      const band = restoring && topic ? elements.current.get(topic)?.getBoundingClientRect().top : undefined;
+      const rows = restoring ? null : projectRows(move.after, next ?? selectedId, revealId);
+      hideHold.current = rows ? holdBack(move.itemId, rows)
+        : place !== undefined ? { key: move.itemId, offset: place, window: true }
+        : topic && band !== undefined ? { key: topic, offset: band, window: true } : null;
+    }
+    // A reveal held for the owner ends: the commit holds its own row, and a later scroll must not put the old one back.
+    if (hideHold.current) revealedAnchor.current = null;
+    if (!move.select) return;
+    hideMove.current = true;
+    clickedReveal.current = move.own;
+    centered.current = true; settled.current = true; openingPlacement.current = null; setAnchor(null);
+    scrollRequested.current = null; focusRequested.current = null;
+    if (move.kind !== 'hide') return;
+    // Focus follows only from a row that goes (R8); the roving focus goes to the new row, or the topic's row when none is selected.
+    const hadFocus = going.some(id => !!elements.current.get(id)?.contains(document.activeElement));
+    const to = next ?? (topic && elements.current.has(topic) ? topic : null);
+    if (!to) return;
+    setFocusKey(to);
+    if (hadFocus) elements.current.get(to)?.focus({ preventScroll: true });
+  });
+  useEffect(() => {
+    if (graph) return undefined;
+    const answer = { route: { project_id: route.project_id, session_id: route.session_id }, choose: chooseAfterHide, present: presentMove };
+    hideViews.add(answer);
+    return () => { hideViews.delete(answer); };
+  }, [graph, route.project_id, route.session_id, chooseAfterHide, presentMove]);
 
   // ------------------------------------------------------------ writes
   /**
@@ -399,7 +525,7 @@ export function TreeView(props: TreeViewProps) {
     openingRequest.current = opening ? call : null;
     if (!opening) { centered.current = true; settled.current = true; openingPlacement.current = null; setAnchor(null); }
     scrollRequested.current = null;
-    setKbd(false);
+    if (!keyboardIntent.current) setKbd(false);
     setFocusKey(id);
     noticeStore.dismiss('tree-reveal-failed');
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -538,6 +664,7 @@ export function TreeView(props: TreeViewProps) {
     setNextRevealId(null);
     onDismissReveal();
     localChips.set([]);
+    setFilterShown(null);
     const filters = view?.filters;
     if (filters && (filters.statuses.length || filters.owners.length || filters.hide_later)) {
       void saveView(next => { next.filters.statuses = []; next.filters.owners = []; next.filters.hide_later = false; });
@@ -578,7 +705,7 @@ export function TreeView(props: TreeViewProps) {
     'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
     'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
     // The Details path's topic segment: the Tree scrolls back to its top (the owner asked; the Map never does it by itself).
-    'map.top': () => { if (graph || !scroller.current) return false; scroller.current.scrollTop = 0; return true; },
+    'map.top': () => { if (graph || !scroller.current) return false; stopLanding(); scroller.current.scrollTop = 0; return true; },
   });
 
   // ------------------------------------------------------------ keyboard
@@ -647,16 +774,11 @@ export function TreeView(props: TreeViewProps) {
   const remember = useRef((key: string, element: HTMLDivElement | null) => {
     if (element) elements.current.set(key, element); else elements.current.delete(key);
   }).current;
-  useEffect(() => { if (selectedId) { setKbd(false); setFocusKey(selectedId); } }, [selectedId]);
+  // A selection the keyboard made (`x`, `.`, Enter) keeps the focus ring; one the pointer made clears it (D6, R9).
+  useEffect(() => { if (selectedId) { if (!keyboardIntent.current) setKbd(false); setFocusKey(selectedId); } }, [selectedId]);
+  // Hover peek never shows on the selected row (D7): a card waiting for the row the selection lands on, or open on it, goes.
+  useEffect(() => { if (selectedId) peek?.dropHover({ ...route, item_id: selectedId }); }, [selectedId]);
   useLayoutEffect(() => {
-    // hiddenFocus holds a hidden group's key: the strip that now stands for the hidden item takes the focus.
-    const hiddenTarget = hiddenFocus.current, strip = hiddenTarget ? rows.find(row => row.kind === 'strip' && row.reason === 'hidden'
-      && hiddenGroupKey(row.topicId, row.parent) === hiddenTarget) : undefined;
-    if (strip) {
-      hiddenFocus.current = null;
-      setFocusKey(strip.key); elements.current.get(strip.key)?.focus({ preventScroll: true });
-      return;
-    }
     if (!rows.length || (focusKey && rows.some(row => row.key === focusKey))) return;
     let candidate: string | null = focusKey && session?.items[focusKey] ? session.items[focusKey]!.parent ?? session.items[focusKey]!.topic_id : null;
     while (candidate && !rows.some(row => row.key === candidate)) candidate = session?.items[candidate]?.parent ?? session?.items[candidate]?.topic_id ?? null;
@@ -698,18 +820,60 @@ export function TreeView(props: TreeViewProps) {
     if (target.offset === null) center(target.key);
     else box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - headerHeight(element) - target.offset;
   };
-  // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
-  // taller than the tree lines up its top instead of running past it.
-  const nearest = (key: string, margin = 0) => {
-    const box = scroller.current, element = elements.current.get(key);
-    if (!box || !element) return;
-    const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    // The Back-to pill floats over the edge it points at: a row the owner is taken to ends clear of it.
-    const back = margin > 0 ? box.parentElement?.querySelector<HTMLElement>('.tree-back') : null, rect = back?.getBoundingClientRect();
+  // The Back-to pill floats over the edge it points at: a row the owner is taken to ends clear of it.
+  const pillOver = (box: HTMLElement): BackPill | null => {
+    const back = box.parentElement?.querySelector<HTMLElement>('.tree-back'), rect = back?.getBoundingClientRect(), top = box.getBoundingClientRect().top;
     const side = back?.dataset.edge === 'above' ? 'above' : back?.dataset.edge === 'below' ? 'below' : null;
     // A pill with no height is not laid out (no layout engine): it covers nothing.
-    const pill: BackPill | null = rect && rect.height > 0 && side ? { edge: side, top: rect.top - a.top, bottom: rect.bottom - a.top } : null;
-    box.scrollTop += nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current, pill);
+    return rect && rect.height > 0 && side ? { edge: side, top: rect.top - top, bottom: rect.bottom - top } : null;
+  };
+  // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
+  // taller than the tree lines up its top instead of running past it. Null when the row is not drawn. `pill`: the Back-to pill to
+  // clear; by default the one on screen now (with a margin; none without).
+  const nearestBy = (key: string, margin = 0, pill?: BackPill | null): number | null => {
+    const box = scroller.current, element = elements.current.get(key);
+    if (!box || !element) return null;
+    const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
+    const clear = pill !== undefined ? pill : margin > 0 ? pillOver(box) : null;
+    return nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current, clear);
+  };
+  const nearest = (key: string, margin = 0) => {
+    const box = scroller.current, delta = nearestBy(key, margin);
+    if (!box || !delta) return;
+    // The app moving the Map for the owner at once is a new target: a landing on its way stops (Q1).
+    stopLanding();
+    box.scrollTop += delta;
+  };
+  /**
+   * Takes the owner to `key` (alpha.24 P3, Q1): the least scrolling that shows it, 8px clear of the band, the dock and the Back-to pill,
+   * then the row is retained as the reveal. `animate` (⌘[ / ⌘], `n`): over a few eased frames, unless motion is reduced; a landing
+   * already on its way to `key` goes on, and any other stops where it is first. Every frame marks its move as the hold's own and
+   * measures the way left again, so the reading-row hold refreshes on the way and its corrections are absorbed (Q2). The Back-to pill
+   * it clears is the one on screen when it starts, as for the jump: a pill that comes or goes on the way (the selected row going out of
+   * view, or arriving) moves the end no more than it moved the jump's. Only a landing that arrives retains its row (Q7).
+   */
+  const land = (key: string, animate: boolean) => {
+    if (animate && landing.current?.key === key && landing.current.run.running()) return;
+    stopLanding();
+    releaseReveal();
+    settled.current = true; setAnchor(null);
+    const box = scroller.current;
+    if (!animate || !box || !landingMoves()) { nearest(key, 8); retainReveal(key); return; }
+    const pill = pillOver(box);
+    let run: Landing | null = null;
+    run = startLanding({
+      remaining: () => {
+        const delta = scroller.current === box ? nearestBy(key, 8, pill) : null;
+        return delta === null ? null : reachable(box, { top: delta, left: 0 });
+      },
+      move: by => { box.scrollTop += by.top; ownScroll.current = box.scrollTop; },
+      screen: () => ({ top: box.clientHeight, left: 0 }),
+      landed: () => {
+        if (run && landing.current?.run === run) landing.current = null;
+        retainReveal(key);
+      },
+    });
+    if (run.running()) { landing.current = { key, run }; wheels.carry(); }
   };
   const centered = useRef(false), settled = useRef(false), openingReveal = useRef<string | null>(null);
   const openingPlacement = useRef<string | null>(null);
@@ -800,8 +964,12 @@ export function TreeView(props: TreeViewProps) {
       openingPlacement.current = null;
       scrollRequested.current = id;
     }
-    // Leaving Focus can mount the target on the next render. Keep the handoff until its row exists.
-    if (reveal?.kind === 'item' && reveal !== previous.reveal) { setKbd(false); focusRequested.current = id; }
+    // Leaving Focus can mount the target on the next render. Keep the handoff until its row exists. A hide's move takes focus
+    // only where focus was in what went (`presentMove`).
+    if (reveal?.kind === 'item' && reveal !== previous.reveal && !hideMove.current) {
+      if (!keyboardIntent.current) setKbd(false);
+      focusRequested.current = id;
+    }
   }, [reveal, selectedId, graph]);
   // Hold the saved reading position while fonts and initial rows settle. Selection or panel changes
   // end this restoration, as do the owner's scrolling, clicking or keyboard navigation.
@@ -816,9 +984,12 @@ export function TreeView(props: TreeViewProps) {
     return () => { observer.disconnect(); box.removeEventListener('wheel', settle); box.removeEventListener('pointerdown', settle); };
   }, [anchor]);
   useLayoutEffect(() => {
-    if (!focusKey || !kbd) return;
+    // A hide's move keeps the Map still even when the row it selects is off-screen (R3): the Back-to pill points at it.
+    if (!focusKey || !kbd || hideMove.current) return;
+    // A row ⌘[ / ⌘] or `n` is landing on comes into view by that landing (Q1).
+    if (landing.current?.key === focusKey) return;
     if (focusKey !== anchor?.key) settled.current = true;
-    // Keyboard moves scroll only when the new row is off-screen, and by the least amount.
+    // Keyboard moves scroll only when the new row is off-screen, and by the least amount, at once (held keys repeat).
     nearest(focusKey, 8);
   }, [focusKey]);
   // The Map never moves on its own (D24): what the owner is reading keeps its place in the window when rows above it grow,
@@ -910,8 +1081,17 @@ export function TreeView(props: TreeViewProps) {
   /**
    * The held row, or when it went (filtered out, hidden or removed), the nearest surviving row below it, else above it.
    * A row the owner folded away under its topic or a parent is the owner's own move: nothing is held, as before D24.
+   * A hide on screen holds the row above the hidden one instead (S10), whatever the reading row was: the rows above it stay,
+   * and the rows below close its space (the selected row among them, when it was below).
    */
-  const heldRow = (before: Held): { readonly element: HTMLElement; readonly offset: number; readonly windowPlace?: boolean } | null => {
+  const heldRow = (before: Held): { readonly element: HTMLElement; readonly offset: number; readonly windowPlace?: boolean; readonly y?: number } | null => {
+    const hide = hideHold.current;
+    hideHold.current = null;
+    if (hide) {
+      const above = hide.key ? elements.current.get(hide.key) : undefined;
+      if (!above) return null;
+      return hide.window ? { element: above, offset: 0, windowPlace: true, y: hide.offset } : { element: above, offset: hide.offset };
+    }
     const element = elements.current.get(before.key);
     if (element) return { element, offset: before.offset };
     const { rows: now, session: current } = latest.current, item = current?.items[before.key];
@@ -1057,11 +1237,19 @@ export function TreeView(props: TreeViewProps) {
     // A different scroll position means the view was moved on purpose (a scroll, a reveal, the keyboard), and the opening
     // placement holds its own row until the owner steers. A shrink at the bottom clamps the scroll position: that is no move.
     const clamped = !!box && clampedAtEnd(box, before);
-    const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
-    const restored = box && before && back ? restoreHeld(box, before, back.offset, back.element, back.windowPlace) : undefined;
+    // A hide's commit is this view's own change: the browser may have clamped the scroll position part-way through it (a row
+    // gone before its strip was laid out), so its hold applies whatever the position now.
+    const hiding = !!hideHold.current;
+    const back = box && before && (hiding || box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
+    const restored = box && before && back
+      ? restoreHeld(box, back.y === undefined ? before : { ...before, y: back.y }, back.offset, back.element, back.windowPlace) : undefined;
     // A clamp that left the held row in place needed no correction, yet the scroller moved: that move is the browser's, not
     // the owner's, so a pinned reveal must not end on it (`remembering` ends the pin on any move the hold did not make).
     if (box && clamped && back) ownScroll.current = box.scrollTop;
+    // A hide's hold is for its own commit only. The reading row held before it is not put back: the view the hide left is the
+    // one remembered now, so no later scroll or resize restores the old place (S10).
+    if (hiding && !hideHold.current) held.current = null;
+    hideHold.current = null; hideMove.current = false;
     inHolding.current = true;
     try { remembering(restored); } finally { inHolding.current = false; }
   };
@@ -1124,7 +1312,7 @@ export function TreeView(props: TreeViewProps) {
       if (select(selectedId, false) && returnFocus) focusRequested.current = selectedId;
       return;
     }
-    settled.current = true; setAnchor(null); nearest(selectedId, 8); retainReveal(selectedId);
+    land(selectedId, false);
     if (returnFocus) focusRow(selectedId);
     // Reveal selected also opens Details on the row (owner's pick, 2026-10-22). The reveal is built here from what is on screen:
     // no read, and `clickedReveal` marks it as this view's own so the selection effect does not scroll a second time.
@@ -1147,7 +1335,8 @@ export function TreeView(props: TreeViewProps) {
     if (selectedId !== target) { scrollRequested.current = null; return; }
     if (!elements.current.has(target)) return;
     scrollRequested.current = null;
-    settled.current = true; setAnchor(null); nearest(target, 8); retainReveal(target);
+    // ⌘[ / ⌘] (and the swipe), a link, the waiting panel: the Map lands on the item (P3).
+    land(target, true);
   }, [rows, selectedId, reveal, graph]);
   const nextCallbacks = useRef<() => void>(() => {});
   nextCallbacks.current = () => {
@@ -1175,7 +1364,7 @@ export function TreeView(props: TreeViewProps) {
     const id = nextScroll.current;
     if (!id || graph || !elements.current.has(id)) return;
     nextScroll.current = null;
-    focusRow(id); nearest(id, 8); retainReveal(id);
+    focusRow(id); land(id, true);
   }, [rows, nextTarget, graph]);
   // A search step brings its match into view by the least scrolling, and only a step does (typing never scrolls). The
   // Graph scrolls its own node on `stepped`. Nothing is selected, focused or marked seen.
@@ -1183,8 +1372,7 @@ export function TreeView(props: TreeViewProps) {
     const id = searchScroll.current;
     searchScroll.current = null;
     if (!id || graph || !elements.current.has(id)) return;
-    releaseReveal();
-    settled.current = true; setAnchor(null); nearest(id, 8); retainReveal(id);
+    land(id, false);
   }, [stepped, graph]);
   useEffect(() => {
     if (!nextTarget) return;
@@ -1194,8 +1382,11 @@ export function TreeView(props: TreeViewProps) {
   }, [nextTarget]);
   useEffect(() => {
     setNextTarget(null); setNextRevealId(null); setNextPulse(false); setNoUnseen(false); nextScroll.current = null;
+    stopLanding();
     return () => noticeStore.dismiss('tree-no-unseen');
   }, [route.project_id, route.session_id]);
+  // The Graph in the Map's place (its scroller goes) or the Map leaving: a landing stops (Q3).
+  useEffect(() => stopLanding, [graph, store]);
   const edgeCallbacks = useRef({ updateEdge, holding });
   edgeCallbacks.current = { updateEdge, holding };
   const topicKeys = JSON.stringify(sections.map(section => section.topic ? section.topic.key : section.place.key));
@@ -1236,9 +1427,11 @@ export function TreeView(props: TreeViewProps) {
   // The rows' other callbacks, stable for the same reason; each calls this render's code.
   const selectRow = useLatest(activate), toggleRow = useLatest(toggleItem), unfoldRow = useLatest(unfold);
   const undoAck = useLatest((id: string) => { hold.undo(id); });
+  // The selected row never hover-peeks (D7): asked when the pointer rests and again when the wait ends.
   const peekHover = useLatest((id: string, event: MouseEvent<HTMLDivElement>) => {
-    const handlers = peek?.chipProps({ ...route, item_id: id });
-    if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
+    if (!peek) return;
+    if (event.type !== 'mouseenter') event.stopPropagation();
+    peek.hoverStart({ ...route, item_id: id }, event.currentTarget, () => latest.current.selectedId === id);
   });
   const peekLeave = useLatest(() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.());
   const openReference = useLatest((id: string) => { select(id, false); });
@@ -1309,12 +1502,25 @@ export function TreeView(props: TreeViewProps) {
   const unreadable = !session && state.status === 'inaccessible';
   // Where the line above the Map is on screen it reports an unsure save, and its "Try again" is the one place to check again.
   const lineShown = useContext(ConnectionLineShown);
-  const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const graphShown = !!graph && !loading && !unreadable;
-  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
-    [scope, filtersShown]);
-  const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
-    disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips} />;
+  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), hidden: hiddenChipCounts(scope), matches: hiddenMatchIds(scope),
+    picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null, [scope, filtersShown]);
+  // The Graph draws no hidden node except on the route to the selected or revealed item (graph/model.ts): the strip's note counts the
+  // hidden matches the Graph reports it does not draw (G16, from its own model), and offers no reveal.
+  const filterHidden = model?.filterHidden;
+  const hiddenNote: HiddenNote | null = !chips?.active ? null : graphShown
+    ? { remaining: chips.matches.filter(id => !graphHidden?.has(id)).length, shown: 0, outside: 0 }
+    : filterHidden ? { remaining: filterHidden.remaining, shown: filterHidden.shown, outside: filterHidden.outside } : null;
+  /** "Show them": opens, in memory only, what the hidden matches inside the Focus need. Neither the saved view nor the Focus changes. */
+  const showHidden = () => {
+    const reveal = model?.filterHidden.reveal;
+    if (!reveal || !model?.filterHidden.remaining) return;
+    const join = (a: readonly string[] = [], b: readonly string[]) => [...new Set([...a, ...b])];
+    setFilterShown(previous => ({ items: join(previous?.items, reveal.items), topics: join(previous?.topics, reveal.topics), groups: join(previous?.groups, reveal.groups) }));
+  };
+  const filterRow = chips && <FilterRow counts={chips.counts} hidden={chips.hidden} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
+    empty={chips.hiddenTotal === 0} note={hiddenNote} disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips}
+    onShowHidden={graphShown ? undefined : showHidden} onHideShown={graphShown ? undefined : () => setFilterShown(null)} />;
   let body: ReactNode;
   if (loading) {
     body = <div className="tree-loading" aria-busy="true">
@@ -1375,12 +1581,16 @@ export function TreeView(props: TreeViewProps) {
 
   // data-session-busy: "true" while the session is loading or a lifecycle change (close, reopen, rename, archive) saves.
   return <MapSearchContext.Provider value={mapSearch}><section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-session-busy={String(lifecycle.busy || !session)} data-kbd={kbd || undefined}
-    onKeyDownCapture={() => {
+    onKeyDownCapture={event => {
       releaseReveal();
+      // The owner's key stops a landing (Q3); a held key's repeats and a bare modifier (the ⌘ of the next ⌘[) do not.
+      if (keyStopsLanding(event)) stopLanding();
+      keyboardIntent.current = true;
       if (!kbd) setKbd(true);
     }}
-    onPointerDownCapture={releaseReveal} onWheelCapture={releaseReveal}
-    onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
+    onPointerDownCapture={() => { releaseReveal(); stopLanding(); }}
+    onWheelCapture={event => { releaseReveal(); if (scroller.current && wheels.stops(event, scroller.current)) stopLanding(); }}
+    onMouseDownCapture={() => { keyboardIntent.current = false; if (kbd) setKbd(false); }}>
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
     {filterRow}
@@ -1388,7 +1598,7 @@ export function TreeView(props: TreeViewProps) {
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     {notices}
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
-    {graphShown ? graph : <div className="tree-scroll-shell">
+    {graphShown ? <DrawnHiddenContext.Provider value={reportGraphHidden}>{graph}</DrawnHiddenContext.Provider> : <div className="tree-scroll-shell">
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event; remembering restores any intervening reflow
         // before capturing again, and ends a reveal the owner scrolled away from.

@@ -18,7 +18,7 @@ const filterRow = () => {
   if (!screen.queryByRole('group', { name: 'Filter items' })) fireEvent.click(screen.getByRole('button', { name: /^Filter by status/ }));
   return screen.getByRole('group', { name: 'Filter items' });
 };
-const chip = (name: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${name} \\d+$`) });
+const chip = (name: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${name} \\d+(, \\d+ more hidden)?$`) });
 async function ready() {
   await waitFor(() => expect(screen.getByRole('button', { name: /^Switch session or project/ })).toBeTruthy());
   await waitFor(() => expect(screen.getByRole('button', { name: /^Filter by status/ }).hasAttribute('disabled')).toBe(false));
@@ -35,7 +35,7 @@ async function mount(transport = new AppTransport()) {
   return { transport, ...app };
 }
 async function hide(id: string) {
-  fireEvent.click(within(row(id)!).getByRole('button', { name: 'Hide (h)' }));
+  fireEvent.click(within(row(id)!).getByRole('button', { name: 'Hide (x)' }));
   await waitFor(() => expect(row(id)).toBeNull()); await ready();
 }
 
@@ -81,7 +81,7 @@ describe('owner hide and unhide actions', () => {
     await hide('4');
     const second = toasts.current()!;
     fireEvent.click(screen.getByRole('treeitem', { name: /^1 hidden/ }));
-    fireEvent.click(within(row('4')!).getByRole('button', { name: 'Unhide (h)' }));
+    fireEvent.click(within(row('4')!).getByRole('button', { name: 'Unhide (x)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
     act(() => toasts.runUndo(second.id));
     await ready();
@@ -123,7 +123,7 @@ describe('owner hide and unhide actions', () => {
     for (const previous of order.slice(0, -1).reverse()) { fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' }); expect(document.activeElement).toBe(previous); }
   });
 
-  it('hides with h during a session refresh, saving once after the fresh read returns', async () => {
+  it('hides with x during a session refresh, saving once after the fresh read returns', async () => {
     class RefreshTransport extends AppTransport {
       holdSession: Promise<void> | null = null;
       override async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
@@ -139,7 +139,7 @@ describe('owner hide and unhide actions', () => {
     ++session.revision;
     act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     expect(row('4')!.getAttribute('aria-disabled')).toBeNull();
-    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
     expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
     await act(async () => { transport.holdSession = null; release(); });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4']));
@@ -150,38 +150,51 @@ describe('owner hide and unhide actions', () => {
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.hidden_item_ids?.includes('4')))).toHaveLength(1);
   });
 
-  it('keeps keyboard focus on the hidden group after h and enters its dimmed rows with Right', async () => {
+  // alpha.24 "Hide moves on" replaces "focus goes to the hidden group": x selects the next row and focus goes with it.
+  it('moves the selection and keyboard focus to the next row after x; the hidden group still opens into its dimmed rows', async () => {
     const { transport } = await mount(); fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
-    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
-    await waitFor(() => expect(document.activeElement).toBe(group()));
-    fireEvent.keyDown(group(), { key: 'ArrowRight' });
+    expect(saved(transport).selected_item_id).toBe('5');
+    expect(row('5')!.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(row('5'));
+    group().focus(); fireEvent.keyDown(group(), { key: 'ArrowRight' });
     expect(group().getAttribute('aria-expanded')).toBe('true'); expect(document.activeElement).toBe(group());
     fireEvent.keyDown(group(), { key: 'ArrowRight' }); expect(document.activeElement).toBe(row('4'));
-    fireEvent.keyDown(row('4')!, { key: 'h' });
-    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
+    // Unhide never moves the selection (row 14). All by keyboard: Enter selects the dimmed row, x unhides it, and it keeps the
+    // selection and the focus.
+    fireEvent.keyDown(row('4')!, { key: 'Enter' }); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4')); await ready();
+    expect(document.activeElement).toBe(row('4'));
+    fireEvent.keyDown(row('4')!, { key: 'x' });
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
+    expect(saved(transport).selected_item_id).toBe('4');
+    expect(document.activeElement).toBe(row('4'));
   });
 
-  it('keeps focus on a newly hidden row in an expanded group and unhides it with h', async () => {
+  // alpha.24 replaces "a newly hidden row keeps focus": in an open hidden group the row dims at the group's end, and the
+  // selection and focus move to the next row on its level (Path B).
+  it('moves on from a row newly hidden into an expanded group, and unhides it with x', async () => {
     const { transport } = await mount(); await hide('2'); fireEvent.click(group());
     fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
-    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2', '4'])); await ready();
     expect(group(2).getAttribute('aria-expanded')).toBe('true');
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(true);
-    expect(document.activeElement).toBe(row('4'));
-    fireEvent.keyDown(document.activeElement!, { key: 'h' });
+    expect(saved(transport).selected_item_id).toBe('5');
+    expect(document.activeElement).toBe(row('5'));
+    fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
+    fireEvent.keyDown(row('4')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2'])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
-    expect(document.activeElement).toBe(row('4'));
+    expect(saved(transport).selected_item_id).toBe('4');
     expect(group().getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('hides a parent from the hover actions, expands and collapses its group, and unhides with h', async () => {
+  it('hides a parent from the hover actions, expands and collapses its group, and unhides with x', async () => {
     const { transport } = await mount(), sessionBefore = JSON.stringify(transport.sessions.get(route.session_id));
     const actions = row('1')!.querySelector('.tree-actions')!;
-    expect(within(actions as HTMLElement).getByRole('button', { name: 'Hide (h)' }).querySelector('svg')).not.toBeNull();
+    expect(within(actions as HTMLElement).getByRole('button', { name: 'Hide (x)' }).querySelector('svg')).not.toBeNull();
     await hide('1'); expect(row('1.1')).toBeNull();
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1']));
     expect(group().getAttribute('aria-expanded')).toBe('false');
@@ -189,10 +202,10 @@ describe('owner hide and unhide actions', () => {
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(true);
-    expect(within(row('1')!).getByRole('button', { name: 'Unhide (h)' }).getAttribute('title')).toBe('Unhide (h)');
+    expect(within(row('1')!).getByRole('button', { name: 'Unhide (x)' }).getAttribute('title')).toBe('Unhide (x)');
     group().focus(); fireEvent.keyDown(group(), { key: 'Enter' }); expect(row('1')).toBeNull();
     fireEvent.keyDown(group(), { key: 'Enter' }); fireEvent.click(row('1')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('1'));
-    row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'h' });
+    row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).not.toBeNull();
     expect(screen.queryByRole('treeitem', { name: /^1 hidden/ })).toBeNull();
@@ -205,23 +218,28 @@ describe('owner hide and unhide actions', () => {
     expect(row('1')).not.toBeNull(); expect(group().getAttribute('aria-level')).toBe('3');
     await hide('1'); await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1', '1']));
     expect(screen.getAllByRole('treeitem', { name: /^1 hidden/ })).toHaveLength(1);
-    fireEvent.click(group()); fireEvent.click(within(row('1')!).getByRole('button', { name: 'Unhide (h)' }));
+    fireEvent.click(group()); fireEvent.click(within(row('1')!).getByRole('button', { name: 'Unhide (x)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1'])); await ready();
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).toBeNull();
     expect(group().getAttribute('aria-level')).toBe('3');
-    fireEvent.click(group()); fireEvent.click(within(row('1.1')!).getByRole('button', { name: 'Unhide (h)' }));
+    fireEvent.click(group()); fireEvent.click(within(row('1.1')!).getByRole('button', { name: 'Unhide (x)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
-  it('persists hidden preferences through an app restart and offers Unhide in the detail head menu', async () => {
+  // alpha.24 replaces "Details keeps the hidden item": Details Hide moves the selection on, and Details follows it, through a restart.
+  it('persists hidden preferences and the selection Hide moved to through an app restart, and offers Unhide in the detail head menu', async () => {
     const { transport, unmount } = await mount();
     fireEvent.click(row('4')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); await ready();
     pressRow('Hide');
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
-    expect(hasRow('Unhide')).toBe(true);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="5"]' });
+    expect(saved(transport).selected_item_id).toBe('5'); expect(hasRow('Hide')).toBe(true);
     unmount(); await mount(transport);
     expect(saved(transport).hidden_item_ids).toEqual(['4']); expect(group()).toBeTruthy();
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="5"]' });
+    fireEvent.click(group()); fireEvent.click(row('4')!);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); await ready();
     expect(hasRow('Unhide')).toBe(true);
     pressRow('Unhide');
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
@@ -262,7 +280,8 @@ describe('owner hide and unhide actions', () => {
 
   it('names hidden search matches in the top bar and leaves the ordinary status chip counts alone', async () => {
     await mount(); await hide('1.1');
-    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    // alpha.24 (G3): the visible count is unchanged; the chip now also says what hides behind it.
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');
     // The top bar's search box opens from its "Search the Map" button.
     fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
@@ -270,7 +289,7 @@ describe('owner hide and unhide actions', () => {
     await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
     expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
     expect(row('1.1')).toBeNull();
-    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');
     fireEvent.click(chip('Open'));
     expect(await screen.findByText('Showing 2 of 8 items')).toBeTruthy();
     await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches'));
@@ -281,7 +300,8 @@ describe('owner hide and unhide actions', () => {
   it('explains hidden matches for a status chip without search and clears that filter', async () => {
     const { transport } = await mount(); await hide('1.1'); fireEvent.click(chip('Open'));
     expect(await screen.findByText('Showing 2 of 8 items')).toBeTruthy();
-    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2');
+    expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');
+    expect(within(filterRow()).getByText('+1 hidden match')).toBeTruthy();
     expect(group()).toBeTruthy();
     fireEvent.click(within(filterRow()).getByRole('button', { name: 'Clear' }));
     // Clear empties the saved chips and closes the row.

@@ -42,16 +42,13 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     });
     expect(attention.contrast, 'small New text remains readable, including while the row pulses').toBeGreaterThanOrEqual(4.5);
     for (const status of attention.statuses) expect(attention.text).not.toEqual(status);
-    await expect(child).toHaveCSS('outline-color', markerColour);
-    // D21: a dashed 1.5px outline, which the browser computes as 1px.
-    await expect(child).toHaveCSS('outline-style', 'dashed');
-    await expect(child).toHaveCSS('outline-width', '1px');
+    // D21 (alpha.24 P5: on the item, not across the Map): a dashed 1.5px box, which the browser computes as 1px.
+    await expectDashedBox(child, markerColour);
     await expect(child).toHaveAttribute('aria-selected', 'false');
     await expect(child).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
     await expect(child.getByTestId('change-marker')).toBeVisible();
-    await expect(child).toHaveCSS('outline-width', '1px');
-    await expect(child).toHaveCSS('outline-color', markerColour);
+    await expectDashedBox(child, markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     const changed = page.locator('.tree-item[data-item-id="2"]');
     await page.keyboard.press('n');
@@ -67,8 +64,7 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(last).toHaveAttribute('data-next-unseen', 'true');
     await expectRevealedRow(last);
     await expect(last).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
-    await expect(last).toHaveCSS('outline-width', '1px');
-    await expect(last).toHaveCSS('outline-color', markerColour);
+    await expectDashedBox(last, markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     await page.keyboard.press('n');
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
@@ -104,6 +100,15 @@ async function openTree(page: Page, origin: string, query = '') {
   await expect(page.locator('[data-popover-trigger="connection"]')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
+}
+
+/** The `n` target's box: a dashed line in `colour` on the item (its ::after), and no outline across the Map's width. */
+async function expectDashedBox(row: Locator, colour: string) {
+  await expect(row).toHaveCSS('outline-style', 'none');
+  expect(await row.evaluate(element => {
+    const style = getComputedStyle(element, '::after');
+    return { style: style.borderTopStyle, width: style.borderTopWidth, colour: style.borderTopColor };
+  })).toEqual({ style: 'dashed', width: '1px', colour });
 }
 
 async function expectRevealedRow(row: Locator) {
@@ -208,11 +213,25 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps peeks clear of
     // The click left keyboard focus on the row's own button; the peek below restores focus to the row.
     await root.focus();
 
-    // A press on the row's button opened no card. Off the row and back, a resting pointer previews it; the Map does not move.
+    // A press on the row's button opened no card. The selected row never hover-peeks (alpha.24 D7); another row's resting pointer
+    // previews it, and the Map does not move.
     const scrollBeforeHover = await scroller.evaluate(element => element.scrollTop);
     await expect(page.getByRole('dialog', { name: /^Peek:/ })).toHaveCount(0);
     await page.mouse.move(0, 0); await root.hover();
     const peek = page.getByRole('dialog', { name: /^Peek:/ });
+    await page.waitForTimeout(1300);
+    await expect(peek).toHaveCount(0);
+    // A row already on screen, under the pointer as it is: Playwright's hover() would scroll a row into view first.
+    const other = await scroller.evaluate(box => {
+      const edge = box.getBoundingClientRect();
+      const element = [...box.querySelectorAll<HTMLElement>('.tree-item')].find(item => {
+        const rect = item.getBoundingClientRect();
+        return item.getAttribute('aria-selected') !== 'true' && rect.top > edge.top + 60 && rect.bottom < edge.bottom;
+      })!;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left + rect.width * 0.4, y: rect.top + Math.min(12, rect.height / 2) };
+    });
+    await page.mouse.move(0, 0); await page.mouse.move(other.x, other.y);
     await expect(peek).toBeVisible();
     expect(await scroller.evaluate(element => element.scrollTop)).toBe(scrollBeforeHover);
     const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-top').boundingBox())!;

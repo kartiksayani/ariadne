@@ -417,8 +417,12 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '13.2': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 218], [31, 39, 398, 218], [0.003, 0.003])],
   // The R4 board's dock path runs to the question itself ("note on workspace keys"), the first file's and the app's to its parent ("which cache keys"): about 0.25% of the dock.
   '14.5': [...topBar(BAR), ...dockOpen(440, 357, [0.004, 0.006])],
-  // The key lists' rows sit a pixel off at some fractional line heights: a few hundred pixels of key caps and legends.
-  '16.1': [...topBar(BAR), ...dockLineEnds(), ...box('help panel', [614, 46, 644, 588], [10, 46, 880, 564], [0.003, 0.003])],
+  // 16.1 holds the panel's head (title, tabs, close) and the first row of key groups, down to the old sixth row ("n" on the left, esc on the
+  // right). The list has two rows more than the board (alpha.24, asked by the owner): "⌥↑ ↓ Scroll Details" is the last row of "Move around
+  // the Map" and "⌥1–9 Choose and send" the last of "Answer and reply", so both sit under everything the board draws and leave row 1 as it was.
+  // The second group row (On the selected item, Find and switch) is left out: it shifts down by the added line, so it no longer lines up with
+  // the board (and it holds Hide, which is x where the board says h, so no keycap needs masking in the rows kept). At 900 x 650 the taller panel reaches over the dock line, so the narrow frame leaves the dock line out too.
+  '16.1': [...topBar(BAR), ...dockLineEnds().filter(region => region.variants === WIDE), ...box('help panel head and first key row', [614, 46, 644, 260], [10, 46, 880, 246], [0.003, 0.003])],
   '16.2': [...topBar(BAR), ...dockLineEnds(), ...box('help panel', [614, 46, 644, 470], [10, 46, 880, 430], [0.001, 0.001])],
   // R4's empty-Map line (clear0) keeps "New questions open here." at 900 wide; its "Nothing waiting" line (15.4) drops it. The app trims both, so 15.3 narrow holds the icon only.
   '15.3': [...topBarUnnamed(BAR), { name: 'dock line text', rect: [0, 760, 700, 40], variants: WIDE }, { name: 'dock line icon (narrow)', rect: [0, 610, 36, 40], variants: NARROW },
@@ -437,7 +441,14 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '14.2': [...band('sessions page above the rows', [0, 123], [0, 123], [0.0002, 0.0001]),
     ...box('sessions page, group headings and names', [0, 123, 500, 677], [0, 123, 340, 527], [0.0001, 0.0001]),
     ...box('sessions page, right of the boxes', [1144, 123, 136, 677], [870, 123, 30, 527], [0.0001, 0.0001]),
-    ...band('sessions page below the last box', [458, 342], [458, 192], [0.0001, 0.0001])]
+    ...band('sessions page below the last box', [458, 342], [458, 192], [0.0001, 0.0001])],
+  // The owner asked (2026-10-23, alpha.24) for project cards of one size: every card is as tall as a card with five session rows, so a card
+  // with fewer rows keeps blank space above its footer, the footers sit lower than the board's, the second row of cards moves down, and the
+  // list's rows (a fixed height each) sit a fraction of a pixel off the board's. The board draws each card as tall as its own rows. What is
+  // held to the board: the top bar, the page head and the first row of cards down to their headers (folder, name, path, tag, pill, "…").
+  // The rows, the footers, the second row of cards and the note under the cards are held by tests/e2e/tree-layout/projects-cards.spec.mts.
+  '14.1': [...topBar(BAR), ...band('projects page head and card headers', [40, 110], [40, 110])],
+  '14.4': [...topBar(BAR), ...band('projects page head and card headers', [40, 110], [40, 110])]
 };
 
 /**

@@ -9,7 +9,7 @@ afterEach(cleanup);
 // to the unoccluded Map; typing and overlays must never mutate its selection.
 const bindings: readonly (readonly [KeyLike, WorkspaceIntent | null])[] = [
   ...Object.entries({ ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
-    ArrowRight: 'unfold', ArrowLeft: 'fold', Enter: 'enter', a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', h: 'hide', o: 'reopen',
+    ArrowRight: 'unfold', ArrowLeft: 'fold', Enter: 'enter', a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', x: 'hide', o: 'reopen',
     '/': 'search', g: 'graph', f: 'filter', c: 'continue', n: 'next-unseen', '?': 'help', Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
     '.': 'back-to-selected', '[': 'dock-prev', ']': 'dock-next',
   }).map(([key, kind]) => [{ key }, { kind } as WorkspaceIntent] as const),
@@ -18,9 +18,19 @@ const bindings: readonly (readonly [KeyLike, WorkspaceIntent | null])[] = [
   ...Object.entries({ o: 'switcher', e: 'recent', f: 'search', Enter: 'send', '[': 'history-back', ']': 'history-forward', '-': 'text-smaller', '+': 'text-larger', '0': 'text-default' })
     .map(([key, kind]) => [{ key, metaKey: true }, { kind } as WorkspaceIntent] as const),
   ...Array.from({ length: 9 }, (_, index) => [{ key: String(index + 1) }, { kind: 'choose', index }] as const),
-  ...['e', 'x', 'w', 'l', '0', 'A', 'H'].map(key => [{ key }, null] as const),
+  ...['e', 'h', 'w', 'l', '0', 'A', 'H'].map(key => [{ key }, null] as const),
   [{ key: 'j', metaKey: true }, null],
-  ...Array.from({ length: 10 }, (_, index) => [{ key: String(index), code: `Digit${index}`, altKey: true }, null] as const),
+  // ⌥1–9 choose and send by the physical key (macOS types ¡™£ for them); ⌥0 stays unbound; a held ⌥digit resolves to nothing.
+  ...Array.from({ length: 9 }, (_, index) => [{ key: '¡™£'[index % 3], code: `Digit${index + 1}`, altKey: true }, { kind: 'choose-send', index }] as const),
+  [{ key: 'º', code: 'Digit0', altKey: true }, null],
+  [{ key: '¡', code: 'Digit1', altKey: true, repeat: true }, null],
+  // ⌥↑ / ⌥↓ scroll Details and repeat while held; with ⇧, ⌘ or ⌃ they are not ours.
+  [{ key: 'ArrowUp', altKey: true }, { kind: 'details-up' }],
+  [{ key: 'ArrowDown', altKey: true }, { kind: 'details-down' }],
+  [{ key: 'ArrowDown', altKey: true, repeat: true }, { kind: 'details-down' }],
+  [{ key: 'ArrowDown', altKey: true, shiftKey: true }, null],
+  [{ key: 'ArrowDown', altKey: true, ctrlKey: true }, null],
+  [{ key: 'ArrowDown', altKey: true, metaKey: true }, null],
 ];
 
 type Overlay = 'dialog' | 'switcher' | 'help' | 'peek';
@@ -67,7 +77,7 @@ describe('key routing invariant: key × focus owner', () => {
 
 // C5: a key either asks for an intent (answered by whichever view registered it) or belongs to where focus is.
 describe('intent keys × focus owner', () => {
-  const scoped = new Set(['move-down', 'move-up', 'first', 'last', 'unfold', 'fold', 'enter', 'send', 'choose', 'escape', 'peek',
+  const scoped = new Set(['move-down', 'move-up', 'first', 'last', 'unfold', 'fold', 'enter', 'send', 'choose', 'choose-send', 'details-up', 'details-down', 'escape', 'peek',
     'history-back', 'history-forward', 'text-smaller', 'text-larger', 'text-default']);
   function IntentProbe({ overlay }: { readonly overlay?: Overlay }) {
     return <Probe handlers={intentKeyHandlers<HTMLDivElement>()} overlay={overlay} />;
@@ -104,7 +114,7 @@ describe('intent keys × focus owner', () => {
   it('passes a held key on as a repeat', () => {
     const handler = vi.fn(() => true), off = registerIntent('item.hide', handler);
     render(<IntentProbe />);
-    fireEvent.keyDown(node('button'), { key: 'h', repeat: true });
+    fireEvent.keyDown(node('button'), { key: 'x', repeat: true });
     expect(handler).toHaveBeenCalledWith({ repeat: true });
     off();
   });
@@ -114,7 +124,7 @@ describe('useWorkspaceKeys scopes', () => {
   it('leaves composing keys with the input method', () => {
     const action = vi.fn(() => true);
     render(<Probe handlers={{ answer: action, drop: action, hide: action, remove: action }} />);
-    for (const key of ['a', 'd', 'h', 'Backspace']) fireEvent.keyDown(node('button'), { key, isComposing: true });
+    for (const key of ['a', 'd', 'x', 'Backspace']) fireEvent.keyDown(node('button'), { key, isComposing: true });
     expect(action).not.toHaveBeenCalled();
   });
   it.each(['dialog', 'switcher', 'help'] as const)('keeps a covered editor from sending behind %s', overlay => {
@@ -128,7 +138,7 @@ describe('useWorkspaceKeys scopes', () => {
   it.each(['input', 'area', 'select', 'editable', 'textbox'])('keeps destructive keys in %s', field => {
     const action = vi.fn(() => true);
     render(<Probe handlers={{ answer: action, drop: action, hide: action, remove: action, later: action, reopen: action }} />);
-    for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'z', 'o']) fireEvent.keyDown(node(field), { key });
+    for (const key of ['a', 'd', 'x', 'Backspace', 'Delete', 'z', 'o']) fireEvent.keyDown(node(field), { key });
     expect(action).not.toHaveBeenCalled();
   });
   it('ignores keys already handled below and unhandled keys keep their default', () => {

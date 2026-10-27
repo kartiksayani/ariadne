@@ -34,6 +34,19 @@ describe('project cards and archive rows', () => {
     expect(empty.footer).toBe('Last activity 12 Sep');
     expect(empty.emptyText).toBe('No sessions. Its last one, “landing copy”, is in Archive.');
   });
+  it('a card lists its sessions by latest activity, newest first, closed ones in the same order and archived ones not at all (alpha.24 P1)', () => {
+    const stamp = (month: number, day: number, hours: number) => new Date(at(month, day, hours)).toISOString();
+    const own = [
+      summary({ session_id: 'oldest', title: 'oldest', name: null, state: 'active', updated_at: stamp(9, 1, 9), archived_at: null }),
+      summary({ session_id: 'newest-closed', title: 'newest closed', name: null, state: 'closed', updated_at: stamp(9, 7, 20), archived_at: null }),
+      summary({ session_id: 'middle', title: 'middle', name: null, state: 'active', updated_at: stamp(9, 5, 8), archived_at: null }),
+      summary({ session_id: 'gone', title: 'gone', name: null, state: 'closed', updated_at: stamp(9, 7, 21), archived_at: stamp(9, 7, 21) }),
+      summary({ session_id: 'second-closed', title: 'second closed', name: null, state: 'closed', updated_at: stamp(9, 6, 12), archived_at: null }),
+    ];
+    const card = projectCardData(project, own, now, null);
+    expect(card.sessions.map(row => row.name)).toEqual(['newest closed', 'second closed', 'middle', 'oldest']);
+    expect(card.sessions.map(row => row.run)).toEqual(['closed', 'closed', expect.any(String), expect.any(String)]);
+  });
   it('an archived session row counts its topics and items and dates its archiving', () => {
     const counts = (sessions.items[0] as SessionSummary).counts;
     const archived = summary({ title: 'March incident notes', name: null, state: 'closed', topic_count: 4, archived_at: new Date(at(9, 3)).toISOString(),

@@ -8,7 +8,8 @@ import { hasStatusFilter } from './selectors/tree/folds';
 import { filterCount, type LocalChip } from './selectors/tree/filter';
 import { useLocalChips } from './ui/tree/useLocalChips';
 import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type Immutable, type SessionStore } from './data/session-store';
@@ -20,6 +21,7 @@ import { viewOf } from './state/navigation/view';
 import { OwnerDraftStore, useOwnerDrafts } from './state/drafts/store';
 import { readFolded } from './state/details/column';
 import { WaitingStore } from './selectors/waiting/store';
+import { displayStatus } from './selectors/waiting/replied';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
@@ -49,6 +51,7 @@ import { SessionNotice } from './components/edge-states/EdgeState';
 import { DraftConflictNotices } from './components/edge-states/DraftConflictNotices';
 import { hiddenItems, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
+import { hideViewFor } from './ui/tree/hideMove';
 import { useLatest } from './ui/shared/latest';
 import type { MapSearchStatus } from './ui/tree/mapSearch';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
@@ -67,6 +70,7 @@ import { nextSelection, subtree, targetSession } from './ui/remove/model';
 import { themeToggle } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
+import { SwipeNavigation } from './ui/shell/SwipeNavigation';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { ackHoldFor, ackTarget, attachAckHolds, flushAckHold, stopAckHolds } from './ui/shared/ack';
@@ -100,6 +104,11 @@ const clearedFilters = (filters: { readonly archived: boolean }): SessionPrefere
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
 const filtering = (filters: Immutable<SessionPreferences['filters']>, local: readonly LocalChip[]) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
   || filters.owners.length > 0 || filters.hide_later || local.length > 0;
+/**
+ * What a hide moved, for its Undo (R7): the selection before it, whether Details was open, the selection count after the move, and
+ * the focused root when the hide ended Focus.
+ */
+interface HidMove { readonly prior: string; readonly detailOpen: boolean; readonly generation: number; readonly focused?: string }
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
@@ -113,8 +122,6 @@ interface CenterProps {
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onOpenItem: (itemId: string) => void;
   readonly onOpenTopic: OpenTopicInDetails;
-  /** The owner hid this item from the Map: say so, with an Undo. */
-  readonly onHid: (itemId: string) => void;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void;
   readonly filterOpen?: boolean;
@@ -196,10 +203,17 @@ function Workspace({ application }: { application: Application }) {
     }
   }, [navigation, ownerReady, sessionState?.snapshot]);
   const graph = graphModes[key] ?? false;
-  const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
+  // A hide that left nothing selected (R4) drops the navigation's reveal too, so it selects the hidden item no more.
+  const [droppedReveal, setDroppedReveal] = useState<RevealedItem | null>(null);
+  const currentReveal = localReveal?.store === store ? localReveal
+    : state.reveal?.store === store && state.reveal !== droppedReveal ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
   const candidateId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
+  // Counts every selection change (and session switch) on screen: a hide's move, and its Undo, apply only while it has not
+  // moved since they were asked for, so the owner's newer choice always wins (S3, S9). Counted in the commit that shows it.
+  const selectionGeneration = useRef(0);
+  useLayoutEffect(() => { ++selectionGeneration.current; }, [key, selectedId]);
   // Details shows the selected item, or (E5) a topic's own conversation: then the dock keeps its question and no dwell runs.
   const detailTarget = useDetailTarget(key, selectedId);
   const topicMode = detailTarget.target?.kind === 'topic' && !conversation;
@@ -353,8 +367,10 @@ function Workspace({ application }: { application: Application }) {
   const revealItem = (target: ItemRoute, openDetail = true) => {
     void revealLinkedItem(target, openDetail).catch((error: unknown) => reportRouteError(navigationFailure(error)));
   };
+  // One guard for the action and for what advertises it (the Back/Forward buttons, the swipe's arrow): where it refuses, nothing offers it.
+  const historyOpen = !conversation && !!route && !state.writing && state.pendingOperationId === null;
   const navigateHistory = (direction: HistoryDirection) => {
-    if (conversation || !route || state.writing || state.pendingOperationId !== null) return false;
+    if (!historyOpen || !route) return false;
     return itemHistory.navigate(direction, async id => {
       const token = ++shortcutSequence.current;
       setOwnerFocus(null); setRouteError(null);
@@ -366,8 +382,7 @@ function Workspace({ application }: { application: Application }) {
       }
     });
   };
-  const historyControls = { canBack: itemHistory.canBack && !state.writing && state.pendingOperationId === null,
-    canForward: itemHistory.canForward && !state.writing && state.pendingOperationId === null,
+  const historyControls = { canBack: itemHistory.canBack && historyOpen, canForward: itemHistory.canForward && historyOpen,
     back: () => navigateHistory('back'), forward: () => navigateHistory('forward') };
   // Send while the session's agent isn't running asks first (1ad); see ui/answer/notRunning.
   const onAgentNotRunning = (submission: PendingSubmission) => {
@@ -391,6 +406,33 @@ function Workspace({ application }: { application: Application }) {
     }).catch((error: unknown) => reportRouteError(navigationFailure(error))).finally(() => {
       if (quickRequests.current.get(identity) === token && (!published || shortcutSequence.current !== token)) quickRequests.current.delete(identity);
     });
+  };
+  // ⌥N: open the question and send option N at once. The answer box in Details sends it with its own guards (stale read, item
+  // changed, in flight); this only refuses to start while the session, drafts or a request are not ready.
+  // In topic mode Details shows the topic's conversation, not the Map's selected item: the key is refused (and consumed) there,
+  // so it never switches Details to that item and sends in one go.
+  const quickAnswer = (target: ItemRoute, index: number) => {
+    if (topicMode) return true;
+    const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
+    const session = current?.snapshot?.session, item = session?.items[target.item_id];
+    const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
+    if (session && item && (current?.status !== 'ready' || current.error)) {
+      notices.push({ id: 'quick-answer-not-ready', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
+        text: "Ariadne is still loading this session's latest changes. Try again." });
+      return true;
+    }
+    notices.dismiss('quick-answer-not-ready');
+    if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
+      || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
+      || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
+      || quickRequests.current.has(JSON.stringify(target))
+      || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
+      || entry?.receipt
+      || !item.options[index]) return false;
+    focusOwner(target, 'answer', index, undefined, 'send', {
+      optionId: item.options[index]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id,
+    });
+    return true;
   };
   const queueBring = async (target: ItemRoute, onReveal?: (result: RevealedItem) => void) => {
     const identity = JSON.stringify(target);
@@ -584,28 +626,100 @@ function Workspace({ application }: { application: Application }) {
     void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
   };
   // "Hid “x”." with an Undo that unhides (E19). It sets the state, so a late Undo never hides the item again.
-  const announceHid = (target: ItemRoute) => {
+  const announceHid = (target: ItemRoute, moved: HidMove | null) => {
     const item = navigation.opened.open(target).getSnapshot().snapshot?.session.items[target.item_id];
     const label = item ? shortLabel(item) : 'the item';
     toasts.show({ text: `Hid “${label}”.`, undo: () => {
-      if (!toggleHidden(target, false)) notices.push({ id: 'hide-undo-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)',
+      if (!toggleHidden(target, false, moved)) notices.push({ id: 'hide-undo-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)',
         text: `“${label}” could not be unhidden just now. Try Unhide again in a moment.` });
     } });
   };
+  const latestConversation = useRef(conversation);
+  latestConversation.current = conversation;
+  /**
+   * A hide's move as the selection (D4): Details follows it while open, and closes when nothing is selected, as for Remove. It is
+   * no visit of the owner's: Recent records nothing, so the hide stays one write (R1).
+   */
+  const showMove = (reveal: RevealedItem | null, openDetail = false) => {
+    historyReveal.current = null;
+    invalidateOwnerRequest();
+    if (!reveal) { setLocalReveal(null); setDroppedReveal(navigation.getSnapshot().reveal); closeDetail(); return; }
+    setLocalReveal(reveal);
+    if (openDetail) { detailTarget.showItem(); detailDismissedAt.current = null; setDetailOpen(true); }
+  };
   // `want` sets the state instead of flipping it: Hide's Undo must not hide the item again after the owner unhid it some other way.
-  const toggleHidden = (target: ItemRoute, want?: boolean) => {
+  // Hide moves on (alpha.24): hiding the selected item, or an ancestor of it, selects the next item on its level, else the previous,
+  // else the parent (the view on screen says which, `hideViewFor`); the bigger view's item follows the same rule. The selection
+  // rides in the hide's own write and shows in the update that publishes it (S1): a refused or failed save changes nothing, and an
+  // unsure one moves nothing until a check confirms it. A selection the owner makes meanwhile wins (S3).
+  const toggleHidden = (target: ItemRoute, want?: boolean, undo?: HidMove | null) => {
     const current = navigation.getSnapshot();
     if (!current.preferences || current.writing || current.pendingOperationId !== null) return false;
     const session = navigation.opened.open(target).getSnapshot().snapshot?.session ?? application.waiting.sessionState(target)?.snapshot?.session;
     const saved = current.preferences.sessions.find(value => routeKey(value.session) === routeKey(target));
     const isHidden = !!session && hiddenItems(session, new Set(saved?.hidden_item_ids ?? [])).has(target.item_id);
     if (want !== undefined && want === isHidden) return true;
-    setDismissedReveal(currentReveal);
-    void navigation.setHidden(target, !isHidden, current.preferences.revision).then(saved => {
-      if (!saved) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
+    const dismissed = currentReveal, asked = selectionGeneration.current, unmoved = () => selectionGeneration.current === asked;
+    const onScreen = !!route && sameSession(target, route);
+    // The view's own reveal (a click echo: no scroll, no centring), keeping the Map's temporary unfolds.
+    const temporary = currentReveal?.kind === 'item' ? currentReveal.temporaryExpandedItemIds : [];
+    const own = (itemId: string): RevealedItem => Object.freeze({ kind: 'item' as const, store: navigation.opened.open(target), temporaryExpandedItemIds: temporary,
+      route: Object.freeze({ project_id: target.project_id, session_id: target.session_id, item_id: itemId }) });
+    const report = (written: boolean) => {
+      if (!written) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
         text: 'The hidden items preference could not be saved. Try again.' });
-      else if (!isHidden) announceHid(target);
-    });
+    };
+    if (isHidden) {
+      // Unhide never moves the selection. Undo selects again what its hide moved away from, and puts back the Focus it ended, while
+      // nothing was selected since (R7). Either way the view on screen keeps the rows above where the item comes back still.
+      const back = onScreen && undo && asked === undo.generation ? undo : null;
+      let written: SessionPreferences | undefined;
+      void navigation.setHidden(target, false, current.preferences.revision, {
+        edit: view => {
+          if (back && unmoved()) { view.selected_item_id = back.prior; if (back.focused) view.focused_item_id = back.focused; }
+          written = view;
+        },
+        committing: land => flushSync(() => {
+          setDismissedReveal(dismissed);
+          const restore = back && unmoved() ? back : null, reveal = restore ? own(restore.prior) : null;
+          if (onScreen) hideViewFor(target)?.present({ kind: 'unhide', itemId: target.item_id, own: reveal, select: !!restore, after: written });
+          if (restore) showMove(reveal, restore.detailOpen);
+          land();
+        }),
+      }).then(report);
+      return true;
+    }
+    const going = new Set(session ? subtree(session, target.item_id).map(item => item.id) : [target.item_id]);
+    const moves = onScreen && !!selectedId && going.has(selectedId);
+    const follows = onScreen && conversation?.route === key && going.has(conversation.itemId);
+    const prior = selectedId, detailWasOpen = detailOpen, answer = hideViewFor(target);
+    // The view the hide writes (a new one for a session with none saved); hiding the focused root ends Focus in the same write (S4).
+    const hiding = navigation.viewWithHidden(target, true);
+    const ended = hiding?.focused_item_id && going.has(hiding.focused_item_id) ? hiding.focused_item_id : undefined;
+    const after: SessionPreferences | null = hiding && { ...hiding, focused_item_id: ended ? undefined : hiding.focused_item_id };
+    const next = (moves || follows) && answer && after ? answer.choose(target.item_id, after) : null;
+    void navigation.setHidden(target, true, current.preferences.revision, {
+      edit: view => {
+        if (view.focused_item_id && going.has(view.focused_item_id)) delete view.focused_item_id;
+        if (moves && answer && unmoved()) view.selected_item_id = next;
+      },
+      committing: land => {
+        const select = moves && !!answer && unmoved(), shownNow = latestConversation.current;
+        const follow = follows && !!answer && shownNow?.route === key && going.has(shownNow.itemId);
+        // A choice the owner made in the view meanwhile stays selected instead of the hide's (S3). One reveal object for the view
+        // and the App: the view knows it as its own echo.
+        const newer = select ? answer?.newer?.(going) ?? null : null;
+        const reveal = newer ? own(newer) : select && next ? own(next) : null;
+        flushSync(() => {
+          answer?.present({ kind: 'hide', itemId: target.item_id, own: reveal, select });
+          if (select) showMove(reveal);
+          if (follow) { if (next) openConversation(next); else closeConversation(); }
+          setDismissedReveal(dismissed);
+          land();
+        });
+        announceHid(target, select && !newer ? { prior: prior!, detailOpen: detailWasOpen, generation: selectionGeneration.current, focused: ended } : null);
+      },
+    }).then(report);
     return true;
   };
   const selectedSession = sessionState?.snapshot?.session;
@@ -625,7 +739,7 @@ function Workspace({ application }: { application: Application }) {
   const hideItem = (itemId: string) => { if (route) toggleHidden({ ...route, item_id: itemId }); };
   const removeItem = (itemId: string) => { if (route) askRemove({ kind: 'item', item: { ...route, item_id: itemId } }); };
   const intentApp: ItemIntentApp = {
-    store: !!store, onPage: viewOf(state).kind !== 'session', toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, queueBring, ack: (target, repeat) => {
+    store: !!store, onPage: viewOf(state).kind !== 'session', toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
@@ -668,7 +782,6 @@ function Workspace({ application }: { application: Application }) {
     dismissBanner: useLatest(() => { setBannerDismissed(currentReveal); }),
     selected: useLatest(selected),
     openTopic: useLatest(openTopic),
-    hid: useLatest((itemId: string) => { if (route) announceHid({ ...route, item_id: itemId }); }),
     openItem: useLatest((itemId: string) => { if (route) revealItem({ ...route, item_id: itemId }); }),
     dismissReveal: useLatest(() => { setDismissedReveal(currentReveal); }),
     resume: useLatest(() => { setDismissedReveal(currentReveal); closeDetail(); }),
@@ -769,7 +882,7 @@ function Workspace({ application }: { application: Application }) {
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && (!!selectedId || topicMode)}
-        onSelected={map.selected} onOpenTopic={map.openTopic} onHid={map.hid} onOpenItem={map.openItem}
+        onSelected={map.selected} onOpenTopic={map.openTopic} onOpenItem={map.openItem}
         onDismissReveal={map.dismissReveal} onResume={map.resume} onAct={map.act}
         onSearchStatus={setSearchStatus}
         onClearSearch={map.clearSearch}
@@ -784,6 +897,7 @@ function Workspace({ application }: { application: Application }) {
       if (route && routeKey(target) === key && archived) showView('tree');
     }} />
     <AgentNotRunningHost navigation={navigation} />
+    <SwipeNavigation history={historyControls} />
   </div></RemovalContext.Provider></ItemHistoryContext.Provider></ItemRefSession.Provider></PeekProvider>;
 }
 

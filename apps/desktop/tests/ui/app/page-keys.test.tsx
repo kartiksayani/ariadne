@@ -12,7 +12,7 @@ import { AppTransport, route } from './transport';
 afterEach(() => { cleanup(); notices.clear(); });
 
 const keys: readonly { readonly name: string; readonly key: string }[] = [
-  { name: 'a', key: 'a' }, { name: 'd', key: 'd' }, { name: 'h', key: 'h' }, { name: 'z', key: 'z' }, { name: 'Backspace', key: 'Backspace' },
+  { name: 'a', key: 'a' }, { name: 'd', key: 'd' }, { name: 'x', key: 'x' }, { name: 'z', key: 'z' }, { name: 'Backspace', key: 'Backspace' },
   { name: 'r', key: 'r' }, { name: 'b', key: 'b' }, { name: 'o', key: 'o' }, { name: 'Escape', key: 'Escape' },
   ...Array.from({ length: 9 }, (_, index) => ({ name: String(index + 1), key: String(index + 1) })),
 ];

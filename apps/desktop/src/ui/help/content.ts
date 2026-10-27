@@ -10,6 +10,7 @@ export const KEY_GROUPS: readonly KeyGroup[] = [
     [['Space'], 'Peek at an item; the Map stays put'],
     [['.'], 'Back to the selected item'],
     [['n'], 'Outline the next unseen item; Next on the topic band does the same'],
+    [['⌥', '↑', '↓'], 'Scroll Details'],
   ] },
   { label: 'Answer and reply', keys: [
     [['[', ']'], 'Open the answer dock at the previous or next waiting question'],
@@ -18,6 +19,7 @@ export const KEY_GROUPS: readonly KeyGroup[] = [
     [['⌘', '↵'], 'Send what you wrote'],
     [['r'], 'Reply about the selected item, in Details'],
     [['esc'], 'Close the box; your words stay as a draft'],
+    [['⌥', '1–9'], 'Choose and send'],
   ] },
   { label: 'On the selected item', keys: [
     [['a'], 'Ack'],
@@ -25,7 +27,7 @@ export const KEY_GROUPS: readonly KeyGroup[] = [
     [['z'], 'Later, or back from Later'],
     [['d'], 'Drop'],
     [['o'], 'Back to Open'],
-    [['h'], 'Hide'],
+    [['x'], 'Hide'],
     [['⌫'], 'Remove; asks first when items below it would go too'],
     [['⇧', 'F'], 'Focus on it, or Unfocus'],
   ] },

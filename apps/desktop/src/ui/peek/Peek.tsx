@@ -16,6 +16,7 @@ import { statusKey } from '../shared/status';
 import { ItemRefSession, PEEK_CLOSE_MS, PEEK_OPEN_MS, PeekContext, type PeekNavigation } from './context';
 import { editableSelector } from '../keys';
 import { peekPosition } from './position';
+import { peekTargetKey } from './target';
 import { peekNames } from './names';
 import { peekChange } from './change';
 import { ChangeMarker } from '../changes/ChangeMarker';
@@ -119,9 +120,11 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
     if (!live.current || kept()) return;
     closing.current = setTimeout(() => { closing.current = null; if (live.current && !kept()) close(false, true); }, PEEK_CLOSE_MS);
   }, [cancelClose, kept, close]);
-  const hoverStart = useCallback((route: ItemRoute, anchor: HTMLElement) => {
+  const hoverStart = useCallback((route: ItemRoute, anchor: HTMLElement, suppressed?: () => boolean) => {
     const open = live.current;
     if (open && sameRoute(open.route, route)) cancelClose();
+    // The view's selected row or node: no hover card waits for it (D7).
+    if (suppressed?.()) { hover.current = null; cancelOpen(); return; }
     const pending = hover.current;
     if (pending && pending.anchor === anchor && sameRoute(pending.route, route)) return;
     hover.current = { route, anchor };
@@ -129,11 +132,15 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
     if (open && sameRoute(open.route, route) || modal()) return;
     opening.current = setTimeout(() => {
       opening.current = null;
-      if (hover.current?.anchor !== anchor || !anchor.isConnected || live.current && kept()) return;
+      if (hover.current?.anchor !== anchor || !anchor.isConnected || live.current && kept() || suppressed?.()) return;
       show(route, anchor, false);
     }, PEEK_OPEN_MS);
   }, [cancelClose, cancelOpen, kept, show]);
   const hoverEnd = useCallback(() => { hover.current = null; cancelOpen(); leave(); }, [cancelOpen, leave]);
+  const dropHover = useCallback((route: ItemRoute) => {
+    if (hover.current && sameRoute(hover.current.route, route)) { hover.current = null; cancelOpen(); }
+    if (live.current && !live.current.explicit && sameRoute(live.current.route, route) && !busy()) close(focusInside());
+  }, [cancelOpen, busy, close, focusInside]);
   useEffect(() => {
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (modal()) { cancelOpen(); return; }
@@ -201,7 +208,7 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
   }, [shown, cancelOpen, close, closeAll, focusInside]);
   useEffect(() => () => { cancelOpen(); cancelClose(); }, [cancelOpen, cancelClose]);
   const peek = useMemo<PeekNavigation>(() => ({
-    open: (route, anchor) => show(route, anchor, true), toggle, close: () => close(), closeAll, hoverStart, hoverEnd,
+    open: (route, anchor) => show(route, anchor, true), toggle, close: () => close(), closeAll, hoverStart, hoverEnd, dropHover,
     reference: route => {
       const session = current.current.lookup(route)?.getSnapshot().snapshot?.session, item = session?.items[route.item_id];
       if (!session || !item || itemRemoved(session, item.id)) return null;
@@ -217,7 +224,7 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
       onMouseLeave: hoverEnd,
     }),
     hoverProps: route => ({ onMouseEnter: event => hoverStart(route, event.currentTarget), onMouseLeave: hoverEnd }),
-  }), [show, toggle, close, closeAll, hoverStart, hoverEnd]);
+  }), [show, toggle, close, closeAll, hoverStart, hoverEnd, dropHover]);
   const leaveTo = (go: (route: ItemRoute) => void) => (route: ItemRoute) => { close(false); onVisit?.(route, 'opened'); go(route); };
   const goTo = leaveTo(onGoTo), openDetails = leaveTo(onOpenDetails);
   return <PeekContext.Provider value={peek}>{children}{shown && createPortal(<PeekCard key={JSON.stringify(shown.route)} shown={shown} drafts={drafts} card={card}
@@ -279,7 +286,7 @@ function PeekCard({ shown, drafts, card, navigation, sending, allowAnswer, onClo
       <button type="button" className="peek-button peek-go" onClick={onGoTo}><i className="ph ph-arrow-right" aria-hidden="true" />Go to</button>
     </>}
   </div>;
-  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${title}`} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
+  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${title}`} data-peek-target={peekTargetKey(shown.route)} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
     onKeyDown={event => { if (event.key !== 'F6') event.stopPropagation(); }}
     onMouseDownCapture={onEngage} onKeyDownCapture={event => { if (event.key !== 'Escape') onEngage(); }} onClickCapture={onEngage}
     onMouseEnter={onPointerEnter} onMouseLeave={onPointerLeave}>

@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
 const detail = () => screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-// ⌥1–9 and ⌥0 are unbound (SPEC 6.1): `alt` is kept only to prove they do nothing now.
+// ⌥1–9 choose and send option N of the selected waiting question (alpha.24, as in alpha.18); ⌥0 stays unbound. macOS types ¡™£ for them.
 const alt = (target: Element, digit: number, repeat = false) => fireEvent.keyDown(target, {
   key: digit === 1 ? '¡' : digit === 0 ? 'º' : '™', code: `Digit${digit}`, altKey: true, repeat,
 });
@@ -59,16 +59,163 @@ async function openQuestion() {
 }
 
 describe('quick owner answers from the desktop', () => {
-  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('Enter on option card %i in Details sends that option, and the same ⌥ digit sends nothing', async digit => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('Enter on option card %i in Details sends that option', async digit => {
     const transport = setup(); await openQuestion();
-    row().focus(); alt(row(), digit); alt(detail(), digit);
-    await act(async () => { await Promise.resolve(); });
-    expect(sends(transport)).toHaveLength(0);
     press(digit);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: {
       kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`,
     } } });
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('⌥%i sends that option from the Map row, using its physical digit code', async digit => {
+    const transport = setup(); await openQuestion();
+    row().focus(); alt(row(), digit);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: {
+      kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`,
+    } } });
+    await act(async () => { await Promise.resolve(); });
+    expect(sends(transport)).toHaveLength(1);
+  });
+
+  it.each(['Details', 'the body'] as const)('⌥2 sends option 2 with focus in %s', async place => {
+    const transport = setup(); await openQuestion();
+    if (place === 'Details') { const card = detail().querySelector<HTMLElement>('[data-answer-option="0"]')!; card.focus(); alt(card, 2); }
+    else { (document.activeElement as HTMLElement | null)?.blur(); alt(document.body, 2); }
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ command: { params: { selected_option_id: 'choice-2' } } });
+  });
+
+  it('keeps the typed note when ⌥ sends from the Map', async () => {
+    const transport = setup(); await openQuestion();
+    const note = 'Keep these exact words: café\nsecond line';
+    fireEvent.change(words(), { target: { value: note } });
+    row().focus(); alt(row(), 2);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2', text: note } });
+  });
+
+  it('ignores a held ⌥ digit key-repeat before any real press, and sends once for a press with repeats after it', async () => {
+    const transport = setup(); await openQuestion();
+    row().focus(); alt(row(), 1, true);
+    await act(async () => { await Promise.resolve(); });
+    expect(sends(transport)).toHaveLength(0);
+    alt(row(), 1); alt(row(), 1, true); alt(row(), 1, true);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    await act(async () => { await Promise.resolve(); });
+    expect(sends(transport)).toHaveLength(1);
+  });
+
+  it('ignores ⌥ bursts and another ⌥ digit while this item is sending', async () => {
+    const transport = setup(); await openQuestion();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void, requested = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'input_submit') { ++requested; await gate; }
+      return invoke(name, args);
+    });
+    row().focus();
+    await act(async () => { alt(row(), 1); alt(row(), 1); });
+    await waitFor(() => expect(requested).toBe(1));
+    alt(row(), 2); alt(detail(), 3);
+    await act(async () => { await Promise.resolve(); });
+    expect(requested).toBe(1);
+    await act(async () => { release(); });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-1' } });
+  });
+
+  it('does nothing for ⌥5 with 3 options, ⌥0, or a ⌥ digit on an item that is not waiting', async () => {
+    const transport = setup(3); await openQuestion();
+    row().focus(); alt(row(), 5); alt(row(), 0);
+    fireEvent.click(document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
+    const other = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+    other.focus(); alt(other, 1); alt(other, 2);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('does not send a ⌥ digit while Details is refreshing, never replays that press after, and sends on a new one', async () => {
+    const transport = setup(); await openQuestion();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
+    row().focus(); alt(row(), 1);
+    await act(async () => { await Promise.resolve(); });
+    expect(sends(transport)).toHaveLength(0);
+    await act(async () => { release(); });
+    await waitFor(answerReady);
+    expect(sends(transport)).toHaveLength(0);
+    alt(row(), 1);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+  });
+
+  it('leaves ⌥ digits to the answer dock when focus is in it, so the dock never sends the Map’s selected question', async () => {
+    const transport = setup(); await openQuestion();
+    closeDetails();
+    const dock = screen.getByRole('region', { name: 'Answer dock' });
+    fireEvent.click(await within(dock).findByRole('button', { name: /^1 waiting$/ }));
+    const card = await waitFor(() => { const found = dock.querySelector<HTMLElement>('[data-answer-option="1"]'); expect(found).not.toBeNull(); return found!; });
+    card.focus(); alt(card, 2);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('offers the not-running dialog for a disconnected ⌥ send, as a click does', async () => {
+    const transport = setup(2, 'disconnected'); await openQuestion();
+    row().focus(); alt(row(), 2);
+    const dialog = await screen.findByRole('dialog', { name: /isn’t running for this session/ });
+    expect(sends(transport)).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Queue it/ }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2' } });
+  });
+
+  it('refuses ⌥N while a hover peek shows another item than the Map’s selection, and sends again once it is gone', async () => {
+    const transport = setup(); await openQuestion();
+    const other = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+    fireEvent.mouseEnter(other);
+    const peek = await screen.findByRole('dialog', { name: /^Peek: / }, { timeout: 3000 });
+    expect(peek.getAttribute('data-peek-target')).toContain('"4"');
+    row().focus();
+    // Refused and consumed: nothing is sent, the key does not fall through.
+    expect(alt(row(), 2)).toBe(false);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(sends(transport)).toHaveLength(0);
+    // Plain digits are unchanged: they still pick the option (and send nothing).
+    expect(fireEvent.keyDown(row(), { key: '2' })).toBe(false);
+    expect(sends(transport)).toHaveLength(0);
+    // Without the card the same key sends.
+    fireEvent.mouseLeave(other);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull());
+    row().focus(); alt(row(), 2);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ command: { params: { target: { item_id: '2' }, selected_option_id: 'choice-2' } } });
+  });
+
+  it('refuses ⌥N in topic mode, where Details shows the topic’s conversation, and does not switch Details to the Map’s item', async () => {
+    const transport = setup(); await openQuestion();
+    const band = document.querySelector<HTMLElement>('.tree-topic')!;
+    fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Reply to topic/ }));
+    await waitFor(() => expect(document.querySelector('[data-composer="topic"]')).not.toBeNull());
+    expect(document.querySelector('[data-detail-item-id]')).toBeNull();
+    row().focus();
+    expect(alt(row(), 2)).toBe(false);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(sends(transport)).toHaveLength(0);
+    expect(document.querySelector('[data-detail-item-id]')).toBeNull();
+    expect(document.querySelector('[data-composer="topic"]')).not.toBeNull();
   });
 
   // The tree row has no inline answer any more (SPEC, Removed): only Details sends from the keyboard on the Map.

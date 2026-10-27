@@ -14,7 +14,9 @@ import { statusColor } from '../shared/status';
 import { useWorkspaceKeys } from '../keys';
 import { useIntents } from '../intents';
 import { useHidden } from '../remove/queue';
-import { visibleSession } from '../remove/model';
+import { subtree, visibleSession } from '../remove/model';
+import { hideViews, selectionAfterHide, type HideMove } from '../tree/hideMove';
+import { useLatest } from '../shared/latest';
 import { filterSignature, type LocalChip } from '../../selectors/tree/filter';
 import { BRANCH_HUES } from '../tree/branch';
 import type { ChangeMarker as MarkerKind } from '../tree/model';
@@ -22,10 +24,12 @@ import { ChangeMarker } from '../changes/ChangeMarker';
 import { usePeek } from '../peek/context';
 import { applyChange, graphColumn, mergeChange, relatedLines, sessionGraph, statusVisual, type GraphNode, type SessionGraph, type TopicGraph, type ViewChange } from './model';
 import { useMapSearch } from '../tree/mapSearch';
+import { useReportDrawnHidden } from './drawnHidden';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
 import { scrollIntoViewIfHidden } from '../shared/scroll';
+import { keyStopsLanding, landingMoves, reachable, startLanding, WheelStream, type Landing, type Offset } from '../shared/landing';
 import { useDockInset } from '../shell/dockInset';
 
 export interface GraphViewProps {
@@ -59,6 +63,11 @@ export interface GraphViewProps {
 
 /** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
 const RING_ROOM = 8;
+/** How far the scroller is from centring `element`. A centred node sits mid-view, clear of the legend card: only the dock shortens the area it is centred in. */
+function centring(scroller: HTMLElement, element: Element, dockInset = 0): Offset {
+  const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
+  return { top: (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - dockInset) / 2), left: (b.left + b.width / 2) - (a.left + a.width / 2) };
+}
 /**
  * Scrolls `element` into the scroller: centred (opening, links) or just into view (keys, search steps).
  * The visible area ends above the floating dock and the legend card (`bottomInset`), so a node under either counts as hidden.
@@ -66,9 +75,9 @@ const RING_ROOM = 8;
 function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, bottomInset = 0, dockInset = 0) {
   const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
   if (center) {
-    // A centred node sits mid-view, clear of the legend card: only the dock shortens the area it is centred in.
-    scroller.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - dockInset) / 2);
-    scroller.scrollLeft += (b.left + b.width / 2) - (a.left + a.width / 2);
+    const by = centring(scroller, element, dockInset);
+    scroller.scrollTop += by.top;
+    scroller.scrollLeft += by.left;
     return;
   }
   scrollIntoViewIfHidden(scroller, element, { top: 8, bottom: 8, bottomInset });
@@ -170,7 +179,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     if (!error) { notices.dismiss(errorNoticeId); return; }
     notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: error });
   }, [errorNoticeId, error]);
-  const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
+  /** `land`: centred over a few eased frames (a reveal from outside: ⌘[ / ⌘], a link), as the Tree lands (alpha.24 P3). */
+  const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean; land?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
   const offered = localReveal && localReveal.asked === revealAsks ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
@@ -188,6 +198,9 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
   [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
+  // The hidden items this layout draws (a path to the selected or revealed item needs them): the filter strip's note counts the rest.
+  const drawnHidden = useMemo(() => graph ? [...graph.nodes.values()].filter(node => node.hidden).map(node => node.item.id).sort() : null, [graph]);
+  useReportDrawnHidden(drawnHidden);
   const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner });
   latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner };
 
@@ -203,6 +216,12 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
    */
   const held = useRef<{ readonly id: string; readonly x: number; readonly y: number; readonly top: number; readonly left: number; readonly graph: SessionGraph } | null>(null);
   const nodeElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null;
+  /** The landing on its way (alpha.24 P3): a node a reveal from outside is centring over a few frames. */
+  const landing = useRef<Landing | null>(null);
+  const stopLanding = () => { landing.current?.cancel(); landing.current = null; };
+  /** The wheel events over the Graph, so a swipe's own trailing momentum never stops the landing the swipe started. */
+  const wheels = useRef(new WheelStream()).current;
+  useEffect(() => stopLanding, []);
   /** The legend card hangs over the scroller's bottom edge; a node must land above it as well as above the dock. */
   const legendInset = useRef(0);
   const bottomInset = () => latest.current.dockInset + legendInset.current;
@@ -326,7 +345,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   // A selection's reveal comes back through `reveal` and must not scroll again.
   const ownReveal = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); held.current = null; }, [store]);
+  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); held.current = null; stopLanding(); }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
   useEffect(() => {
@@ -363,6 +382,50 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       setLocalReveal({ result, asked }); latest.current.onReveal(result, options.openDetail);
     }).catch((failure: unknown) => { if (!stale()) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold, peek]);
+  // Hide moves on (alpha.24): with the Graph open, it says what a hide selects and shows the move as its own selection, which
+  // rides in the hide's write: no second write, no scroll, no centring (S5).
+  const chooseAfterHide = useLatest((itemId: string, after: Immutable<SessionPreferences>) => {
+    const { shown: base, folds, selectedId: kept } = latest.current;
+    if (!session || column === null) return null;
+    const going = new Set(subtree(session, itemId).map(item => item.id));
+    const stays = (id: string | null | undefined) => id && !going.has(id) ? id : null;
+    const projected = sessionGraph({ session, view: { ...base, hidden_item_ids: after.hidden_item_ids ?? [], focused_item_id: after.focused_item_id },
+      later, local, selectedId: stays(kept), column, temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [],
+      revealedItemId: stays(itemReveal?.route.item_id), filterCollapsedItemIds: folds });
+    return selectionAfterHide(session, itemId, projected.order.filter(id => !projected.nodes.get(id)?.hidden));
+  });
+  const presentMove = useLatest((move: HideMove) => {
+    // Any hide or Undo stops a landing first, with a selection change or without one: the Graph stays where it is (Q8).
+    stopLanding();
+    const box = scroller.current, current = latest.current.graph;
+    if (move.kind === 'hide' && box && current?.nodes.has(move.itemId)) {
+      // The Graph stays where it is, as the Map does (S10): the node drawn before the hidden one holds its place, so nothing above
+      // it moves; with none before it, the scroll position stays.
+      const before = current.order[current.order.indexOf(move.itemId) - 1], above = before ? nodeElement(before) : null;
+      held.current = above ? anchorOn(above, box, current) : null;
+    }
+    if (!move.select) return;
+    const id = move.own?.kind === 'item' ? move.own.route.item_id : null, element = id ? nodeElement(id) : null;
+    if (!id) { setLocalSelection(null); setLocalReveal(null); return; }
+    setLocalSelection({ id, asked: latest.current.asked });
+    setFocusedEntry({ id, selectedId: id });
+    ownReveal.current = move.own;
+    // Focus follows only from a node that goes (R8).
+    const going = session ? subtree(session, move.itemId).map(item => item.id) : [move.itemId];
+    if (going.some(gone => !!nodeElement(gone)?.contains(document.activeElement))) element?.focus({ preventScroll: true });
+  });
+  // A node the owner clicked while the hide's write was in flight (its selection waits to be written after it) is the newer
+  // choice: it stays selected, and the hide's own pick never shows (S3).
+  const newerChoice = useLatest((going: ReadonlySet<string>) => {
+    const { asked, selectedId: shownId } = latest.current;
+    return localSelection && localSelection.asked === asked && localSelection.id === shownId && !going.has(localSelection.id) ? localSelection.id : null;
+  });
+  useEffect(() => {
+    const answer = { route: { project_id: state.route.project_id, session_id: state.route.session_id }, choose: chooseAfterHide,
+      newer: newerChoice, present: presentMove };
+    hideViews.add(answer);
+    return () => { hideViews.delete(answer); };
+  }, [state.route.project_id, state.route.session_id, chooseAfterHide, newerChoice, presentMove]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
     if (node.folded) latest.current.onDismissBanner?.();
@@ -476,7 +539,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
       // owner's click, its write and its answer are still in flight. A jump asked for since the click needs no clearing: the held
       // state is stamped with the ask count and stops applying the moment it moves.
       if (echo) { setLocalReveal(null); setLocalSelection(null); }
-      if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true };
+      if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true, land: true };
     }
     const initial = !!graph && opened.current !== store;
     if (initial) {
@@ -486,7 +549,19 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     const box = scroller.current;
     const element = target ? nodeElement(target.id) : null;
     if (box && element && target) {
-      scrollToNode(box, element, target.center, bottomInset(), dockInset);
+      // A new target: the landing on its way stops where it is. The Graph's opening placement never lands.
+      stopLanding();
+      if (target.land && !initial && landingMoves()) {
+        const id = target.id;
+        let run: Landing | null = null;
+        run = startLanding({
+          remaining: () => { const node = scroller.current === box ? nodeElement(id) : null; return node ? reachable(box, centring(box, node, latest.current.dockInset)) : null; },
+          move: by => { box.scrollTop += by.top; box.scrollLeft += by.left; },
+          screen: () => ({ top: box.clientHeight, left: box.clientWidth }),
+          landed: () => { if (run && landing.current === run) landing.current = null; },
+        });
+        if (run.running()) { landing.current = run; wheels.carry(); }
+      } else scrollToNode(box, element, target.center, bottomInset(), dockInset);
       if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
     } else if (initial) box?.focus({ preventScroll: true });
     remember();
@@ -494,18 +569,22 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
 
   // The pointer: one delegated handler for every node. Hover lights the node's related lines and asks for a peek.
   const hovered = useRef<string | null>(null);
+  // The selected node never hover-peeks (D7): asked when the pointer rests and again when the wait ends.
+  const unpeeked = (id: string) => () => latest.current.selectedId === id;
   const pointerOver = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
     const id = element?.dataset.row ?? null;
     if (!element || !id || id === hovered.current) return;
     hovered.current = id; setHoverId(id);
-    peek?.hoverStart({ ...state.route, item_id: id }, element);
+    peek?.hoverStart({ ...state.route, item_id: id }, element, unpeeked(id));
   };
   // A scroll or a search step makes the peek forget the node; resting on it again asks again (the same node is a no-op).
   const pointerMove = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
-    if (element?.dataset.row) peek?.hoverStart({ ...state.route, item_id: element.dataset.row }, element);
+    const id = element?.dataset.row;
+    if (id) peek?.hoverStart({ ...state.route, item_id: id }, element, unpeeked(id));
   };
+  useEffect(() => { if (selectedId) peek?.dropHover({ ...state.route, item_id: selectedId }); }, [selectedId]);
   const pointerOut = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
     if (!element || (event.relatedTarget instanceof globalThis.Node && element.contains(event.relatedTarget))) return;
@@ -519,6 +598,9 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   const current = search.current?.id ?? null;
   return <div className="graph-view">
     <div ref={scroller} className="graph-scroll" data-testid="graph-scroll" tabIndex={-1} onScroll={remember}
+      // The owner's wheel, press or key stops a landing where it is (Q3).
+      onWheelCapture={event => { if (wheels.stops(event, event.currentTarget)) stopLanding(); }} onPointerDownCapture={stopLanding}
+      onKeyDownCapture={event => { if (keyStopsLanding(event)) stopLanding(); }}
       onFocus={event => {
         const element = event.target instanceof Element ? event.target.closest('[data-row]') : null;
         focusedRow.current = element?.getAttribute('data-row') ?? null;

@@ -29,7 +29,7 @@ function KeysTab() {
     <div className="hlp-keys">
       {KEY_GROUPS.map(group => <section className="hlp-group" key={group.label} aria-label={group.label}>
         <h3 className="p-label hlp-h">{group.label}</h3>
-        {group.keys.map(([keys, text]) => <div className="hlp-key" key={keys.join('+') + text}>
+        {group.keys.map(([keys, text]) => <div className="hlp-key" data-testid="help-key" key={keys.join('+') + text}>
           <span className="hlp-caps">{keys.map(key => <Keycap size="md" key={key}>{key}</Keycap>)}</span>
           <span className="hlp-text">{text}</span>
         </div>)}

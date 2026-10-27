@@ -71,7 +71,7 @@ function peekStub() {
   const peek = {
     open: vi.fn(), close: vi.fn(), reference: () => null,
     chipProps: () => ({ onClick() {}, onKeyDown() {}, onMouseEnter() {}, onMouseMove() {}, onMouseLeave() {} }),
-    hoverStart: vi.fn(), hoverEnd: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
+    hoverStart: vi.fn(), hoverEnd: vi.fn(), dropHover: vi.fn(), toggle: vi.fn(), closeAll: vi.fn(),
   };
   return peek as typeof peek & PeekNavigation;
 }
@@ -360,10 +360,18 @@ describe('session tree rows', () => {
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
 
-  it.each(['row Hide', 'detail Hide'] as const)('ends Focus on %s and does not restore it on Unhide', async source => {
+  // The row's Hide asks the App, which ends Focus in the hide's own write (alpha.24 S4; tests/ui/app/hide-moves.test.tsx row 23).
+  it('asks the App to hide from the row: the Map writes nothing itself', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    if (source === 'row Hide') fireEvent.click(within(row('1')).getByRole('button', { name: 'Hide (h)' }));
-    else await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
+    const before = view.transport.mutations.length;
+    fireEvent.click(within(row('1')).getByRole('button', { name: 'Hide (x)' }));
+    expect(view.calls.acts).toEqual([['hide', { ...route, item_id: '1' }]]);
+    expect(view.transport.mutations).toHaveLength(before);
+  });
+
+  it('ends Focus on a hide saved elsewhere and does not restore it on Unhide', async () => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(viewOf(view.transport).hidden_item_ids).toContain('1');
     await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
@@ -1155,14 +1163,14 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     // The hover bar always has six slots (D4). A delivery on its way greys the agent's four and says why; Hide and Remove stay.
     // The slot that would apply says a message is on its way; the others say the status they are not for.
     expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-      .toEqual(['Add a note: a message is on its way', 'Bring it up: not for In progress items', 'Later: not for In progress items', 'Drop: not for In progress items', 'Hide (h)', 'Remove (⌫)']);
+      .toEqual(['Add a note: a message is on its way', 'Bring it up: not for In progress items', 'Later: not for In progress items', 'Drop: not for In progress items', 'Hide (x)', 'Remove (⌫)']);
     for (const name of [/^Add a note/, /^Bring it up/, /^Later/, /^Drop/]) expect((within(row('3')).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);    fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
   });
   it('titles every greyed slot of an open row "a message is on its way", and a parked row\'s Unpark too', async () => {
     // Item 4 is open with a queued drop on its way.
     await mount();
     expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Later: a message is on its way', 'Drop: a message is on its way', 'Hide (h)', 'Remove (⌫)']);
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Later: a message is on its way', 'Drop: a message is on its way', 'Hide (x)', 'Remove (⌫)']);
     cleanup();
     await mount({ configure: transport => { transport.preferences.later = [{ ...route, item_id: '4' }]; } });
     expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')).slice(0, 4))

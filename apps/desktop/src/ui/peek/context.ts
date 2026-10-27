@@ -28,8 +28,14 @@ export interface PeekNavigation {
   /**
    * The pointer rests on a name: opens its card after PEEK_OPEN_MS.
    * Safe to call on every pointer move; only a new route or anchor restarts the wait.
+   * `suppressed` (the Map's and the Graph's selected item) is asked now and again when the wait ends: no card opens while it holds.
    */
-  hoverStart(route: ItemRoute, anchor: HTMLElement): void;
+  hoverStart(route: ItemRoute, anchor: HTMLElement, suppressed?: () => boolean): void;
+  /**
+   * The selection landed on this item: a hover card waiting for it does not open, and a hover card open on it closes.
+   * A card the owner opened (Space, a click) stays.
+   */
+  dropHover(route: ItemRoute): void;
   /**
    * The pointer left the name: closes a hover card after PEEK_CLOSE_MS.
    * The card stays if the pointer reaches it, or if it has focus, a pick, a send in flight or an explicit open.

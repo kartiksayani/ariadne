@@ -12,11 +12,12 @@ export type IntentKind =
   | 'answer' | 'choose' | 'bring' | 'respond' | 'drop' | 'later' | 'hide' | 'reopen'
   | 'search' | 'graph' | 'escape' | 'remove' | 'history-back' | 'history-forward'
   | 'text-smaller' | 'text-larger' | 'text-default' | 'peek' | 'recent'
-  | 'switcher' | 'help' | 'filter' | 'focus' | 'continue' | 'next-unseen' | 'back-to-selected' | 'dock-prev' | 'dock-next';
+  | 'switcher' | 'help' | 'filter' | 'focus' | 'continue' | 'next-unseen' | 'back-to-selected' | 'dock-prev' | 'dock-next'
+  | 'choose-send' | 'details-up' | 'details-down';
 
 export type WorkspaceIntent =
-  | { readonly kind: Exclude<IntentKind, 'choose'> }
-  | { readonly kind: 'choose'; readonly index: number };
+  | { readonly kind: Exclude<IntentKind, 'choose' | 'choose-send'> }
+  | { readonly kind: 'choose' | 'choose-send'; readonly index: number };
 
 /** The keys that ask for an intent. A view registers the intent; the key never presses a button. */
 export const keyIntents: Readonly<Partial<Record<IntentKind, Intent>>> = {
@@ -44,10 +45,10 @@ export interface KeyLike {
   readonly shiftKey?: boolean;
 }
 
-const plain: Readonly<Record<string, Exclude<IntentKind, 'choose'>>> = {
+const plain: Readonly<Record<string, Exclude<IntentKind, 'choose' | 'choose-send'>>> = {
   ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
   ArrowRight: 'unfold', ArrowLeft: 'fold', Enter: 'enter',
-  a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', h: 'hide', o: 'reopen',
+  a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', x: 'hide', o: 'reopen',
   '/': 'search', g: 'graph', f: 'filter', c: 'continue', n: 'next-unseen', '?': 'help',
   '[': 'dock-prev', ']': 'dock-next', '.': 'back-to-selected',
   Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
@@ -66,6 +67,13 @@ export function workspaceIntent(event: KeyLike): WorkspaceIntent | null {
     if (!event.shiftKey && event.key.toLowerCase() === 'o') return { kind: 'switcher' };
     if (event.key === 'Enter') return { kind: 'send' };
     return null;
+  }
+  if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    // ⌥1–9 sends option N; macOS types ¡™£ for ⌥digits, so it matches the physical key. A held key sends once.
+    if (!event.repeat && /^Digit[1-9]$/.test(event.code ?? '')) return { kind: 'choose-send', index: Number(event.code!.slice(-1)) - 1 };
+    // ⌥↑ / ⌥↓ scroll Details. A key-repeat press resolves too, so the handler can swallow it.
+    if (event.key === 'ArrowUp') return { kind: 'details-up' };
+    if (event.key === 'ArrowDown') return { kind: 'details-down' };
   }
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   if (event.shiftKey && event.key.toLowerCase() === 'f') return { kind: 'focus' };

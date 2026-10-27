@@ -15,6 +15,14 @@ const anchors = ['[data-conversation-anchor]', '.tree-column [data-row][tabindex
 
 const within = (target: EventTarget | null, selector: string) => target instanceof Element && !!target.closest(selector);
 
+/**
+ * Where back and forward (⌘[ and ⌘], and the two-finger swipe that means the same) do nothing: in a text field or a dialog, while
+ * a field has focus, or with an overlay (switcher, help, a menu) open.
+ */
+export function historyBlockedAt(target: EventTarget | null, page: Document): boolean {
+  return within(target, `${editable},${dialogs}`) || within(page.activeElement, editable) || !!page.querySelector(workspaceOverlaySelector);
+}
+
 /** The element a body-targeted key goes to: the tree/graph focus anchor, else the app root. */
 export function keyAnchor(root: HTMLElement): HTMLElement {
   for (const selector of anchors) {
@@ -53,8 +61,7 @@ export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, stranded
     return;
   }
   if (history && (intent?.kind === 'history-back' || intent?.kind === 'history-forward')) {
-    if (!event.defaultPrevented && !event.isComposing && !field && !within(target, `${editable},${dialogs}`)
-      && !within(page.activeElement, editable) && !page.querySelector(workspaceOverlaySelector)) {
+    if (!event.defaultPrevented && !event.isComposing && !field && !historyBlockedAt(target, page)) {
       if ((intent.kind === 'history-back' ? history.back : history.forward)()) event.preventDefault();
     }
     return;

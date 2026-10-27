@@ -93,6 +93,13 @@ const moreActions = (page: Page) => bandButton(page, /^More actions for/);
 type Trigger = readonly [name: string, kind: 'still' | 'held' | 'goes', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
+/** The row the hide-with-reveal trigger hides, found in its setup. */
+const hidingWithReveal = { id: '' };
+/** The nearest undimmed row above the reading row (10), in reading order. */
+const visibleRowAbove = (page: Page) => page.evaluate(() => {
+  const rows = [...document.querySelectorAll<HTMLElement>('.tree-item[data-item-id]')], at = rows.findIndex(value => value.dataset.itemId === '10');
+  return rows.slice(0, at).reverse().find(value => !value.classList.contains('tree-item-hidden'))?.dataset.itemId ?? '';
+});
 const triggers: readonly Trigger[] = [
   // The marker is there before the dwell, so its absence afterwards is a clear and not a row that never had one.
   ['a New marker clears', 'still', '11', page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(1), page => seen(page, '11'),
@@ -150,6 +157,24 @@ const triggers: readonly Trigger[] = [
   ['a new agent row below the reading row', 'still', null, nothing, page => agent(page, 'add-below'), page => expect(row(page, '40')).toHaveCount(1)],
   ['Show them reveals a folded match above', 'held', null, page => search(page, 'receipt'),
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],
+  // alpha.24: the filter strip's own Show them / Hide them open and close hidden matches in memory; rows above the reading row come
+  // and go, and the reading row holds its place.
+  ['the filter\'s Show them reveals a hidden match above', 'held', null, hiddenMatchAbove,
+    page => chipRow(page).getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '9')).toHaveCount(1)],
+  ['the filter\'s Hide them puts the revealed match away', 'held', null, async page => {
+    await hiddenMatchAbove(page);
+    await chipRow(page).getByRole('button', { name: 'Show them' }).click();
+    await expect(row(page, '9')).toHaveCount(1); await settle(page);
+  }, page => chipRow(page).getByRole('button', { name: 'Hide them' }).click(), page => expect(row(page, '9')).toHaveCount(0)],
+  // Hide of a row above the reading row while the filter's reveal is open: the Map is projected with the reveal (chooseAfterHide,
+  // holdBack), so the hidden row joins the revealed ones, dimmed where it stood, and the reading row holds.
+  ['a row above the reading row is hidden while the filter\'s reveal is open', 'held', null, async page => {
+    await hiddenMatchAbove(page);
+    await chipRow(page).getByRole('button', { name: 'Show them' }).click();
+    await expect(row(page, '9')).toHaveCount(1); await settle(page);
+    hidingWithReveal.id = await visibleRowAbove(page);
+  }, page => click(row(page, hidingWithReveal.id).getByRole('button', { name: /^Hide/, includeHidden: true })),
+  async page => { await expect(row(page, hidingWithReveal.id)).toHaveClass(/tree-item-hidden/); await expect(row(page, '9')).toHaveCount(1); }],
   ['Show more on the reading row', 'held', '10', nothing, page => press(row(page, '10').getByRole('button', { name: 'Show more' })),
     page => expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
   // The rows below change what is above the reading row, which is out of view: the owner's click is a DOM click.
@@ -314,12 +339,21 @@ const scrollerOf = (view: View) => view === 'Tree' ? '.tree-scroll' : '.graph-sc
 const cellOf = (view: View, id: string) => view === 'Tree' ? `.tree-item[data-item-id="${id}"]` : `.graph-node[data-item-id="${id}"]`;
 const funnel = (page: Page) => page.getByRole('button', { name: /^Filter by status/ });
 const chipRow = (page: Page) => page.getByRole('group', { name: 'Filter items' });
-const chipButton = (page: Page, label: string) => chipRow(page).getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
+const chipButton = (page: Page, label: string) => chipRow(page).getByRole('button', { name: new RegExp(`^${label} \\d+(, \\d+ more hidden)?$`) });
 const chipLabel: Readonly<Record<string, string>> = { open: 'Open', done: 'Done', in_progress: 'In progress', waiting_on_me: 'Waiting on me', decided: 'Decided', replaced: 'Replaced' };
 const statusOf = (page: Page, id: string) => page.evaluate(wanted => {
   const transport = (window as unknown as { treeLayout: { sessions: Map<string, { items: Record<string, { status: string }> }> } }).treeLayout;
   return [...transport.sessions.values()][0]!.items[wanted]!.status;
 }, id);
+
+/** Item 9 (above the reading row) is hidden, and the chips of 9 and 10 are picked: 9 is a hidden match the strip offers to show. */
+async function hiddenMatchAbove(page: Page) {
+  await click(row(page, '9').getByRole('button', { name: /^Hide/, includeHidden: true }));
+  await expect(row(page, '9')).toHaveCount(0);
+  await openRow(page);
+  for (const label of new Set([chipLabel[await statusOf(page, '9')]!, chipLabel[await statusOf(page, '10')]!])) await pick(page, label);
+  await expect(chipRow(page).getByRole('button', { name: 'Show them' })).toBeVisible();
+}
 
 /** Every item whole in view, in reading order: top to bottom, then left to right. The sticky band covers the Tree's first pixels. */
 const wholeCells = (page: Page, view: View): Promise<Cell[]> => page.evaluate(({ scroller, kind }) => {
@@ -546,8 +580,10 @@ test.describe('the filter row never moves the Map', () => {
 // removed), the nearest surviving row below it, else above it, keeps its own window place.
 // The boundaries: at `scrollTop = 0`, content at or above the reading row that shrinks lets the rows below rise into the gap
 // (`rise`: no top spacer); at the bottom a shrink keeps the scroll extent with a spacer, which an owner scroll trims.
+// The owner's own hide differs (S10): the rows above the hidden row keep their window place, and the row below closes the space
+// (`closes`: it takes the hidden row's old window place).
 type Where = 'top' | 'middle' | 'bottom';
-type Expectation = 'held' | 'rise';
+type Expectation = 'held' | 'rise' | 'closes';
 // [name, where, expectation, before, change (given the reading row), done]
 type Hold = readonly [name: string, where: Where, expectation: Expectation, before: (page: Page) => Promise<void>,
   change: (page: Page, reading: string) => Promise<void>, done: (page: Page, reading: string) => Promise<void>];
@@ -586,11 +622,12 @@ const selectTwelve = async (page: Page) => {
 const everywhere = (name: string, expectation: (where: Where) => Expectation, before: Hold[3], change: Hold[4], done: Hold[5]): Hold[] =>
   (['top', 'middle', 'bottom'] as const).map(where => [name, where, expectation(where), before, change, done]);
 const held = (): Expectation => 'held', risesAtTop = (where: Where): Expectation => where === 'top' ? 'rise' : 'held';
+const closesUp = (where: Where): Expectation => where === 'top' ? 'rise' : 'closes';
 const holds: readonly Hold[] = [
   ...everywhere('a new agent row lands above the reading row', held, nothing, page => agent(page, 'add-top'),
     page => expect(row(page, '0')).toHaveCount(1)),
   ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
-  ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
+  ...everywhere('the owner hides the reading row', closesUp, nothing, hide, goes),
   // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
   // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
   ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
@@ -616,7 +653,8 @@ const served = async (page: Page, run: () => Promise<void>) => {
 };
 
 for (const [name, where, expectation, before, change, done] of holds) {
-  const label = expectation === 'rise' ? `top boundary: ${name}, so the rows below rise` : `${name} at the ${where}`;
+  const label = expectation === 'rise' ? `top boundary: ${name}, so the rows below rise`
+    : expectation === 'closes' ? `${name} at the ${where}, and the row below closes the space` : `${name} at the ${where}`;
   test(`the Map holds when ${label}`, ({ page }) => served(page, async () => {
     await before(page);
     await settle(page);
@@ -636,6 +674,11 @@ for (const [name, where, expectation, before, change, done] of holds) {
     if (expectation === 'held') {
       await expect.poll(async () => Math.abs((await windowTop(page, survivor))! - was.get(survivor)!), `${survivor} keeps its window place`)
         .toBeLessThanOrEqual(3);
+    } else if (expectation === 'closes') {
+      await expect.poll(async () => Math.abs((await windowTop(page, survivor))! - was.get(read.key)!), `${survivor} takes ${read.key}'s window place`)
+        .toBeLessThanOrEqual(3);
+      const above = read.keys.slice(0, index).reverse().find(key => present.has(key));
+      if (above) expect(Math.abs((await windowTop(page, above))! - was.get(above)!), `${above} keeps its window place`).toBeLessThanOrEqual(3);
     } else {
       expect(await scrollTopOf(page)).toBe(0);
       const now = (await windowTop(page, survivor))!;
