@@ -84,7 +84,7 @@ describe('the chip row', () => {
   });
 
   it('G6: a filter that is active with no chip drawn still shows the summary and Clear, never an empty strip', () => {
-    const { group, onClear } = row({ counts: none, hidden: none, active: true, shown: 0, total: 0 });
+    const { group, onClear } = row({ counts: none, hidden: none, active: true, shown: 0, total: 0, empty: true });
     expect(within(group).queryByText('Nothing to filter')).toBeNull();
     expect(within(group).getByRole('status').textContent).toContain('Showing 0 of 0 items');
     fireEvent.click(within(group).getByRole('button', { name: 'Clear' }));
@@ -93,7 +93,7 @@ describe('the chip row', () => {
 
   it('G3, G15: before the reveal, says how many hidden items match and offers "Show them"', () => {
     const onShowHidden = vi.fn();
-    const { group } = row({ picked: ['open'], shown: 0, total: 5, note: { remaining: 2, shown: 0, outside: 0, owned: false }, onShowHidden, onHideShown: vi.fn() });
+    const { group } = row({ picked: ['open'], shown: 0, total: 5, note: { remaining: 2, shown: 0, outside: 0 }, onShowHidden, onHideShown: vi.fn() });
     expect(group.textContent).toContain('Showing 0 of 5 items');
     expect(group.textContent).toContain('+2 hidden match');
     expect(within(group).queryByRole('button', { name: 'Hide them' })).toBeNull();
@@ -102,13 +102,13 @@ describe('the chip row', () => {
   });
 
   it('G10, G15: names the matches outside Focus beside the ones Show them can reach', () => {
-    const { group } = row({ picked: ['open'], note: { remaining: 2, shown: 0, outside: 3, owned: false }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+    const { group } = row({ picked: ['open'], note: { remaining: 2, shown: 0, outside: 3 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
     expect(group.textContent).toContain('+2 hidden match (3 outside Focus)');
     expect(within(group).getByRole('button', { name: 'Show them' })).toBeTruthy();
   });
 
   it('G15: with every hidden match outside Focus there is nothing to show, only the count', () => {
-    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 0, outside: 3, owned: false }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 0, outside: 3 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
     expect(group.textContent).toContain('3 hidden match outside Focus');
     expect(within(group).queryByRole('button', { name: 'Show them' })).toBeNull();
     expect(group.textContent).not.toContain('+0');
@@ -116,43 +116,57 @@ describe('the chip row', () => {
 
   it('G15: after the reveal, says how many are shown and offers "Hide them"', () => {
     const onHideShown = vi.fn();
-    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 2, outside: 0, owned: true }, onShowHidden: vi.fn(), onHideShown });
+    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 2, outside: 0 }, onShowHidden: vi.fn(), onHideShown });
     expect(group.textContent).toContain('2 hidden shown');
     expect(within(group).queryByRole('button', { name: 'Show them' })).toBeNull();
     fireEvent.click(within(group).getByRole('button', { name: 'Hide them' }));
     expect(onHideShown).toHaveBeenCalledTimes(1);
   });
 
-  it('G15: "Hide them" stays while the reveal holds anything, whatever the remaining count; both parts show when both apply', () => {
-    const { group } = row({ picked: ['open'], note: { remaining: 1, shown: 2, outside: 0, owned: true }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+  it('G15: both parts show when hidden matches are shown and others remain', () => {
+    const { group } = row({ picked: ['open'], note: { remaining: 1, shown: 2, outside: 0 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
     expect(group.textContent).toContain('2 hidden shown');
     expect(group.textContent).toContain('+1 hidden match');
     expect(within(group).getByRole('button', { name: 'Hide them' })).toBeTruthy();
     expect(within(group).getByRole('button', { name: 'Show them' })).toBeTruthy();
   });
 
-  it('G15: a reveal that holds state but shows nothing now still offers "Hide them", without "0 hidden shown"', () => {
-    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 0, outside: 0, owned: true }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
-    expect(within(group).getByRole('button', { name: 'Hide them' })).toBeTruthy();
+  it('review 4: "Hide them" shows only while K > 0 hidden rows are shown, never as a button that does nothing', () => {
+    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 0, outside: 0 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+    expect(within(group).queryByRole('button', { name: 'Hide them' })).toBeNull();
     expect(group.textContent).not.toContain('0 hidden shown');
   });
 
+  it('review 3: with no visible item the summary says "All items are hidden", the rest of the note unchanged', () => {
+    const { group } = row({ picked: ['open'], shown: 0, total: 0, note: { remaining: 3, shown: 0, outside: 0 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+    expect(within(group).getByRole('status').textContent).toContain('All items are hidden');
+    expect(group.textContent).not.toContain('Showing 0 of 0 items');
+    expect(group.textContent).toContain('+3 hidden match');
+    expect(within(group).getByRole('button', { name: 'Show them' })).toBeTruthy();
+  });
+
+  it('review 3: a session with no item at all keeps "Showing 0 of 0 items"', () => {
+    const { group } = row({ picked: ['open'], shown: 0, total: 0, empty: true });
+    expect(within(group).getByRole('status').textContent).toContain('Showing 0 of 0 items');
+    expect(group.textContent).not.toContain('All items are hidden');
+  });
+
   it('G5: the Graph passes no actions; the note is text only', () => {
-    const { group } = row({ picked: ['open'], note: { remaining: 3, shown: 0, outside: 0, owned: false } });
+    const { group } = row({ picked: ['open'], note: { remaining: 3, shown: 0, outside: 0 } });
     expect(group.textContent).toContain('+3 hidden match');
     expect(within(group).queryByRole('button', { name: 'Show them' })).toBeNull();
     expect(within(group).queryByRole('button', { name: 'Hide them' })).toBeNull();
   });
 
   it('draws no note when nothing hidden matches', () => {
-    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 0, outside: 0, owned: false }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+    const { group } = row({ picked: ['open'], note: { remaining: 0, shown: 0, outside: 0 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
     expect(group.textContent).not.toContain('hidden');
     expect(within(group).queryByRole('button', { name: 'Show them' })).toBeNull();
     expect(within(group).queryByRole('button', { name: 'Hide them' })).toBeNull();
   });
 
   it('disables the note actions with the rest while a write is unconfirmed', () => {
-    const { group } = row({ picked: ['open'], disabled: true, note: { remaining: 1, shown: 1, outside: 0, owned: true }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
+    const { group } = row({ picked: ['open'], disabled: true, note: { remaining: 1, shown: 1, outside: 0 }, onShowHidden: vi.fn(), onHideShown: vi.fn() });
     for (const name of ['Show them', 'Hide them']) expect((within(group).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
   });
 

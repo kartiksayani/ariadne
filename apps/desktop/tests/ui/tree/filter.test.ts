@@ -5,7 +5,7 @@ import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { isBlocked } from '../../../src/selectors/tree/blocked';
 import {
-  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, hiddenChipCounts, hiddenMatchIds, loadLocalChips, pickedChips, saveLocalChips, savedChipEdit, setSavedChip, toggleLocalChip, toggleSavedChip,
+  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, hiddenChipCounts, hiddenMatchIds, loadLocalChips, pickedChips, saveLocalChips, savedChipEdit, setSavedChip, summaryCounts, toggleLocalChip, toggleSavedChip,
   type Chip, type FilterScope, type LocalChip,
 } from '../../../src/selectors/tree/filter';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -213,6 +213,24 @@ describe('chips with hidden items (alpha.24 G3, G8)', () => {
     expect(hiddenChipCounts(scope(session, { archived: true }, [], [], hide))).toEqual(zero);
     session.items['8']!.removed_at = session.updated_at;
     expect(hiddenChipCounts(scope(session, {}, [], [], hide)).open).toBe(anyone.open - 1);
+  });
+
+  it('review 6: hide-later takes the Later items out of every hidden count and match, as it does for the visible ones', () => {
+    const session = seed(), hide = everyId(session);
+    // 4 and 8 are open and hidden; 4 is also in Later.
+    const plain = scope(session, { statuses: ['open'] }, [], ['4'], hide), hiding = scope(session, { statuses: ['open'], hide_later: true }, [], ['4'], hide);
+    expect(hiddenChipCounts(hiding).open).toBe(hiddenChipCounts(plain).open - 1);
+    expect(hiddenChipCounts(hiding).later).toBe(0); expect(hiddenChipCounts(plain).later).toBe(1);
+    expect(hiddenMatchIds(plain)).toContain('4'); expect(hiddenMatchIds(hiding)).not.toContain('4');
+    expect(hiddenMatchIds(hiding)).toContain('8');
+  });
+
+  it('review 3: summaryCounts counts the hidden items apart, so "all hidden" is told from "no item at all"', () => {
+    const session = seed(), all = everyId(session);
+    expect(summaryCounts(scope(session, {}, [], [], all))).toMatchObject({ shown: 0, total: 0, hiddenTotal: all.length });
+    expect(summaryCounts(scope(session, {}, [], [], ['4']))).toMatchObject({ hiddenTotal: 1, total: all.length - 1 });
+    session.items = {}; session.topics = {};
+    expect(summaryCounts(scope(session))).toEqual({ shown: 0, total: 0, hiddenTotal: 0 });
   });
 
   it.each<[LocalChip]>([['toack'], ['sent'], ['blocked'], ['later']])('counts the local chip %s the same way', chip => {

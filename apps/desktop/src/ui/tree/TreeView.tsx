@@ -7,7 +7,7 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 // banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
@@ -39,7 +39,7 @@ import { TopicMenu } from './band/TopicMenu';
 import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { Banner } from './Banner';
 import { FilterRow, chipLabel, type HiddenNote } from './FilterRow';
-import { sessionGraph } from '../graph/model';
+import { DrawnHiddenContext } from '../graph/drawnHidden';
 import { useLocalChips } from './useLocalChips';
 import { useArchiveBridge } from './archiveBridge';
 import { chipCounts, filterActive, filterOf, filterSignature, hiddenChipCounts, hiddenMatchIds, isLocalChip, pickedChips, savedChipEdit, summaryCounts, toggleLocalChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
@@ -165,6 +165,8 @@ export function TreeView(props: TreeViewProps) {
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const focusDisabled = viewBusy && !navigation.isRecentPending();
   const archivedMode = view?.filters.archived ?? false;
+  // The strip is on screen (Archive mode and the closed funnel suppress it); the filter's reveal lives only while it is.
+  const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const savedLater = preferences?.later;
   const later = useMemo(() => new Set(savedLater?.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
     .map(item => item.item_id) ?? []), [savedLater, route.project_id, route.session_id]);
@@ -182,9 +184,13 @@ export function TreeView(props: TreeViewProps) {
   useLayoutEffect(() => { setSearchCurrent(null); if (!termsKey) setSearchShown(null); }, [termsKey]);
   useLayoutEffect(() => { setSearchCurrent(null); setSearchShown(null); }, [route.project_id, route.session_id]);
   // The filter strip's "Show them" (alpha.24) opens the way to hidden matches in memory, as the search does, but in a set of its own
-  // so neither clears the other. It ends with the session, any change of the filter (picked chips, owners, hide-later, archive) and Clear.
+  // so neither clears the other. It ends with the session, any change of the filter (picked chips, owners, hide-later, archive), Clear
+  // and the strip closing (its "Hide them" goes with it).
   const [filterShown, setFilterShown] = useState<SearchReveal | null>(null);
-  useLayoutEffect(() => { setFilterShown(null); }, [route.project_id, route.session_id, filterKey]);
+  useLayoutEffect(() => { setFilterShown(null); }, [route.project_id, route.session_id, filterKey, filtersShown]);
+  // The hidden items the Graph draws, as it reports them (drawnHidden.ts): the strip's Graph note leaves them out.
+  const [graphHidden, setGraphHidden] = useState<ReadonlySet<string> | null>(null);
+  const reportGraphHidden = useCallback((ids: readonly string[] | null) => setGraphHidden(ids ? new Set(ids) : null), []);
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
   const [nextTarget, setNextTarget] = useState<{ readonly id: string; readonly step: number } | null>(null);
   const [nextRevealId, setNextRevealId] = useState<string | null>(null);
@@ -1440,21 +1446,15 @@ export function TreeView(props: TreeViewProps) {
   const unreadable = !session && state.status === 'inaccessible';
   // Where the line above the Map is on screen it reports an unsure save, and its "Try again" is the one place to check again.
   const lineShown = useContext(ConnectionLineShown);
-  const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const graphShown = !!graph && !loading && !unreadable;
   const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), hidden: hiddenChipCounts(scope), matches: hiddenMatchIds(scope),
     picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null, [scope, filtersShown]);
   // The Graph draws no hidden node except on the route to the selected or revealed item (graph/model.ts): the strip's note counts the
-  // hidden matches it does not draw (G16), and offers no reveal.
-  const graphDrawn = useMemo(() => graphShown && session && view && scope && chips?.matches.length
-    ? sessionGraph({ session, view, later, local: localChips.chips, selectedId, temporaryExpandedItemIds: temporary ?? [], revealedItemId: revealId,
-      filterCollapsedItemIds: filterFolds.items }).nodes : null,
-  [graphShown, session, view, scope, chips, later, localChips.chips, selectedId, temporary, revealId, filterFolds.items]);
+  // hidden matches the Graph reports it does not draw (G16, from its own model), and offers no reveal.
   const filterHidden = model?.filterHidden;
-  const revealHeld = !!filterShown && (filterShown.items.length > 0 || filterShown.topics.length > 0 || filterShown.groups.length > 0);
   const hiddenNote: HiddenNote | null = !chips?.active ? null : graphShown
-    ? { remaining: chips.matches.filter(id => !graphDrawn?.has(id)).length, shown: 0, outside: 0, owned: false }
-    : filterHidden ? { remaining: filterHidden.remaining, shown: filterHidden.shown, outside: filterHidden.outside, owned: revealHeld } : null;
+    ? { remaining: chips.matches.filter(id => !graphHidden?.has(id)).length, shown: 0, outside: 0 }
+    : filterHidden ? { remaining: filterHidden.remaining, shown: filterHidden.shown, outside: filterHidden.outside } : null;
   /** "Show them": opens, in memory only, what the hidden matches inside the Focus need. Neither the saved view nor the Focus changes. */
   const showHidden = () => {
     const reveal = model?.filterHidden.reveal;
@@ -1463,7 +1463,7 @@ export function TreeView(props: TreeViewProps) {
     setFilterShown(previous => ({ items: join(previous?.items, reveal.items), topics: join(previous?.topics, reveal.topics), groups: join(previous?.groups, reveal.groups) }));
   };
   const filterRow = chips && <FilterRow counts={chips.counts} hidden={chips.hidden} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
-    note={hiddenNote} disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips}
+    empty={chips.hiddenTotal === 0} note={hiddenNote} disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips}
     onShowHidden={graphShown ? undefined : showHidden} onHideShown={graphShown ? undefined : () => setFilterShown(null)} />;
   let body: ReactNode;
   if (loading) {
@@ -1539,7 +1539,7 @@ export function TreeView(props: TreeViewProps) {
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     {notices}
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
-    {graphShown ? graph : <div className="tree-scroll-shell">
+    {graphShown ? <DrawnHiddenContext.Provider value={reportGraphHidden}>{graph}</DrawnHiddenContext.Provider> : <div className="tree-scroll-shell">
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event; remembering restores any intervening reflow
         // before capturing again, and ends a reveal the owner scrolled away from.

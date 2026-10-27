@@ -20,20 +20,22 @@ const CHIP_VIEW: Readonly<Record<Chip, { readonly label: string; readonly icon: 
 export const chipLabel = (chip: Chip): string => CHIP_VIEW[chip].label;
 
 /** The hidden matches of the picked filter, as the strip says them (alpha.24): `remaining` are not drawn (inside Focus), `shown`
- * are drawn because the filter's own reveal opened them, `outside` lie outside Focus. `owned` is whether the filter's reveal holds
- * anything to put away. */
-export interface HiddenNote { readonly remaining: number; readonly shown: number; readonly outside: number; readonly owned: boolean }
+ * are drawn because the filter's own reveal opened them, `outside` lie outside Focus. */
+export interface HiddenNote { readonly remaining: number; readonly shown: number; readonly outside: number }
 
 /** `active` is the filter itself (picked chips, owners, hide-later or a leftover saved status), so Clear shows whenever the
  * Map is filtered, even with no chip picked. `hidden` counts the hidden items each chip would match beside its visible count;
- * `note` and its two actions speak for the hidden matches (the Graph passes no `onShow`: it draws no hidden nodes). */
-export function FilterRow({ counts, hidden, picked, active, shown, total, note, disabled, onChip, onClear, onShowHidden, onHideShown }: {
+ * `note` and its two actions speak for the hidden matches (the Graph passes no `onShow`: it draws no hidden nodes). With no visible
+ * item the summary says "All items are hidden", unless the session has no item at all (`empty`). */
+export function FilterRow({ counts, hidden, picked, active, shown, total, empty = false, note, disabled, onChip, onClear, onShowHidden, onHideShown }: {
   counts: Readonly<Record<Chip, number>>; hidden?: Readonly<Record<Chip, number>>; picked: readonly Chip[]; active: boolean; shown: number; total: number;
-  note?: HiddenNote | null; disabled: boolean; onChip: (chip: Chip) => void; onClear: () => void; onShowHidden?: () => void; onHideShown?: () => void;
+  empty?: boolean; note?: HiddenNote | null; disabled: boolean; onChip: (chip: Chip) => void; onClear: () => void; onShowHidden?: () => void; onHideShown?: () => void;
 }) {
   const behind = (chip: Chip) => hidden?.[chip] ?? 0;
   const drawn = CHIP_ORDER.filter(chip => counts[chip] > 0 || behind(chip) > 0 || picked.includes(chip));
-  const putAway = note && (note.shown > 0 || note.owned) && onHideShown;
+  const allHidden = total === 0 && !empty;
+  // "Hide them" only while the filter's own reveal draws at least one hidden row: it never shows as a button that does nothing.
+  const putAway = note && note.shown > 0 && onHideShown;
   const offer = note && note.remaining > 0;
   const outsideOnly = note && note.remaining === 0 && note.outside > 0;
   return <div className="tree-filter-row" role="group" aria-label="Filter items">
@@ -51,12 +53,12 @@ export function FilterRow({ counts, hidden, picked, active, shown, total, note, 
     <div className="tree-filter-end">
       {!active ? <span className="tree-filter-hint">{drawn.length ? 'Pick a status' : 'Nothing to filter'}</span> : <>
         <span className="tree-filter-summary" role="status">
-          <span className="tree-filter-wide">Showing {shown} of {total} items</span>
-          <span className="tree-filter-narrow" aria-hidden="true">{shown} of {total}</span>
+          <span className="tree-filter-wide">{allHidden ? 'All items are hidden' : `Showing ${shown} of ${total} items`}</span>
+          <span className="tree-filter-narrow" aria-hidden="true">{allHidden ? 'All hidden' : `${shown} of ${total}`}</span>
         </span>
         {putAway && <span className="tree-filter-note">
           <span aria-hidden="true">·</span>
-          {note.shown > 0 && <span>{note.shown} hidden shown</span>}
+          <span>{note.shown} hidden shown</span>
           <button type="button" className="tree-filter-clear" disabled={disabled} onClick={onHideShown}>Hide them</button>
         </span>}
         {(offer || outsideOnly) && <span className="tree-filter-note">

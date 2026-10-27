@@ -117,6 +117,17 @@ describe('the filter tally of hidden matches', () => {
     expect(items(leftover.rows)).toEqual(items(plain.rows));
   });
 
+  it('review 6: hide-later takes a Later item out of the tally (remaining and shown), as it does for the visible rows', () => {
+    const { model, view } = fixture(['4', '8']);
+    expect(model({ later: new Set(['4']) }).filterHidden).toMatchObject({ remaining: 2 });
+    view.filters.hide_later = true;
+    const built = model({ later: new Set(['4']) });
+    expect(built.filterHidden).toMatchObject({ remaining: 1, shown: 0, outside: 0 });
+    const shown = model({ later: new Set(['4']), filterShown: built.filterHidden.reveal });
+    expect(items(shown.rows)).toContain('8'); expect(items(shown.rows)).not.toContain('4');
+    expect(shown.filterHidden).toMatchObject({ remaining: 0, shown: 1 });
+  });
+
   it('G15: a filter with no hidden item has nothing to tally', () => {
     const { model } = fixture([]);
     expect(model().filterHidden).toMatchObject({ remaining: 0, shown: 0, outside: 0 });

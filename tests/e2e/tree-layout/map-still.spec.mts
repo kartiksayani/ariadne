@@ -93,6 +93,13 @@ const moreActions = (page: Page) => bandButton(page, /^More actions for/);
 type Trigger = readonly [name: string, kind: 'still' | 'held' | 'goes', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
+/** The row the hide-with-reveal trigger hides, found in its setup. */
+const hidingWithReveal = { id: '' };
+/** The nearest undimmed row above the reading row (10), in reading order. */
+const visibleRowAbove = (page: Page) => page.evaluate(() => {
+  const rows = [...document.querySelectorAll<HTMLElement>('.tree-item[data-item-id]')], at = rows.findIndex(value => value.dataset.itemId === '10');
+  return rows.slice(0, at).reverse().find(value => !value.classList.contains('tree-item-hidden'))?.dataset.itemId ?? '';
+});
 const triggers: readonly Trigger[] = [
   // The marker is there before the dwell, so its absence afterwards is a clear and not a row that never had one.
   ['a New marker clears', 'still', '11', page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(1), page => seen(page, '11'),
@@ -159,6 +166,15 @@ const triggers: readonly Trigger[] = [
     await chipRow(page).getByRole('button', { name: 'Show them' }).click();
     await expect(row(page, '9')).toHaveCount(1); await settle(page);
   }, page => chipRow(page).getByRole('button', { name: 'Hide them' }).click(), page => expect(row(page, '9')).toHaveCount(0)],
+  // Hide of a row above the reading row while the filter's reveal is open: the Map is projected with the reveal (chooseAfterHide,
+  // holdBack), so the hidden row joins the revealed ones, dimmed where it stood, and the reading row holds.
+  ['a row above the reading row is hidden while the filter\'s reveal is open', 'held', null, async page => {
+    await hiddenMatchAbove(page);
+    await chipRow(page).getByRole('button', { name: 'Show them' }).click();
+    await expect(row(page, '9')).toHaveCount(1); await settle(page);
+    hidingWithReveal.id = await visibleRowAbove(page);
+  }, page => click(row(page, hidingWithReveal.id).getByRole('button', { name: /^Hide/, includeHidden: true })),
+  async page => { await expect(row(page, hidingWithReveal.id)).toHaveClass(/tree-item-hidden/); await expect(row(page, '9')).toHaveCount(1); }],
   ['Show more on the reading row', 'held', '10', nothing, page => press(row(page, '10').getByRole('button', { name: 'Show more' })),
     page => expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
   // The rows below change what is above the reading row, which is out of view: the owner's click is a DOM click.

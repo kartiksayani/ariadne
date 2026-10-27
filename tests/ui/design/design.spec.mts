@@ -43,6 +43,23 @@ async function settle(page: Page) {
   });
 }
 
+/**
+ * The chip row (SPEC 6.10), where the frame shows it: toggle buttons named "<status> <count>" (alpha.24: "<status> 0, N more hidden"
+ * when items hide behind the chip), no menu button and no combobox. Only a frame whose fixture is empty or all hidden may have no
+ * chip, and then the strip says "Nothing to filter" instead of drawing an empty strip; a populated frame with no chip fails.
+ */
+async function chipStrip(page: Page, spec: FrameSpec) {
+  const filters = page.getByRole('group', { name: 'Filter items' });
+  if (!await filters.count()) return;
+  const chips = filters.getByRole('button', { name: /\d( more hidden)?$/ });
+  if (spec.state === 'empty' || spec.allHidden) {
+    if (await chips.count()) await expect(chips.first()).toBeVisible();
+    else await expect(filters).toContainText('Nothing to filter');
+  } else await expect(chips.first()).toBeVisible();
+  await expect(filters.getByRole('button', { name: /^Filter/ })).toHaveCount(0);
+  await expect(filters.getByRole('combobox')).toHaveCount(0);
+}
+
 /** Opens the frame in the app and puts it in the frame's state. */
 async function openApp(page: Page, origin: string, spec: FrameSpec) {
   const denied: string[] = [];
@@ -77,16 +94,7 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await expect(sessionBar.getByRole('button', { name: 'Close session' })).toHaveCount(0);
     await expect(sessionBar.locator('.tree-session-meta')).toHaveText(/^\d+ topics?$/);
   }
-  const filters = page.getByRole('group', { name: 'Filter items' });
-  if (await filters.count()) {
-    // The chip row (SPEC 6.10): toggle buttons named "<status> <count>" (alpha.24: "<status> 0, N more hidden" when items hide behind
-    // the chip), no menu button and no combobox. A session with nothing to filter says so instead of drawing an empty strip.
-    const chips = filters.getByRole('button', { name: /\d( more hidden)?$/ });
-    if (await chips.count()) await expect(chips.first()).toBeVisible();
-    else await expect(filters).toContainText('Nothing to filter');
-    await expect(filters.getByRole('button', { name: /^Filter/ })).toHaveCount(0);
-    await expect(filters.getByRole('combobox')).toHaveCount(0);
-  }
+  await chipStrip(page, spec);
   // The Back-to pill (SPEC §5.8) floats over the Map in the scroller's shell, never inside the scroller, never in the Graph.
   if (graphFrame(spec)) {
     await expect(page.locator('.tree-back')).toHaveCount(0);
@@ -531,6 +539,7 @@ for (const theme of ['dark', 'light'] as const) {
     await page.getByRole('button', { name: /^Filter by status/ }).click();
     const strip = page.getByRole('group', { name: 'Filter items' });
     await expect(strip).toBeVisible();
+    await chipStrip(page, { ...frameSpec('filter-all-hidden'), theme });
     const chips = strip.getByRole('button', { name: /more hidden$/ });
     expect(await chips.count(), 'a chip for each status the hidden items hold').toBeGreaterThan(2);
     await expect(strip.getByRole('button', { name: /^(Open|Done|In progress) 0, \d+ more hidden$/ }).first()).toBeVisible();
@@ -564,10 +573,20 @@ for (const theme of ['dark', 'light'] as const) {
     await openApp(page, origin, { ...frameSpec('filter-empty'), theme });
     await page.getByRole('button', { name: /^Filter by status/ }).click();
     const strip = page.getByRole('group', { name: 'Filter items' });
+    await chipStrip(page, { ...frameSpec('filter-empty'), theme });
     await expect(strip).toContainText('Nothing to filter');
     await expect(strip.getByRole('button')).toHaveCount(0);
     await expect(strip).not.toContainText('Pick a status');
     await testInfo.attach(`filter-empty-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  // A populated frame must draw a chip: "Nothing to filter" is no fallback for it.
+  test(`A populated frame's chip strip draws a status chip (map-thread, ${theme})`, async ({ page, origin }) => {
+    await openApp(page, origin, { ...frameSpec('map-thread'), theme });
+    await page.getByRole('button', { name: /^Filter by status/ }).click();
+    await expect(page.getByRole('group', { name: 'Filter items' })).toBeVisible();
+    await chipStrip(page, { ...frameSpec('map-thread'), theme });
+    await expect(page.getByRole('group', { name: 'Filter items' })).not.toContainText('Nothing to filter');
   });
 }
 

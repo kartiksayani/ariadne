@@ -24,6 +24,7 @@ import { ChangeMarker } from '../changes/ChangeMarker';
 import { usePeek } from '../peek/context';
 import { applyChange, graphColumn, mergeChange, relatedLines, sessionGraph, statusVisual, type GraphNode, type SessionGraph, type TopicGraph, type ViewChange } from './model';
 import { useMapSearch } from '../tree/mapSearch';
+import { useReportDrawnHidden } from './drawnHidden';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
@@ -190,6 +191,9 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
   [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
+  // The hidden items this layout draws (a path to the selected or revealed item needs them): the filter strip's note counts the rest.
+  const drawnHidden = useMemo(() => graph ? [...graph.nodes.values()].filter(node => node.hidden).map(node => node.item.id).sort() : null, [graph]);
+  useReportDrawnHidden(drawnHidden);
   const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner });
   latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, asked: revealAsks, dockInset, folds: filterFolds.items, onDismissBanner };
 

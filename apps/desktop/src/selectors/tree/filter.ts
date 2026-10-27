@@ -111,9 +111,9 @@ function shownItems(scope: FilterScope): readonly Immutable<Item>[] {
 const hiddenOf = (scope: FilterScope) => hiddenItems(scope.session, new Set(scope.view.hidden_item_ids ?? []));
 
 /** "Showing N of M items": the matching items over every item of the shown topics, hidden items left out of both. */
-export function summaryCounts(scope: FilterScope): { readonly shown: number; readonly total: number } {
-  const hidden = hiddenOf(scope), filter = filterOf(scope), live = shownItems(scope).filter(item => !hidden.has(item.id));
-  return { shown: live.filter(item => filter.matches(item)).length, total: live.length };
+export function summaryCounts(scope: FilterScope): { readonly shown: number; readonly total: number; readonly hiddenTotal: number } {
+  const hidden = hiddenOf(scope), filter = filterOf(scope), all = shownItems(scope), live = all.filter(item => !hidden.has(item.id));
+  return { shown: live.filter(item => filter.matches(item)).length, total: live.length, hiddenTotal: all.length - live.length };
 }
 
 /** Counts inside today's scope; hidden items are left out, except in Waiting on me, which never loses a question (D14). The hidden

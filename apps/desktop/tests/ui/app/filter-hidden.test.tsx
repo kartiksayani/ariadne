@@ -28,8 +28,18 @@ async function ready() {
     expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
   });
 }
-async function mount(setup: (transport: AppTransport) => void = () => undefined) {
-  const transport = new AppTransport();
+/** A transport that holds the write saving item 1.1 as the selection until the test lets it go (a Graph select that is still pending). */
+class HeldSelection extends AppTransport {
+  gate: Promise<void> | null = null;
+  override async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
+    const request = args.request;
+    if (this.gate && 'command' in request && request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')) await this.gate;
+    return super.invoke<T>(name, args);
+  }
+}
+const graphNode = (id: string) => document.querySelector<HTMLElement>(`[data-testid="graph-scroll"] [role="treeitem"][data-item-id="${id}"]`);
+async function mount(setup: (transport: AppTransport) => void = () => undefined, transport: AppTransport = new AppTransport()) {
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   saved(transport).tab_open = true;
   setup(transport);
@@ -65,7 +75,8 @@ describe('Show them and Hide them (G1, G2, G4, G15)', () => {
     const transport = await mount(allHidden);
     await pick('Open 0, 3 more hidden');
     expect(picked(transport)).toEqual(['open']);
-    expect(text()).toContain('Showing 0 of 0 items');
+    // Review 3: with no visible item the summary says so instead of "Showing 0 of 0 items".
+    expect(text()).toContain('All items are hidden'); expect(text()).not.toContain('Showing 0 of 0 items');
     expect(text()).toContain('+3 hidden match');
     for (const id of ['4', '8', '1.1']) expect(treeRow(id)).toBeNull();
     const writes = transport.mutations.length, hiddenBefore = [...saved(transport).hidden_item_ids ?? []];
@@ -175,6 +186,55 @@ describe('Show them and Hide them (G1, G2, G4, G15)', () => {
     await pick(/^Later /);
     expect(treeRow('4')).toBeNull();
   });
+
+  it('review 2: closing the funnel ends the reveal, so no dimmed row is left without its "Hide them"; reopening counts again', async () => {
+    await mount(allHidden);
+    await pick('Open 0, 3 more hidden');
+    fireEvent.click(within(strip()).getByRole('button', { name: 'Show them' }));
+    expect(treeRow('4')).not.toBeNull();
+    fireEvent.click(funnel());
+    expect(screen.queryByRole('group', { name: 'Filter items' })).toBeNull();
+    for (const id of ['4', '8', '1.1']) expect(treeRow(id)).toBeNull();
+    // `text()` opens the funnel again: the filter is still picked, and the hidden matches are waiting to be shown.
+    expect(text()).toContain('+3 hidden match'); expect(text()).not.toContain('hidden shown');
+    for (const id of ['4', '8', '1.1']) expect(treeRow(id)).toBeNull();
+  });
+
+  it('review 4: once every revealed row is unhidden by hand there is nothing for "Hide them" to put away, and it goes', async () => {
+    const transport = await mount(setup => { saved(setup).hidden_item_ids = ['4', '8']; });
+    await pick(/^Open \d+, 2 more hidden$/);
+    fireEvent.click(within(strip()).getByRole('button', { name: 'Show them' }));
+    expect(text()).toContain('2 hidden shown');
+    expect(within(strip()).getByRole('button', { name: 'Hide them' })).toBeTruthy();
+    for (const id of ['4', '8']) {
+      fireEvent.click(within(treeRow(id)!).getByRole('button', { name: 'Unhide (x)' }));
+      await waitFor(() => expect(saved(transport).hidden_item_ids).not.toContain(id)); await ready();
+    }
+    expect(text()).not.toContain('hidden shown');
+    expect(within(strip()).queryByRole('button', { name: 'Hide them' })).toBeNull();
+    expect(within(strip()).queryByRole('button', { name: 'Show them' })).toBeNull();
+  });
+
+  it('review 6: the search\'s reveal survives the filter\'s Hide them and Clear, and the filter\'s survives nothing of the search', async () => {
+    await mount(setup => { saved(setup).hidden_item_ids = ['4', '8']; });
+    fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'preserve' } });
+    expect(await screen.findByText('Also matching: 1 in a hidden item.')).toBeTruthy();
+    // The funnel is still closed, so this "Show them" is the top bar's search note.
+    fireEvent.click(screen.getByRole('button', { name: 'Show them' }));
+    expect(treeRow('8')).not.toBeNull();
+    await pick(/^Open \d+, 2 more hidden$/);
+    // 8 is drawn by the search, so only 4 is left for the filter's reveal.
+    expect(text()).toContain('+1 hidden match');
+    fireEvent.click(within(strip()).getByRole('button', { name: 'Show them' }));
+    expect(treeRow('4')).not.toBeNull(); expect(text()).toContain('1 hidden shown');
+    fireEvent.click(within(strip()).getByRole('button', { name: 'Hide them' }));
+    expect(treeRow('4')).toBeNull(); expect(treeRow('8')).not.toBeNull();
+    fireEvent.click(within(strip()).getByRole('button', { name: 'Show them' }));
+    expect(treeRow('4')).not.toBeNull();
+    fireEvent.click(within(strip()).getByRole('button', { name: 'Clear' })); await ready();
+    expect(treeRow('4')).toBeNull(); expect(treeRow('8')).not.toBeNull();
+  });
 });
 
 describe('Focus (G10)', () => {
@@ -204,6 +264,37 @@ describe('the Graph (G5, G16)', () => {
     await waitFor(() => expect(text()).toContain('+2 hidden match'));
     expect(within(strip()).queryByRole('button', { name: 'Show them' })).toBeNull();
     expect(within(strip()).queryByRole('button', { name: 'Hide them' })).toBeNull();
+  });
+
+  it('review 1: a hidden match on the selected route is left out of the note because the Graph reports it drawn', async () => {
+    await mount(setup => { allHidden(setup); saved(setup).selected_item_id = '1.1'; });
+    await pick(/^Open 0, \d more hidden$/);
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    await ready();
+    // The Graph draws 1 and 1.1 (the route, dimmed): 1.1 is a match; 4 and 8 are not drawn.
+    await waitFor(() => expect(graphNode('1.1')).not.toBeNull());
+    await waitFor(() => expect(text()).toContain('+2 hidden match'));
+  });
+
+  it('review 1: a Graph select that is still pending changes the note at once, from the Graph\'s own layout', async () => {
+    const transport = new HeldSelection();
+    // 4 and 8 are hidden open matches; 1.1 is a visible one.
+    await mount(setup => { saved(setup).hidden_item_ids = ['4', '8']; saved(setup).selected_item_id = '4'; }, transport);
+    await pick(/^Open \d+, 2 more hidden$/);
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    await ready();
+    // The Graph draws item 4 on the selected route: one hidden match (8) is left.
+    await waitFor(() => expect(graphNode('4')).not.toBeNull());
+    await waitFor(() => expect(text()).toContain('+1 hidden match'));
+    let release!: () => void;
+    transport.gate = new Promise<void>(resolve => { release = resolve; });
+    fireEvent.click(graphNode('1.1')!);
+    // The write saving item 1.1 is held, so the saved view still selects 4; the Graph already draws 1.1 and no longer 4.
+    await waitFor(() => expect(text()).toContain('+2 hidden match'));
+    expect(saved(transport).selected_item_id).toBe('4');
+    release();
+    await waitFor(() => expect(saved(transport).selected_item_id).toBe('1.1')); await ready();
+    expect(text()).toContain('+2 hidden match');
   });
 });
 
