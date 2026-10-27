@@ -49,7 +49,7 @@ import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop, type BackPill } from './scroll';
-import { keyStopsLanding, landingMoves, startLanding, wheelScrolls, type Landing } from '../shared/landing';
+import { keyStopsLanding, landingMoves, reachable, startLanding, WheelStream, type Landing } from '../shared/landing';
 import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -246,6 +246,8 @@ export function TreeView(props: TreeViewProps) {
   const landing = useRef<{ readonly key: string; readonly run: Landing } | null>(null);
   /** Stops a landing where it is: it retains nothing (Q7). */
   const stopLanding = () => { const current = landing.current; landing.current = null; current?.run.cancel(); };
+  /** The wheel events over the Map, so a swipe's own trailing momentum never stops the landing the swipe started. */
+  const wheels = useRef(new WheelStream()).current;
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
@@ -846,7 +848,7 @@ export function TreeView(props: TreeViewProps) {
     run = startLanding({
       remaining: () => {
         const delta = scroller.current === box ? nearestBy(key, 8, pill) : null;
-        return delta === null ? null : { top: delta, left: 0 };
+        return delta === null ? null : reachable(box, { top: delta, left: 0 });
       },
       move: by => { box.scrollTop += by.top; ownScroll.current = box.scrollTop; },
       screen: () => ({ top: box.clientHeight, left: 0 }),
@@ -855,7 +857,7 @@ export function TreeView(props: TreeViewProps) {
         retainReveal(key);
       },
     });
-    if (run.running()) landing.current = { key, run };
+    if (run.running()) { landing.current = { key, run }; wheels.carry(); }
   };
   const centered = useRef(false), settled = useRef(false), openingReveal = useRef<string | null>(null);
   const openingPlacement = useRef<string | null>(null);
@@ -1558,7 +1560,7 @@ export function TreeView(props: TreeViewProps) {
       if (!kbd) setKbd(true);
     }}
     onPointerDownCapture={() => { releaseReveal(); stopLanding(); }}
-    onWheelCapture={event => { releaseReveal(); if (scroller.current && wheelScrolls(event, scroller.current)) stopLanding(); }}
+    onWheelCapture={event => { releaseReveal(); if (scroller.current && wheels.stops(event, scroller.current)) stopLanding(); }}
     onMouseDownCapture={() => { keyboardIntent.current = false; if (kbd) setKbd(false); }}>
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}

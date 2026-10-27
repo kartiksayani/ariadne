@@ -27,11 +27,13 @@
 /* The keyboard focus (alpha.24 P4) and the next unseen target (`n`, P5) draw their line on the item where the selected box draws its
    ring: the selected box's place grown by the ring's 1.5px, so the line covers the ring's place. Focus is a soft dotted ring; the `n`
    target a dashed one in the attention colour. Precedence: `n` > selected > focus. No outline goes round the item's whole width (the
-   page's focus-visible one). A topic band or a strip keeps its focus ring (tree.css). */
-.tree-item:focus-visible {
+   page's focus-visible one). A topic band or a strip keeps its focus ring (tree.css). The dotted box also draws for :focus-visible
+   without the column's keyboard mode: a Tab into the Map from outside never passes a key through the column. */
+.product-app .tree-item:focus-visible {
   outline: none;
 }
 
+.tree-item:focus-visible:not([aria-selected="true"], [data-next-unseen])::before,
 .tree-column[data-kbd] .tree-item:focus:not([aria-selected="true"], [data-next-unseen])::before,
 .tree-item[data-next-unseen]::after {
   content: '';

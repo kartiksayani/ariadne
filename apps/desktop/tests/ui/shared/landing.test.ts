@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keyStopsLanding, LANDING_MS, landingMoves, startLanding, wheelScrolls, type Offset } from '../../../src/ui/shared/landing';
+import { keyStopsLanding, LANDING_MS, landingMoves, reachable, startLanding, WheelStream, wheelScrolls, type Offset } from '../../../src/ui/shared/landing';
+import { SWIPE_GAP_MS } from '../../../src/ui/shell/swipeGesture';
 
 const FRAME = 16, SCREEN = 500;
 
@@ -77,6 +78,24 @@ describe('landing', () => {
     expect(gone.landing.running()).toBe(false);
   });
 
+  it('eases toward the place it can reach, not past the end of the scroll range where it would stop dead at full speed', () => {
+    const box = { scrollTop: 100, scrollLeft: 0, scrollHeight: 1000, clientHeight: 500, scrollWidth: 400, clientWidth: 400 } as Element;
+    const cut = (top: number, left: number) => { const out = reachable(box, { top, left }); return [out.top, out.left].map(value => value + 0); };
+    expect(cut(-300, 0)).toEqual([-100, 0]);
+    expect(cut(300, 50)).toEqual([300, 0]);
+    expect(cut(450, -20)).toEqual([400, 0]);
+    // A landing measured through it stops smoothly at the end.
+    const state = { position: 100 };
+    startLanding({
+      remaining: () => reachable({ ...box, scrollTop: state.position } as Element, { top: 900 - state.position, left: 0 }),
+      move: by => { state.position += by.top; }, screen: () => ({ top: SCREEN, left: SCREEN }), landed: () => {},
+    });
+    const seen = run(state, LANDING_MS + 100);
+    expect(state.position).toBe(500);
+    const steps = seen.map((value, index) => value - (seen[index - 1] ?? 100)).filter(step => step > 0.5);
+    expect(steps.at(-1)!).toBeLessThan(0.1 * 400);
+  });
+
   it('lands at once with no way to go, and never starts without a target', () => {
     const there = scroller(0.2);
     expect(there.state.landed).toBe(1);
@@ -109,5 +128,49 @@ describe('landing', () => {
     expect(keyStopsLanding({ key: 'ArrowDown', repeat: false })).toBe(true);
     expect(keyStopsLanding({ key: 'ArrowDown', repeat: true })).toBe(false);
     for (const key of ['Meta', 'Shift', 'Alt', 'Control']) expect(keyStopsLanding({ key, repeat: false })).toBe(false);
+  });
+});
+
+describe('the wheel events of the swipe that started a landing', () => {
+  /** A Graph whose horizontal room the landing itself opens up: the box can scroll left once the landing has moved it. */
+  const edge = (scrollLeft: number) => ({ scrollLeft, clientWidth: 400, scrollWidth: 900 }) as Element;
+  const wheel = (timeStamp: number, deltaX: number, deltaY = 1) => ({ timeStamp, deltaX, deltaY });
+
+  it('never stop the landing, though the landing has moved the box so that the same wheel now scrolls it', () => {
+    const stream = new WheelStream();
+    // The swipe at the left edge: nothing to scroll that way yet, so no wheel stops anything.
+    expect(stream.stops(wheel(0, -40), edge(0))).toBe(false);
+    expect(stream.stops(wheel(16, -60), edge(0))).toBe(false);
+    stream.carry();
+    // The landing now moves the box right; the swipe's trailing momentum (a negative deltaX) would scroll it, read from the box alone.
+    expect(wheelScrolls(wheel(32, -30), edge(120))).toBe(true);
+    for (let time = 32; time < 900; time += 16) expect(stream.stops(wheel(time, -30), edge(120)), `at ${time} ms`).toBe(false);
+  });
+
+  it('stop it for the owner: a vertical wheel, a new gesture after a gap, or a stream that turns vertical', () => {
+    const stream = new WheelStream();
+    stream.stops(wheel(0, -80, 2), edge(0));
+    stream.carry();
+    expect(stream.stops(wheel(16, 0, 4), edge(120)), 'a little vertical in a sideways stream is still the swipe').toBe(false);
+    expect(stream.stops(wheel(32, -2, 90), edge(120)), 'the stream turned vertical').toBe(true);
+    const next = new WheelStream();
+    next.stops(wheel(0, -80, 2), edge(0));
+    next.carry();
+    expect(next.stops(wheel(16, -20), edge(120))).toBe(false);
+    // A gap of more than SWIPE_GAP_MS: a new gesture is the owner's own and scrolls the box where it can.
+    expect(next.stops(wheel(16 + SWIPE_GAP_MS + 1, -20), edge(120))).toBe(true);
+    expect(next.stops(wheel(16 + SWIPE_GAP_MS + 17, -20), edge(0))).toBe(false);
+  });
+
+  it('shield only the stream running when the landing begins (a ⌘[ from the keyboard, long after, has none)', () => {
+    const stream = new WheelStream();
+    stream.stops(wheel(0, -80, 2), edge(0));
+    stream.carry();
+    stream.stops(wheel(16, -80, 2), edge(0));
+    // Another landing begins from the keyboard long after: the stream that ended is not carried over.
+    stream.stops(wheel(1000, 0, 0), edge(0));
+    stream.carry();
+    expect(stream.stops(wheel(1016, -30), edge(120))).toBe(false);
+    expect(stream.stops(wheel(2000, -30), edge(120))).toBe(true);
   });
 });

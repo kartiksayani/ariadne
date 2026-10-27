@@ -28,7 +28,7 @@ import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
 import { scrollIntoViewIfHidden } from '../shared/scroll';
-import { keyStopsLanding, landingMoves, startLanding, wheelScrolls, type Landing, type Offset } from '../shared/landing';
+import { keyStopsLanding, landingMoves, reachable, startLanding, WheelStream, type Landing, type Offset } from '../shared/landing';
 import { useDockInset } from '../shell/dockInset';
 
 export interface GraphViewProps {
@@ -215,6 +215,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   /** The landing on its way (alpha.24 P3): a node a reveal from outside is centring over a few frames. */
   const landing = useRef<Landing | null>(null);
   const stopLanding = () => { landing.current?.cancel(); landing.current = null; };
+  /** The wheel events over the Graph, so a swipe's own trailing momentum never stops the landing the swipe started. */
+  const wheels = useRef(new WheelStream()).current;
   useEffect(() => stopLanding, []);
   /** The legend card hangs over the scroller's bottom edge; a node must land above it as well as above the dock. */
   const legendInset = useRef(0);
@@ -549,12 +551,12 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
         const id = target.id;
         let run: Landing | null = null;
         run = startLanding({
-          remaining: () => { const node = scroller.current === box ? nodeElement(id) : null; return node ? centring(box, node, latest.current.dockInset) : null; },
+          remaining: () => { const node = scroller.current === box ? nodeElement(id) : null; return node ? reachable(box, centring(box, node, latest.current.dockInset)) : null; },
           move: by => { box.scrollTop += by.top; box.scrollLeft += by.left; },
           screen: () => ({ top: box.clientHeight, left: box.clientWidth }),
           landed: () => { if (run && landing.current === run) landing.current = null; },
         });
-        if (run.running()) landing.current = run;
+        if (run.running()) { landing.current = run; wheels.carry(); }
       } else scrollToNode(box, element, target.center, bottomInset(), dockInset);
       if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
     } else if (initial) box?.focus({ preventScroll: true });
@@ -593,7 +595,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   return <div className="graph-view">
     <div ref={scroller} className="graph-scroll" data-testid="graph-scroll" tabIndex={-1} onScroll={remember}
       // The owner's wheel, press or key stops a landing where it is (Q3).
-      onWheelCapture={event => { if (wheelScrolls(event, event.currentTarget)) stopLanding(); }} onPointerDownCapture={stopLanding}
+      onWheelCapture={event => { if (wheels.stops(event, event.currentTarget)) stopLanding(); }} onPointerDownCapture={stopLanding}
       onKeyDownCapture={event => { if (keyStopsLanding(event)) stopLanding(); }}
       onFocus={event => {
         const element = event.target instanceof Element ? event.target.closest('[data-row]') : null;

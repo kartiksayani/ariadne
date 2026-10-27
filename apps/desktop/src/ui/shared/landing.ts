@@ -3,6 +3,7 @@
 // far the target still is, so rows that change height on the way and the reading-row hold's own corrections are absorbed, never
 // overshot. A long way jumps all but the last screen at once and eases over that screen. Reduced motion jumps, as does a page that
 // cannot ask for it (jsdom has no matchMedia).
+import { SWIPE_DOMINANCE, SWIPE_GAP_MS } from '../shell/swipeGesture';
 
 /** How long a landing takes, in ms. */
 export const LANDING_MS = 300;
@@ -31,6 +32,16 @@ export interface Landing {
   /** Stops the landing where it is. */
   readonly cancel: () => void;
   readonly running: () => boolean;
+}
+
+/**
+ * `offset` cut to what `box` can still scroll. A target whose place lies past the end of the scroll range (a node near the edge that
+ * cannot be centred, a row at the very end) is reached at the end, as the jump reaches it; without the cut a landing would ease
+ * toward a place it cannot get to and stop dead against the end at full speed.
+ */
+export function reachable(box: Element, offset: Offset): Offset {
+  const limit = (by: number, scrolled: number, room: number) => Math.min(Math.max(by, -scrolled), Math.max(0, room - scrolled));
+  return { top: limit(offset.top, box.scrollTop, box.scrollHeight - box.clientHeight), left: limit(offset.left, box.scrollLeft, box.scrollWidth - box.clientWidth) };
 }
 
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
@@ -74,11 +85,37 @@ export function keyStopsLanding(event: Pick<KeyboardEvent, 'key' | 'repeat'>): b
   return !event.repeat && !MODIFIERS.has(event.key);
 }
 
-/**
- * Whether a wheel is the owner scrolling `box`: up or down, or across where it can still go that way. A sideways swipe at its edge is
- * the back / forward gesture (the one that started the landing), not a scroll.
- */
+/** Whether a wheel is the owner scrolling `box` now: up or down, or across where it can still go that way. */
 export function wheelScrolls(event: Pick<WheelEvent, 'deltaX' | 'deltaY'>, box: Element): boolean {
   if (Math.abs(event.deltaY) >= Math.abs(event.deltaX)) return event.deltaY !== 0;
   return event.deltaX < 0 ? box.scrollLeft > 0 : box.scrollLeft + box.clientWidth < box.scrollWidth - 1;
+}
+
+/**
+ * The wheel events over a view, grouped into streams (a quiet SWIPE_GAP_MS ends one, as for the swipe). A sideways stream that was
+ * running when a landing began is the swipe that started it, trailing momentum included: the landing moving the Graph sideways
+ * must not make the next event of that stream look like a scroll (`wheelScrolls` reads the box as it is now). It stops for the
+ * owner's own wheel: a new stream, or one that is not mostly sideways.
+ */
+export class WheelStream {
+  private streams = 0;
+  private carried = -1;
+  private last = Number.NEGATIVE_INFINITY;
+  private along = 0;
+  private across = 0;
+
+  /** A landing has just begun: the stream running now (if any) is the one that started it. Call this wherever a landing starts. */
+  carry(): void { this.carried = this.streams; }
+
+  /**
+   * Whether this wheel stops a running landing: it is the owner scrolling `box`, and not the sideways stream the landing began in.
+   * Call it for every wheel over the view, a landing running or not (the swipe's own events come before its landing begins).
+   */
+  stops(event: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'timeStamp'>, box: Element): boolean {
+    if (event.timeStamp - this.last > SWIPE_GAP_MS) { ++this.streams; this.along = 0; this.across = 0; }
+    this.last = event.timeStamp;
+    this.along += Math.abs(event.deltaX); this.across += Math.abs(event.deltaY);
+    if (this.streams === this.carried && this.along > SWIPE_DOMINANCE * this.across) return false;
+    return wheelScrolls(event, box);
+  }
 }
