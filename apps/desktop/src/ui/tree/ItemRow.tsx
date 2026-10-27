@@ -242,7 +242,7 @@ export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMar
     onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { placeActions(event.currentTarget, bar.current, dockInset); onPeekHover?.(item.id, event); }}
     onMouseMove={event => { placeActions(event.currentTarget, bar.current, dockInset); onPeekHover?.(item.id, event); }} onMouseLeave={() => onPeekLeave?.()}>
     <Boxes boxes={row.boxes} />
-    {selected && <span aria-hidden="true" className="tree-selected-box" />}
+    {selected && <span aria-hidden="true" className="tree-selected-box" data-testid="selected-box" />}
     <Guides guides={row.guides} />
     {row.hasKids
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"

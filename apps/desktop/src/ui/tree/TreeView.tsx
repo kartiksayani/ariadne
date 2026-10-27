@@ -50,6 +50,7 @@ import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop, type BackPill } from './scroll';
+import { keyStopsLanding, landingMoves, reachable, startLanding, WheelStream, type Landing } from '../shared/landing';
 import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -253,6 +254,12 @@ export function TreeView(props: TreeViewProps) {
    * the offset is a window top instead (a hide that ends Focus, see `presentMove`).
    */
   const hideHold = useRef<{ readonly key: string | null; readonly offset: number; readonly window?: boolean } | null>(null);
+  /** The landing on its way (alpha.24 P3): the row ⌘[ / ⌘] or `n` is bringing into view over a few frames (see `land`). */
+  const landing = useRef<{ readonly key: string; readonly run: Landing } | null>(null);
+  /** Stops a landing where it is: it retains nothing (Q7). */
+  const stopLanding = () => { const current = landing.current; landing.current = null; current?.run.cancel(); };
+  /** The wheel events over the Map, so a swipe's own trailing momentum never stops the landing the swipe started. */
+  const wheels = useRef(new WheelStream()).current;
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
@@ -450,6 +457,8 @@ export function TreeView(props: TreeViewProps) {
   };
   /** A hide's move (or its Undo's), in the update that publishes its write: the reveal is this view's own, so nothing scrolls. */
   const presentMove = useLatest((move: HideMove) => {
+    // Any hide or Undo stops a landing first, with a selection change or without one: the Map stays where it is (Q8).
+    stopLanding();
     const next = move.own?.kind === 'item' ? move.own.route.item_id : null;
     const going = session ? subtree(session, move.itemId).map(item => item.id) : [move.itemId];
     const topic = session?.items[move.itemId]?.topic_id;
@@ -696,7 +705,7 @@ export function TreeView(props: TreeViewProps) {
     'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
     'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
     // The Details path's topic segment: the Tree scrolls back to its top (the owner asked; the Map never does it by itself).
-    'map.top': () => { if (graph || !scroller.current) return false; scroller.current.scrollTop = 0; return true; },
+    'map.top': () => { if (graph || !scroller.current) return false; stopLanding(); scroller.current.scrollTop = 0; return true; },
   });
 
   // ------------------------------------------------------------ keyboard
@@ -811,18 +820,60 @@ export function TreeView(props: TreeViewProps) {
     if (target.offset === null) center(target.key);
     else box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - headerHeight(element) - target.offset;
   };
-  // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
-  // taller than the tree lines up its top instead of running past it.
-  const nearest = (key: string, margin = 0) => {
-    const box = scroller.current, element = elements.current.get(key);
-    if (!box || !element) return;
-    const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    // The Back-to pill floats over the edge it points at: a row the owner is taken to ends clear of it.
-    const back = margin > 0 ? box.parentElement?.querySelector<HTMLElement>('.tree-back') : null, rect = back?.getBoundingClientRect();
+  // The Back-to pill floats over the edge it points at: a row the owner is taken to ends clear of it.
+  const pillOver = (box: HTMLElement): BackPill | null => {
+    const back = box.parentElement?.querySelector<HTMLElement>('.tree-back'), rect = back?.getBoundingClientRect(), top = box.getBoundingClientRect().top;
     const side = back?.dataset.edge === 'above' ? 'above' : back?.dataset.edge === 'below' ? 'below' : null;
     // A pill with no height is not laid out (no layout engine): it covers nothing.
-    const pill: BackPill | null = rect && rect.height > 0 && side ? { edge: side, top: rect.top - a.top, bottom: rect.bottom - a.top } : null;
-    box.scrollTop += nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current, pill);
+    return rect && rect.height > 0 && side ? { edge: side, top: rect.top - top, bottom: rect.bottom - top } : null;
+  };
+  // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
+  // taller than the tree lines up its top instead of running past it. Null when the row is not drawn. `pill`: the Back-to pill to
+  // clear; by default the one on screen now (with a margin; none without).
+  const nearestBy = (key: string, margin = 0, pill?: BackPill | null): number | null => {
+    const box = scroller.current, element = elements.current.get(key);
+    if (!box || !element) return null;
+    const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
+    const clear = pill !== undefined ? pill : margin > 0 ? pillOver(box) : null;
+    return nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current, clear);
+  };
+  const nearest = (key: string, margin = 0) => {
+    const box = scroller.current, delta = nearestBy(key, margin);
+    if (!box || !delta) return;
+    // The app moving the Map for the owner at once is a new target: a landing on its way stops (Q1).
+    stopLanding();
+    box.scrollTop += delta;
+  };
+  /**
+   * Takes the owner to `key` (alpha.24 P3, Q1): the least scrolling that shows it, 8px clear of the band, the dock and the Back-to pill,
+   * then the row is retained as the reveal. `animate` (⌘[ / ⌘], `n`): over a few eased frames, unless motion is reduced; a landing
+   * already on its way to `key` goes on, and any other stops where it is first. Every frame marks its move as the hold's own and
+   * measures the way left again, so the reading-row hold refreshes on the way and its corrections are absorbed (Q2). The Back-to pill
+   * it clears is the one on screen when it starts, as for the jump: a pill that comes or goes on the way (the selected row going out of
+   * view, or arriving) moves the end no more than it moved the jump's. Only a landing that arrives retains its row (Q7).
+   */
+  const land = (key: string, animate: boolean) => {
+    if (animate && landing.current?.key === key && landing.current.run.running()) return;
+    stopLanding();
+    releaseReveal();
+    settled.current = true; setAnchor(null);
+    const box = scroller.current;
+    if (!animate || !box || !landingMoves()) { nearest(key, 8); retainReveal(key); return; }
+    const pill = pillOver(box);
+    let run: Landing | null = null;
+    run = startLanding({
+      remaining: () => {
+        const delta = scroller.current === box ? nearestBy(key, 8, pill) : null;
+        return delta === null ? null : reachable(box, { top: delta, left: 0 });
+      },
+      move: by => { box.scrollTop += by.top; ownScroll.current = box.scrollTop; },
+      screen: () => ({ top: box.clientHeight, left: 0 }),
+      landed: () => {
+        if (run && landing.current?.run === run) landing.current = null;
+        retainReveal(key);
+      },
+    });
+    if (run.running()) { landing.current = { key, run }; wheels.carry(); }
   };
   const centered = useRef(false), settled = useRef(false), openingReveal = useRef<string | null>(null);
   const openingPlacement = useRef<string | null>(null);
@@ -935,8 +986,10 @@ export function TreeView(props: TreeViewProps) {
   useLayoutEffect(() => {
     // A hide's move keeps the Map still even when the row it selects is off-screen (R3): the Back-to pill points at it.
     if (!focusKey || !kbd || hideMove.current) return;
+    // A row ⌘[ / ⌘] or `n` is landing on comes into view by that landing (Q1).
+    if (landing.current?.key === focusKey) return;
     if (focusKey !== anchor?.key) settled.current = true;
-    // Keyboard moves scroll only when the new row is off-screen, and by the least amount.
+    // Keyboard moves scroll only when the new row is off-screen, and by the least amount, at once (held keys repeat).
     nearest(focusKey, 8);
   }, [focusKey]);
   // The Map never moves on its own (D24): what the owner is reading keeps its place in the window when rows above it grow,
@@ -1259,7 +1312,7 @@ export function TreeView(props: TreeViewProps) {
       if (select(selectedId, false) && returnFocus) focusRequested.current = selectedId;
       return;
     }
-    settled.current = true; setAnchor(null); nearest(selectedId, 8); retainReveal(selectedId);
+    land(selectedId, false);
     if (returnFocus) focusRow(selectedId);
     // Reveal selected also opens Details on the row (owner's pick, 2026-10-22). The reveal is built here from what is on screen:
     // no read, and `clickedReveal` marks it as this view's own so the selection effect does not scroll a second time.
@@ -1282,7 +1335,8 @@ export function TreeView(props: TreeViewProps) {
     if (selectedId !== target) { scrollRequested.current = null; return; }
     if (!elements.current.has(target)) return;
     scrollRequested.current = null;
-    settled.current = true; setAnchor(null); nearest(target, 8); retainReveal(target);
+    // ⌘[ / ⌘] (and the swipe), a link, the waiting panel: the Map lands on the item (P3).
+    land(target, true);
   }, [rows, selectedId, reveal, graph]);
   const nextCallbacks = useRef<() => void>(() => {});
   nextCallbacks.current = () => {
@@ -1310,7 +1364,7 @@ export function TreeView(props: TreeViewProps) {
     const id = nextScroll.current;
     if (!id || graph || !elements.current.has(id)) return;
     nextScroll.current = null;
-    focusRow(id); nearest(id, 8); retainReveal(id);
+    focusRow(id); land(id, true);
   }, [rows, nextTarget, graph]);
   // A search step brings its match into view by the least scrolling, and only a step does (typing never scrolls). The
   // Graph scrolls its own node on `stepped`. Nothing is selected, focused or marked seen.
@@ -1318,8 +1372,7 @@ export function TreeView(props: TreeViewProps) {
     const id = searchScroll.current;
     searchScroll.current = null;
     if (!id || graph || !elements.current.has(id)) return;
-    releaseReveal();
-    settled.current = true; setAnchor(null); nearest(id, 8); retainReveal(id);
+    land(id, false);
   }, [stepped, graph]);
   useEffect(() => {
     if (!nextTarget) return;
@@ -1329,8 +1382,11 @@ export function TreeView(props: TreeViewProps) {
   }, [nextTarget]);
   useEffect(() => {
     setNextTarget(null); setNextRevealId(null); setNextPulse(false); setNoUnseen(false); nextScroll.current = null;
+    stopLanding();
     return () => noticeStore.dismiss('tree-no-unseen');
   }, [route.project_id, route.session_id]);
+  // The Graph in the Map's place (its scroller goes) or the Map leaving: a landing stops (Q3).
+  useEffect(() => stopLanding, [graph, store]);
   const edgeCallbacks = useRef({ updateEdge, holding });
   edgeCallbacks.current = { updateEdge, holding };
   const topicKeys = JSON.stringify(sections.map(section => section.topic ? section.topic.key : section.place.key));
@@ -1525,12 +1581,15 @@ export function TreeView(props: TreeViewProps) {
 
   // data-session-busy: "true" while the session is loading or a lifecycle change (close, reopen, rename, archive) saves.
   return <MapSearchContext.Provider value={mapSearch}><section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-session-busy={String(lifecycle.busy || !session)} data-kbd={kbd || undefined}
-    onKeyDownCapture={() => {
+    onKeyDownCapture={event => {
       releaseReveal();
+      // The owner's key stops a landing (Q3); a held key's repeats and a bare modifier (the ⌘ of the next ⌘[) do not.
+      if (keyStopsLanding(event)) stopLanding();
       keyboardIntent.current = true;
       if (!kbd) setKbd(true);
     }}
-    onPointerDownCapture={releaseReveal} onWheelCapture={releaseReveal}
+    onPointerDownCapture={() => { releaseReveal(); stopLanding(); }}
+    onWheelCapture={event => { releaseReveal(); if (scroller.current && wheels.stops(event, scroller.current)) stopLanding(); }}
     onMouseDownCapture={() => { keyboardIntent.current = false; if (kbd) setKbd(false); }}>
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
