@@ -90,7 +90,9 @@ for (const [name, query, body, focus] of [
         await focus(page).focus();
         await record(scroller);
         await page.keyboard.down('Alt'); await page.keyboard.down('ArrowDown');
-        await page.waitForTimeout(1200);
+        // Slow frames hold longer, so the cruise still spans several frames on a slow runner (steps keep their 50 ms cap, so the
+        // slow page covers about half the distance a second and stays inside the bounds below).
+        await page.waitForTimeout(frameMs ? 2000 : 1200);
         await page.keyboard.up('ArrowDown'); await page.keyboard.up('Alt');
         await page.waitForTimeout(1000);
         const { frames, times, upAt } = await stopRecording(page);
