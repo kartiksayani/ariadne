@@ -50,6 +50,27 @@ describe('⌥↑ / ⌥↓ scrolling of Details', () => {
     }
   });
 
+  it('is at rest within 250 ms of the key coming up, however slow the frames are', () => {
+    for (const slow of [16, 33, 50, 100, 200, 400]) {
+      // Frames that really come every `slow` ms (the fake requestAnimationFrame always ticks at 16).
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), slow) as unknown as number);
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id));
+      const element = body();
+      startDetailScroll('down', { key: 'ArrowDown' });
+      for (let spent = 0; spent < 2000; spent += slow) vi.advanceTimersByTime(slow);
+      const moving = element.scrollTop;
+      expect(moving).toBeGreaterThan(0.05 * HEIGHT);
+      key('keyup', 'ArrowDown');
+      // 250 ms later it is at rest; a frame slower than that is the only thing that may come after it.
+      for (let spent = 0; spent < Math.max(250, slow); spent += slow) vi.advanceTimersByTime(slow);
+      const rest = element.scrollTop;
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(1000);
+      expect(element.scrollTop).toBe(rest);
+      element.remove();
+    }
+  });
+
   it('scrolls up by a tap too', () => {
     const element = body(); element.scrollTop = 1000;
     startDetailScroll('up', { key: 'ArrowUp' }); key('keyup', 'ArrowUp');

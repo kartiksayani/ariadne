@@ -70,13 +70,15 @@ function frame(now: number) {
   // Every frame asks what Details shows now: a folded column keeps its body mounted (inert, aria-hidden), and switching to or from the
   // bigger view changes the scroller; in either case the run is over, so a hidden body never scrolls on and a reopened one is where it was left.
   if (detailBody(current.page) !== body || Math.abs(body.scrollTop - current.position) > MOVED_AWAY) { stopDetailScroll(); return; }
-  const gap = current.last === null ? 0 : Math.min((now - current.last) / 1000, MAX_FRAME);
+  const elapsed = current.last === null ? 0 : (now - current.last) / 1000, gap = Math.min(elapsed, MAX_FRAME);
   current.last = now;
   const height = Math.max(1, body.clientHeight), top = SPEED * height, accel = top / RAMP;
   const remaining = TAP * height - current.traveled, braking = current.speed * current.speed / (2 * accel);
   // Keep speeding up while the keys are down, or while a tap has more distance to go than it takes to stop; otherwise slow down.
+  // Speeding up and each step use the capped gap, so a stalled frame never jumps. Slowing down uses the real time passed, so a
+  // let-go hold is at rest within RAMP seconds of the key coming up (plus one frame) however slow the frames are.
   const drive = current.keyDown || remaining > braking;
-  current.speed = drive ? Math.min(top, current.speed + accel * gap) : Math.max(0, current.speed - accel * gap);
+  current.speed = drive ? Math.min(top, current.speed + accel * gap) : Math.max(0, current.speed - accel * elapsed);
   // A tap let go before its distance is covered slows so as to stop exactly on it, however long a frame was.
   const finishing = !current.keyDown && remaining > 0;
   if (finishing) current.speed = Math.min(current.speed, Math.sqrt(2 * accel * remaining));
