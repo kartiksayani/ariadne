@@ -57,11 +57,23 @@ describe('two-finger swipe, same as Command+[ and Command+]', () => {
     expect(history.back).toHaveBeenCalledTimes(1);
   });
 
-  it('reads a mouse wheel in lines, not pixels', () => {
+  it.each([['lines', 1], ['pages', 2]])('ignores a wheel that reports %s: a mouse wheel, even a sideways one, never navigates', (_name, deltaMode) => {
     const history = controls();
     render(<SwipeNavigation history={history} />);
-    swipe(document.body, 2, 4, { deltaMode: 1 });
-    expect(history.forward).toHaveBeenCalledTimes(1);
+    swipe(document.body, -3, 3, { deltaMode });
+    swipe(document.body, 3, 3, { deltaMode });
+    swipe(document.body, -3, 60, { deltaMode });
+    expect(history.back).not.toHaveBeenCalled(); expect(history.forward).not.toHaveBeenCalled();
+    expect(arrow()).toBeNull();
+  });
+
+  it('a gesture that turns vertical after it began never navigates, and draws nothing once it has turned', () => {
+    const history = controls();
+    render(<SwipeNavigation history={history} />);
+    act(() => { vi.advanceTimersByTime(16); fireEvent.wheel(document.body, { deltaX: -12, deltaY: 0 }); });
+    for (let index = 0; index < 22; index++) act(() => { vi.advanceTimersByTime(16); fireEvent.wheel(document.body, { deltaX: -4, deltaY: 20 }); });
+    expect(history.back).not.toHaveBeenCalled();
+    expect(arrow()).toBeNull();
   });
 });
 
@@ -107,6 +119,30 @@ describe('the guards of Command+[', () => {
     render(<SwipeNavigation history={history} />);
     swipe(make(), -10, 20);
     expect(history.back).not.toHaveBeenCalled();
+  });
+
+  it('a partial swipe that moves over a text field while the wheel runs on loses its arrow and its timer', () => {
+    const history = controls();
+    render(<SwipeNavigation history={history} />);
+    swipe(document.body, -10, 5);
+    expect(arrow()).not.toBeNull();
+    const field = document.body.appendChild(document.createElement('input'));
+    swipe(field, -10, 2);
+    expect(arrow()).toBeNull();
+    // Nothing is pending that could bring it back or commit later.
+    act(() => { vi.advanceTimersByTime(SWIPE_GAP_MS * 3); });
+    expect(arrow()).toBeNull();
+    expect(history.back).not.toHaveBeenCalled();
+  });
+
+  it('a swipe that stops short after the detector was reset still takes its arrow away', () => {
+    render(<SwipeNavigation history={controls()} />);
+    swipe(document.body, -10, 5);
+    expect(arrow()).not.toBeNull();
+    const overlay = document.body.appendChild(document.createElement('div')); overlay.setAttribute('data-workspace-overlay', 'help');
+    act(() => { fireEvent.wheel(document.body, { deltaX: -10, deltaY: 0 }); });
+    expect(arrow()).toBeNull();
+    overlay.remove();
   });
 
   it('does nothing while a text field has focus, or an overlay (switcher, help, a menu) is open', () => {

@@ -354,8 +354,10 @@ function Workspace({ application }: { application: Application }) {
   const revealItem = (target: ItemRoute, openDetail = true) => {
     void revealLinkedItem(target, openDetail).catch((error: unknown) => reportRouteError(navigationFailure(error)));
   };
+  // One guard for the action and for what advertises it (the Back/Forward buttons, the swipe's arrow): where it refuses, nothing offers it.
+  const historyOpen = !conversation && !!route && !state.writing && state.pendingOperationId === null;
   const navigateHistory = (direction: HistoryDirection) => {
-    if (conversation || !route || state.writing || state.pendingOperationId !== null) return false;
+    if (!historyOpen || !route) return false;
     return itemHistory.navigate(direction, async id => {
       const token = ++shortcutSequence.current;
       setOwnerFocus(null); setRouteError(null);
@@ -367,8 +369,7 @@ function Workspace({ application }: { application: Application }) {
       }
     });
   };
-  const historyControls = { canBack: itemHistory.canBack && !state.writing && state.pendingOperationId === null,
-    canForward: itemHistory.canForward && !state.writing && state.pendingOperationId === null,
+  const historyControls = { canBack: itemHistory.canBack && historyOpen, canForward: itemHistory.canForward && historyOpen,
     back: () => navigateHistory('back'), forward: () => navigateHistory('forward') };
   // Send while the session's agent isn't running asks first (1ad); see ui/answer/notRunning.
   const onAgentNotRunning = (submission: PendingSubmission) => {

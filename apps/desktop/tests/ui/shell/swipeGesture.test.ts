@@ -85,6 +85,18 @@ describe('two-finger swipe detector', () => {
     expect(commits(stream(detector, -30, 20, { start: 5 * FRAME }))).toHaveLength(0);
   });
 
+  it('a gesture that turns vertical after it began is dropped before it commits, and stays dropped until it ends', () => {
+    const detector = new SwipeDetector();
+    expect(detector.feed({ dx: -12, dy: 0, time: 0, scrolls: false }).kind).toBe('move');
+    const turned = stream(detector, -4, 22, { dy: 20, start: FRAME });
+    expect(turned[0]).toEqual({ kind: 'end' });
+    expect(turned.slice(1).every(outcome => outcome.kind === 'none')).toBe(true);
+    // Even a long horizontal run now cannot undo it: the gesture is latched as ignored.
+    expect(commits(stream(detector, -30, 20, { start: 24 * FRAME }))).toHaveLength(0);
+    // After the gap the next gesture is clean.
+    expect(commits(stream(detector, -20, 6, { start: 100 * FRAME + SWIPE_GAP_MS }))).toHaveLength(1);
+  });
+
   it('a gesture that stops short ends without committing, and the next one starts clean', () => {
     const detector = new SwipeDetector();
     expect(stream(detector, -5, 6).some(outcome => outcome.kind === 'commit')).toBe(false);

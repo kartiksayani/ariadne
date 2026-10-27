@@ -38,7 +38,8 @@ type Phase = 'idle' | 'deciding' | 'swiping' | 'ignored' | 'fired';
 /**
  * One gesture at a time:
  *  - the first events decide whether it is horizontal (|dx| > 2|dy| over its first SWIPE_DECIDE px); a vertical or diagonal gesture
- *    is ignored whole, so a scroll with a little sideways drift never navigates;
+ *    is ignored whole, so a scroll with a little sideways drift never navigates. The rule holds to the commit: a gesture whose
+ *    travel turns vertical later is latched as ignored until it ends;
  *  - a wheel that scrolls something (a wide table, the Graph) owns the whole gesture: it is never a swipe, even after the scroller
  *    reaches its edge (the momentum that runs on would otherwise navigate). A new gesture started at the edge is a swipe;
  *  - it commits once, when the summed horizontal delta passes SWIPE_THRESHOLD; the momentum that follows is ignored until the gap.
@@ -60,9 +61,10 @@ export class SwipeDetector {
     if (this.phase === 'idle') this.phase = 'deciding';
     if (this.phase === 'deciding') {
       if (this.along + this.across < SWIPE_DECIDE) return { kind: 'none' };
-      if (this.along <= SWIPE_DOMINANCE * this.across) return this.ignore();
       this.phase = 'swiping';
     }
+    // Checked on every sample, not only the first: a gesture that turns vertical after it began is dropped for good.
+    if (this.along <= SWIPE_DOMINANCE * this.across) return this.ignore();
     if (this.sum === 0) return { kind: 'none' };
     const direction: SwipeDirection = this.sum < 0 ? 'back' : 'forward';
     if (Math.abs(this.sum) >= SWIPE_THRESHOLD) { this.phase = 'fired'; return { kind: 'commit', direction }; }

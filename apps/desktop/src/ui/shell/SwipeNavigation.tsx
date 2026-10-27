@@ -22,8 +22,6 @@ export const SWIPE_POP_MS = 420;
 interface Arrow { readonly direction: SwipeDirection; readonly progress: number; readonly done: boolean }
 
 const reducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-/** Wheel deltas in pixels: a mouse wheel reports lines (about 16px) or pages. */
-const pixels = (value: number, mode: number) => mode === 1 ? value * 16 : mode === 2 ? value * 400 : value;
 
 export function SwipeNavigation({ history }: { readonly history: SwipeHistory }) {
   const latest = useRef(history);
@@ -34,16 +32,21 @@ export function SwipeNavigation({ history }: { readonly history: SwipeHistory })
     let quiet: ReturnType<typeof setTimeout> | undefined, pop: ReturnType<typeof setTimeout> | undefined;
     const available = (direction: SwipeDirection) => direction === 'back' ? latest.current.canBack : latest.current.canForward;
     const hidePop = () => { clearTimeout(pop); setArrow(null); };
+    // The "done" pop has its own timer and finishes on its own; any other arrow goes with the gesture it followed.
+    const dropArrow = () => setArrow(current => current?.done ? current : null);
     const wheel = (event: WheelEvent) => {
       // A pinch (ctrl), a chord, Shift+wheel (a mouse's sideways scroll) and a wheel something else already took are not the swipe.
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-      if (historyBlockedAt(event.target, document)) { detector.reset(); return; }
-      const dx = pixels(event.deltaX, event.deltaMode), dy = pixels(event.deltaY, event.deltaMode);
+      // Only a trackpad's pixel deltas: a mouse wheel, even a dedicated sideways one, reports lines or pages and never navigates.
+      if (event.deltaMode !== 0) return;
+      // Blocked (a text field, a dialog, an overlay): the gesture is over and its arrow and quiet timer go with it.
+      if (historyBlockedAt(event.target, document)) { detector.reset(); clearTimeout(quiet); dropArrow(); return; }
+      const dx = event.deltaX, dy = event.deltaY;
       const outcome = detector.feed({ dx, dy, time: event.timeStamp, scrolls: dx !== 0 && canScrollHorizontally(event.target, dx) });
       clearTimeout(quiet);
-      quiet = setTimeout(() => { if (detector.end().kind === 'end') setArrow(current => current?.done ? current : null); }, SWIPE_GAP_MS);
+      quiet = setTimeout(() => { detector.end(); dropArrow(); }, SWIPE_GAP_MS);
       if (outcome.kind === 'move') setArrow(available(outcome.direction) && !reducedMotion() ? { direction: outcome.direction, progress: outcome.progress, done: false } : null);
-      else if (outcome.kind === 'end') setArrow(current => current?.done ? current : null);
+      else if (outcome.kind === 'end') dropArrow();
       else if (outcome.kind === 'commit') {
         const did = (outcome.direction === 'back' ? latest.current.back : latest.current.forward)();
         clearTimeout(pop);

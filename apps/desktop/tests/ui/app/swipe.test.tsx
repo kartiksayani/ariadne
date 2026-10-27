@@ -60,6 +60,20 @@ describe('two-finger swipe in the app', () => {
     selected('1.1');
   });
 
+  it('offers no arrow where Back refuses: over the bigger conversation view, with history behind it', async () => {
+    await twoSteps();
+    await click(screen.getByRole('button', { name: 'Read in a bigger view' }));
+    screen.getByRole('region', { name: 'Item conversation' });
+    await act(async () => { for (let index = 0; index < 5; index++) fireEvent.wheel(document.body, { deltaX: -10, deltaY: 0 }); });
+    expect(screen.queryByTestId('swipe-arrow')).toBeNull();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    await swipe(document.body, -10);
+    expect(screen.queryByTestId('swipe-arrow')).toBeNull();
+    // Neither the swipe nor the key went back: the conversation is still open.
+    await keyDown(document.body, '[', true);
+    screen.getByRole('region', { name: 'Item conversation' });
+  });
+
   it('does nothing while the owner is typing in the Map search, like the keys', async () => {
     await twoSteps();
     await click(screen.getByLabelText('Search the Map', { selector: 'button' }));

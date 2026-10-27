@@ -20,7 +20,10 @@ const projects = [
   card('five', 'notes-five', 5),
   card('seven', 'notes-seven', 7),
   card('twelve', 'notes-twelve', 12),
-  card('long', 'a-project-with-a-name-that-is-far-too-long-to-fit-on-one-line-of-a-card', 3, { path: '~/code/a/very/deep/folder/structure/that/also/does/not/fit/in/a/card' }),
+  card('long', 'a-project-with-a-name-that-is-far-too-long-to-fit-on-one-line-of-a-card', 3, { path: '~/code/a/very/deep/folder/structure/that/also/does/not/fit/in/a/card',
+    footer: '3 sessions · 3 open · last activity 21:25 · a footer that is far too long to fit on one line of a card',
+    sessions: sessions(3, 'long').map((session, index) => index === 1
+      ? { ...session, name: 'A session name that is far too long to fit on one line of a card, with a question waiting on the owner', waiting: 12 } : session) }),
 ];
 
 createRoot(document.getElementById('root')!).render(<ProjectsCards back={{ label: 'cache PR review', onBack: noop }} sub="6 projects · 4 questions waiting on you" projects={projects}
