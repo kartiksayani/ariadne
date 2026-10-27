@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import type { OwnerMutationRequest } from '../../../src/generated/core';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
@@ -90,6 +90,37 @@ describe('a hide carries its own view changes and hook (alpha.24 R1, S1)', () =>
     expect(await store.setHidden({ ...route, item_id: '4' }, true, store.getSnapshot().preferences!.revision, { committing: () => { ++ran; } })).toBe(false);
     expect(ran).toBe(1);
     expect(store.getSnapshot().preferences?.sessions[0].hidden_item_ids).toEqual(['3']);
+  });
+
+  it('keeps a saved hide saved when its hook throws: the write confirms and its preferences publish', async () => {
+    const { transport, store } = await setup();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const saved = await store.setHidden({ ...route, item_id: '3' }, true, 1, {
+        edit: next => { next.selected_item_id = '4'; },
+        committing: () => { throw new Error('The view could not show the move'); },
+      });
+      expect(saved).toBe(true);
+      expect(store.getSnapshot().preferences?.sessions[0]).toMatchObject({ hidden_item_ids: ['3'], selected_item_id: '4' });
+      expect(store.getSnapshot().error).toBeNull();
+      expect(store.getSnapshot().writing).toBe(false);
+      expect(transport.preferences.sessions[0].hidden_item_ids).toEqual(['3']);
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally { logged.mockRestore(); }
+  });
+
+  it('builds the view a hide writes, a new one for a session with none saved, as setHidden does', async () => {
+    const { transport, store } = await setup(['5']);
+    expect(store.viewWithHidden({ ...route, item_id: '3' }, true)).toMatchObject({ ...view(transport), hidden_item_ids: ['5', '3'] });
+    expect(store.viewWithHidden({ ...route, item_id: '5' }, false)?.hidden_item_ids).toEqual([]);
+    // No saved view: the default one setHidden would write, with the item hidden.
+    transport.preferences.sessions = []; ++transport.preferences.revision;
+    await store.refresh();
+    await waitFor(() => expect(store.getSnapshot().preferences?.sessions).toEqual([]));
+    const fresh = store.viewWithHidden({ ...route, item_id: '3' }, true);
+    expect(fresh).toMatchObject({ session: { project_id: route.project_id, session_id: route.session_id }, selected_item_id: null, hidden_item_ids: ['3'] });
+    expect(await store.setHidden({ ...route, item_id: '3' }, true, store.getSnapshot().preferences!.revision)).toBe(true);
+    expect(writtenView(transport.mutations.at(-1)!)).toEqual(fresh);
   });
 });
 

@@ -161,12 +161,15 @@ describe('owner hide and unhide actions', () => {
     group().focus(); fireEvent.keyDown(group(), { key: 'ArrowRight' });
     expect(group().getAttribute('aria-expanded')).toBe('true'); expect(document.activeElement).toBe(group());
     fireEvent.keyDown(group(), { key: 'ArrowRight' }); expect(document.activeElement).toBe(row('4'));
-    // Unhide never moves the selection (row 14): h on the selected hidden row unhides it and keeps it selected.
-    fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
+    // Unhide never moves the selection (row 14). All by keyboard: Enter selects the dimmed row, h unhides it, and it keeps the
+    // selection and the focus.
+    fireEvent.keyDown(row('4')!, { key: 'Enter' }); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4')); await ready();
+    expect(document.activeElement).toBe(row('4'));
     fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
     expect(saved(transport).selected_item_id).toBe('4');
+    expect(document.activeElement).toBe(row('4'));
   });
 
   // alpha.24 replaces "a newly hidden row keeps focus": in an open hidden group the row dims at the group's end, and the

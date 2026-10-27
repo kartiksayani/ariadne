@@ -93,6 +93,17 @@ async function closesFromBelow(page: Page, before: Record<string, number>, rowsA
   }
   if (nextTop !== undefined) expect(Math.abs((await topOf(page, next)) - nextTop), `${next} closes ${gone}'s space`).toBeLessThanOrEqual(1);
 }
+/** Undo on the "Hid …" toast. */
+const undo = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true }).click();
+/** After an Undo of `id`'s hide: the rows above it are where they were before the hide, and so is `id`. */
+async function comesBack(page: Page, before: Record<string, number>, rowsAbove: readonly string[], id: string, place: number) {
+  await expect(row(page, id)).toHaveCount(1);
+  for (const key of rowsAbove) {
+    if (before[key] === undefined) continue;
+    await expect.poll(async () => Math.abs((await tops(page))[key]! - before[key]!), `${key} above ${id} keeps its place`).toBeLessThanOrEqual(1);
+  }
+  expect(Math.abs((await topOf(page, id)) - place), `${id} is back in its place`).toBeLessThanOrEqual(1);
+}
 
 test.describe('hide moves on, and the Map stays still', () => {
   test('row 1: h on the selected middle row selects the next row, in view, with scrollTop unchanged', async ({ page }) => serve(page, async () => {
@@ -107,6 +118,23 @@ test.describe('hide moves on, and the Map stays still', () => {
     expect(Math.abs((await scrollTop(page)) - was)).toBeLessThanOrEqual(1);
     await closesFromBelow(page, before, rowsAbove, '12', '13', place);
     await expect(row(page, '13')).toBeInViewport();
+    await expect(page.getByRole('button', { name: /^Back to “/ })).toHaveCount(0);
+  }));
+
+  test('row 2: h on the selected last row of its level selects the previous row; the rows above stay, scrollTop unchanged', async ({ page }) => serve(page, async () => {
+    // 7 is topic A's last root: 6 before it takes the selection, and topic B's band below closes 7's space.
+    await placeUnderBand(page, '5', 4); await settle(page);
+    await select(page, '7');
+    const before = await tops(page), was = await scrollTop(page), rowsAbove = await above(page, '7');
+    expect(rowsAbove).toContain('6');
+    await page.keyboard.press('h');
+    await expect(row(page, '7')).toHaveCount(0);
+    await expect(row(page, '6')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-detail-item-id="6"]').first()).toBeVisible();
+    await quiet(page);
+    expect(Math.abs((await scrollTop(page)) - was)).toBeLessThanOrEqual(1);
+    await closesFromBelow(page, before, rowsAbove, '7', '6');
+    await expect(row(page, '6')).toBeInViewport();
     await expect(page.getByRole('button', { name: /^Back to “/ })).toHaveCount(0);
   }));
 
@@ -155,6 +183,35 @@ test.describe('hide moves on, and the Map stays still', () => {
     await expect(row(page, '14')).toHaveAttribute('aria-selected', 'true');
     await closesFromBelow(page, before, rowsAbove, '11', '12');
     expect(Math.abs((await topOf(page, '14')) - (place - gap)), 'the selected row moves up by the hidden row’s height').toBeLessThanOrEqual(1);
+  }));
+
+  test('row 11: Undo of h on the selected row puts it back in its place and selects it again; the rows above stay', async ({ page }) => serve(page, async () => {
+    await placeUnderBand(page, '10', 4); await settle(page);
+    await select(page, '12');
+    const before = await tops(page), rowsAbove = await above(page, '12'), place = await topOf(page, '12');
+    await page.keyboard.press('h');
+    await expect(row(page, '12')).toHaveCount(0);
+    await expect(row(page, '13')).toHaveAttribute('aria-selected', 'true');
+    await quiet(page);
+    await undo(page);
+    await expect(row(page, '12')).toHaveAttribute('aria-selected', 'true');
+    await quiet(page);
+    await comesBack(page, before, rowsAbove, '12', place);
+    expect(Math.abs((await topOf(page, '13')) - before['13']!), '13 makes room below it').toBeLessThanOrEqual(1);
+  }));
+
+  test('row 11: Undo of a hover Hide on an unrelated row puts it back; the rows above stay and the selection keeps its place', async ({ page }) => serve(page, async () => {
+    await placeUnderBand(page, '10', 4); await settle(page);
+    await select(page, '14');
+    const before = await tops(page), rowsAbove = await above(page, '11'), place = await topOf(page, '11');
+    await hoverHide(page, '11');
+    await expect(row(page, '11')).toHaveCount(0);
+    await quiet(page);
+    await undo(page);
+    await quiet(page);
+    await comesBack(page, before, rowsAbove, '11', place);
+    await expect(row(page, '14')).toHaveAttribute('aria-selected', 'true');
+    expect(Math.abs((await topOf(page, '14')) - before['14']!), 'the selected row is back where it was').toBeLessThanOrEqual(1);
   }));
 
   test('row 20: the parent the hide selects is above the window: the Map stays and the Back-to pill points at it', async ({ page }) => serve(page, async () => {
@@ -251,6 +308,16 @@ test('row 23: Focus on a root that is hidden ends in the same write: one layout 
   expect(await tops(page)).toEqual(first);
   // The rows that come back go above, off-screen: the selected row takes the hidden row's place, under the same band.
   expect(Math.abs((await topOf(page, '13')) - place)).toBeLessThanOrEqual(1);
+  expect(Math.abs((await band.boundingBox())!.y - was)).toBeLessThanOrEqual(1);
+  // Undo is the way back in one change: Focus returns with the selection, 12 takes 13's place again (its own), under the same band.
+  await undo(page);
+  await expect(page.getByRole('button', { name: /^Unfocus/ }).first()).toBeVisible();
+  await expect(row(page, '12')).toHaveAttribute('aria-selected', 'true');
+  await settle(page);
+  const back = await tops(page);
+  await quiet(page);
+  expect(await tops(page)).toEqual(back);
+  expect(Math.abs((await topOf(page, '12')) - place)).toBeLessThanOrEqual(1);
   expect(Math.abs((await band.boundingBox())!.y - was)).toBeLessThanOrEqual(1);
 }));
 

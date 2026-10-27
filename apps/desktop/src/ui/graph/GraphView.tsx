@@ -395,11 +395,18 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     const going = session ? subtree(session, move.itemId).map(item => item.id) : [move.itemId];
     if (going.some(gone => !!nodeElement(gone)?.contains(document.activeElement))) element?.focus({ preventScroll: true });
   });
+  // A node the owner clicked while the hide's write was in flight (its selection waits to be written after it) is the newer
+  // choice: it stays selected, and the hide's own pick never shows (S3).
+  const newerChoice = useLatest((going: ReadonlySet<string>) => {
+    const { asked, selectedId: shownId } = latest.current;
+    return localSelection && localSelection.asked === asked && localSelection.id === shownId && !going.has(localSelection.id) ? localSelection.id : null;
+  });
   useEffect(() => {
-    const answer = { route: { project_id: state.route.project_id, session_id: state.route.session_id }, choose: chooseAfterHide, present: presentMove };
+    const answer = { route: { project_id: state.route.project_id, session_id: state.route.session_id }, choose: chooseAfterHide,
+      newer: newerChoice, present: presentMove };
     hideViews.add(answer);
     return () => { hideViews.delete(answer); };
-  }, [state.route.project_id, state.route.session_id, chooseAfterHide, presentMove]);
+  }, [state.route.project_id, state.route.session_id, chooseAfterHide, newerChoice, presentMove]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
     if (node.folded) latest.current.onDismissBanner?.();

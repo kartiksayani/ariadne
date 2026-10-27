@@ -102,8 +102,11 @@ const clearedFilters = (filters: { readonly archived: boolean }): SessionPrefere
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
 const filtering = (filters: Immutable<SessionPreferences['filters']>, local: readonly LocalChip[]) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
   || filters.owners.length > 0 || filters.hide_later || local.length > 0;
-/** What a hide moved, for its Undo (R7): the selection before it, whether Details was open, and the selection count after the move. */
-interface HidMove { readonly prior: string; readonly detailOpen: boolean; readonly generation: number }
+/**
+ * What a hide moved, for its Undo (R7): the selection before it, whether Details was open, the selection count after the move, and
+ * the focused root when the hide ended Focus.
+ */
+interface HidMove { readonly prior: string; readonly detailOpen: boolean; readonly generation: number; readonly focused?: string }
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
@@ -637,17 +640,20 @@ function Workspace({ application }: { application: Application }) {
         text: 'The hidden items preference could not be saved. Try again.' });
     };
     if (isHidden) {
-      // Unhide never moves the selection. Undo selects again what its hide moved away from, while nothing was selected since (R7).
-      const back = onScreen && undo && asked === undo.generation ? undo.prior : null;
+      // Unhide never moves the selection. Undo selects again what its hide moved away from, and puts back the Focus it ended, while
+      // nothing was selected since (R7). Either way the view on screen keeps the rows above where the item comes back still.
+      const back = onScreen && undo && asked === undo.generation ? undo : null;
+      let written: SessionPreferences | undefined;
       void navigation.setHidden(target, false, current.preferences.revision, {
-        edit: view => { if (back && unmoved()) view.selected_item_id = back; },
+        edit: view => {
+          if (back && unmoved()) { view.selected_item_id = back.prior; if (back.focused) view.focused_item_id = back.focused; }
+          written = view;
+        },
         committing: land => flushSync(() => {
           setDismissedReveal(dismissed);
-          if (back && unmoved()) {
-            const reveal = own(back);
-            hideViewFor(target)?.present({ kind: 'unhide', itemId: target.item_id, own: reveal, select: true });
-            showMove(reveal, undo!.detailOpen);
-          }
+          const restore = back && unmoved() ? back : null, reveal = restore ? own(restore.prior) : null;
+          if (onScreen) hideViewFor(target)?.present({ kind: 'unhide', itemId: target.item_id, own: reveal, select: !!restore, after: written });
+          if (restore) showMove(reveal, restore.detailOpen);
           land();
         }),
       }).then(report);
@@ -657,10 +663,10 @@ function Workspace({ application }: { application: Application }) {
     const moves = onScreen && !!selectedId && going.has(selectedId);
     const follows = onScreen && conversation?.route === key && going.has(conversation.itemId);
     const prior = selectedId, detailWasOpen = detailOpen, answer = hideViewFor(target);
-    // The saved view with the hide in it; hiding the focused root ends Focus in the same write (S4).
-    const after: SessionPreferences | null = saved ? { ...structuredClone(saved) as SessionPreferences,
-      hidden_item_ids: [...new Set([...saved.hidden_item_ids ?? [], target.item_id])],
-      focused_item_id: saved.focused_item_id && !going.has(saved.focused_item_id) ? saved.focused_item_id : undefined } : null;
+    // The view the hide writes (a new one for a session with none saved); hiding the focused root ends Focus in the same write (S4).
+    const hiding = navigation.viewWithHidden(target, true);
+    const ended = hiding?.focused_item_id && going.has(hiding.focused_item_id) ? hiding.focused_item_id : undefined;
+    const after: SessionPreferences | null = hiding && { ...hiding, focused_item_id: ended ? undefined : hiding.focused_item_id };
     const next = (moves || follows) && answer && after ? answer.choose(target.item_id, after) : null;
     void navigation.setHidden(target, true, current.preferences.revision, {
       edit: view => {
@@ -670,8 +676,10 @@ function Workspace({ application }: { application: Application }) {
       committing: land => {
         const select = moves && !!answer && unmoved(), shownNow = latestConversation.current;
         const follow = follows && !!answer && shownNow?.route === key && going.has(shownNow.itemId);
-        // One reveal object for the view and the App: the view knows it as its own echo.
-        const reveal = select && next ? own(next) : null;
+        // A choice the owner made in the view meanwhile stays selected instead of the hide's (S3). One reveal object for the view
+        // and the App: the view knows it as its own echo.
+        const newer = select ? answer?.newer?.(going) ?? null : null;
+        const reveal = newer ? own(newer) : select && next ? own(next) : null;
         flushSync(() => {
           answer?.present({ kind: 'hide', itemId: target.item_id, own: reveal, select });
           if (select) showMove(reveal);
@@ -679,7 +687,7 @@ function Workspace({ application }: { application: Application }) {
           setDismissedReveal(dismissed);
           land();
         });
-        announceHid(target, select ? { prior: prior!, detailOpen: detailWasOpen, generation: selectionGeneration.current } : null);
+        announceHid(target, select && !newer ? { prior: prior!, detailOpen: detailWasOpen, generation: selectionGeneration.current, focused: ended } : null);
       },
     }).then(report);
     return true;

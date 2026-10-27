@@ -3,7 +3,7 @@ import { ReadingLane } from '../preferences/reading';
 import type { BindingConnectParams, GlobalPreferences, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
   PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef, Theme } from '../../generated/core';
 import type { RevealedItem } from '../../data/routes';
-import type { ItemStatus } from '../../generated/domain/models';
+import type { ItemStatus, Session } from '../../generated/domain/models';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
 import { changesNothing, sameFailure, sameValue } from '../../data/same';
@@ -38,7 +38,8 @@ type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'se
 type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
 /**
  * Runs once a receipt confirms a write (a retry, or a later Check again, included), handed `land`, which publishes the saved
- * preferences. The hook calls it where its own changes must land in the same update; it publishes after the hook otherwise.
+ * preferences. The hook calls it where its own changes must land in the same update; it publishes after the hook otherwise,
+ * and also when the hook throws (the write stays confirmed).
  */
 export type Committing = (land: () => void) => void;
 /** A hide's own view changes, made on the view it writes (the first write and every rebase), and its hook. */
@@ -111,6 +112,28 @@ function rebaseEntries(entries: NavigationPatch[], base: PreferencesSnapshot, cu
     }
     return structuredClone(entry);
   });
+}
+/** The session view with `item` hidden or shown again (a new view when the session has none saved). */
+function hiddenView(preferences: PreferencesSnapshot, session: Immutable<Session>, item: ItemRoute, hidden: boolean): SessionPreferences {
+  const current = preferences.sessions.find(saved => sameRoute(saved.session, item));
+  const view: SessionPreferences = current ? structuredClone(current) : {
+    session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
+    tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
+    expanded_item_ids: [...initialExpansion(session)],
+    filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null,
+  };
+  const ids = new Set((view.hidden_item_ids ?? []).filter(id => !!session.items[id]));
+  if (hidden) ids.add(item.item_id);
+  else {
+    // Restoring an inherited hidden row opens its ancestors but keeps
+    // independently hidden siblings and descendants.
+    const seen = new Set<string>();
+    for (let id: string | null = item.item_id; id && !seen.has(id); id = session.items[id]?.parent ?? null) {
+      ids.delete(id); seen.add(id);
+    }
+  }
+  view.hidden_item_ids = [...ids];
+  return view;
 }
 
 export class NavigationStore {
@@ -626,7 +649,8 @@ export class NavigationStore {
         this.seenAdvance = null;
         this.publish({ preferences: immutable(normalizeStatusFilters(saved)) });
       };
-      try { committing?.(land); } finally { land(); }
+      // The write is saved whatever the hook does: a hook that throws shows less, and the receipt still confirms.
+      try { committing?.(land); } catch (error: unknown) { console.error('Ariadne could not show a saved view change', error); } finally { land(); }
       confirmed();
     } };
   }
@@ -806,25 +830,16 @@ export class NavigationStore {
   private hiddenEntry(preferences: PreferencesSnapshot, item: ItemRoute, hidden: boolean): NavigationPatch | null {
     const state = this.opened.get(item)?.getSnapshot(), session = state?.snapshot?.session;
     if (!session?.items[item.item_id] || state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh') return null;
-    const current = preferences.sessions.find(saved => sameRoute(saved.session, item));
-    const view: SessionPreferences = current ? structuredClone(current) : {
-      session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
-      tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
-      expanded_item_ids: [...initialExpansion(session)],
-      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null,
-    };
-    const ids = new Set((view.hidden_item_ids ?? []).filter(id => !!session.items[id]));
-    if (hidden) ids.add(item.item_id);
-    else {
-      // Restoring an inherited hidden row opens its ancestors but keeps
-      // independently hidden siblings and descendants.
-      const seen = new Set<string>();
-      for (let id: string | null = item.item_id; id && !seen.has(id); id = session.items[id]?.parent ?? null) {
-        ids.delete(id); seen.add(id);
-      }
-    }
-    view.hidden_item_ids = [...ids];
-    return { kind: 'set_session_view', preferences: view };
+    return { kind: 'set_session_view', preferences: hiddenView(preferences, session, item, hidden) };
+  }
+  /**
+   * The session view a hide (or unhide) of `item` would write now, from the loaded session: the view `setHidden` builds, a new
+   * one for a session with none saved. Null before preferences or the session load.
+   */
+  viewWithHidden(item: ItemRoute, hidden: boolean): SessionPreferences | null {
+    const session = this.opened.get(item)?.getSnapshot().snapshot?.session;
+    if (!this.state.preferences || !session?.items[item.item_id]) return null;
+    return hiddenView(this.preferences(), session, item, hidden);
   }
   async setLater(item: ItemRoute, later: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     try {

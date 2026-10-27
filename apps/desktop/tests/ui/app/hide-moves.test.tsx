@@ -31,8 +31,13 @@ class Gate extends AppTransport {
   held = 0;
   reject = false;
   hold() { this.gate = new Promise<void>(resolve => { this.release = () => { this.gate = null; resolve(); }; }); }
+  /** Reveal answers wait too, until `releaseReveals` (a reveal slower than the write). */
+  private reveals: Promise<void> | null = null;
+  releaseReveals = () => {};
+  holdReveals() { this.reveals = new Promise<void>(resolve => { this.releaseReveals = () => { this.reveals = null; resolve(); }; }); }
   override async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
+    if ('request' in request && request.request.command === 'reveal_item' && this.reveals) await this.reveals;
     if ('command' in request && request.command.command === 'preferences_patch') {
       if (this.gate) { ++this.held; await this.gate; }
       if (this.reject) {
@@ -203,6 +208,51 @@ describe('hide moves on to the next item on the same level', () => {
     expect(selectedRows()).toEqual(['3']);
   });
 
+  it('row 11: Undo of a hide made with Details closed selects the item again and leaves Details closed', async () => {
+    const transport = await mount();
+    await select(transport, '3');
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Close Details/ }));
+    await waitFor(() => expect(detailOf()).toBeNull());
+    pressH('3');
+    await hidden(transport, '3');
+    expect(saved(transport).selected_item_id).toBe('4');
+    expect(detailOf()).toBeNull();
+    act(() => toasts.runUndo(toasts.current()!.id));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
+    expect(saved(transport).selected_item_id).toBe('3');
+    expect(selectedRows()).toEqual(['3']);
+    expect(detailOf()).toBeNull();
+  });
+
+  it('row 23: Undo of a hide that ended Focus puts the Focus back with the selection, in the unhide’s one write', async () => {
+    const transport = await mount(transport => { saved(transport).focused_item_id = '3'; saved(transport).selected_item_id = '3'; });
+    await waitFor(() => expect(selectedRows()).toEqual(['3']));
+    pressH('3');
+    await hidden(transport, '3');
+    expect(saved(transport).focused_item_id).toBeUndefined();
+    expect(row('8')).not.toBeNull();
+    act(() => toasts.runUndo(toasts.current()!.id));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
+    expect(saved(transport)).toMatchObject({ focused_item_id: '3', selected_item_id: '3' });
+    expect(transport.mutations.filter(request => request.command.command === 'preferences_patch')).toHaveLength(2);
+    await waitFor(() => expect(row('8')).toBeNull());
+    expect(selectedRows()).toEqual(['3']);
+  });
+
+  it('row 23 / 12: Undo after the owner selected something else leaves Focus ended', async () => {
+    const transport = await mount(transport => { saved(transport).focused_item_id = '3'; saved(transport).selected_item_id = '3'; });
+    await waitFor(() => expect(selectedRows()).toEqual(['3']));
+    pressH('3');
+    await hidden(transport, '3');
+    const toast = toasts.current()!;
+    await select(transport, '6');
+    act(() => toasts.runUndo(toast.id));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
+    expect(saved(transport).focused_item_id).toBeUndefined();
+    expect(saved(transport).selected_item_id).toBe('6');
+  });
+
   it('row 12: Undo after the owner selected something else unhides and leaves that selection', async () => {
     const transport = await mount();
     await select(transport, '3');
@@ -236,15 +286,13 @@ describe('hide moves on to the next item on the same level', () => {
     expect(saved(transport).selected_item_id).toBe('4');
   });
 
-  it('row 15: h keeps the focus ring on the new row, as Enter and . do', async () => {
+  it('row 15: Enter selects by key and h moves on by key; the focus ring stays on the new row', async () => {
     const transport = await mount();
     const tree = screen.getByRole('region', { name: 'Session tree' });
     row('3')!.focus(); fireEvent.keyDown(row('3')!, { key: 'Enter' });
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('3')); await ready();
     expect(tree.hasAttribute('data-kbd')).toBe(true);
-    fireEvent.keyDown(row('3')!, { key: '.' });
-    await ready();
-    expect(tree.hasAttribute('data-kbd')).toBe(true);
+    expect(document.activeElement).toBe(row('3'));
     fireEvent.keyDown(row('3')!, { key: 'h' });
     await hidden(transport, '3');
     expect(saved(transport).selected_item_id).toBe('4');
@@ -254,6 +302,23 @@ describe('hide moves on to the next item on the same level', () => {
     fireEvent.mouseDown(row('6')!); fireEvent.click(row('6')!);
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('6'));
     expect(tree.hasAttribute('data-kbd')).toBe(false);
+  });
+
+  it('row 15: . brings a selection folded away back by key, and the focus ring stays on it', async () => {
+    const transport = await mount();
+    const tree = screen.getByRole('region', { name: 'Session tree' });
+    row('1.1')!.focus(); fireEvent.keyDown(row('1.1')!, { key: 'Enter' });
+    await waitFor(() => expect(saved(transport).selected_item_id).toBe('1.1')); await ready();
+    // ArrowLeft goes up to 1, and again folds it: the selected 1.1 is out of the Map.
+    fireEvent.keyDown(row('1.1')!, { key: 'ArrowLeft' });
+    expect(document.activeElement).toBe(row('1'));
+    fireEvent.keyDown(row('1')!, { key: 'ArrowLeft' });
+    await waitFor(() => expect(row('1.1')).toBeNull()); await ready();
+    // `.` reveals it again (a select, then the reveal's focus hand-off): both are the keyboard's, so the ring stays.
+    fireEvent.keyDown(row('1')!, { key: '.' });
+    await waitFor(() => expect(document.activeElement).toBe(row('1.1'))); await ready();
+    expect(saved(transport).selected_item_id).toBe('1.1');
+    expect(tree.hasAttribute('data-kbd')).toBe(true);
   });
 
   it('row 23: hiding the focused root ends Focus in the same write and selects the next root', async () => {
@@ -278,8 +343,8 @@ describe('hide moves on to the next item on the same level', () => {
     expect(document.activeElement).toBe(row('2'));
   });
 
-  it('row 26: the bigger view’s Hide of its own item follows the rule there and leaves the Map selection', async () => {
-    const transport = await mount(transport => { saved(transport).selected_item_id = '4'; });
+  /** Opens item 2's waiting question from the dock in the bigger view, and returns that view's item. */
+  async function biggerOn2(transport: AppTransport) {
     fireEvent.click(await screen.findByRole('button', { name: 'Read in a bigger view' }));
     const dock = screen.getByRole('region', { name: 'Answer dock' });
     fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
@@ -291,13 +356,22 @@ describe('hide moves on to the next item on the same level', () => {
       fireEvent.click(within(dock).getByRole('button', { name: 'Next question' }));
     }
     fireEvent.click(open()!);
-    const bigger = () => screen.getByRole('region', { name: 'Item conversation' });
-    await waitFor(() => expect(bigger().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('2'));
-    fireEvent.click(within(bigger()).getByRole('button', { name: 'More actions' }));
+    const item = () => screen.getByRole('region', { name: 'Item conversation' }).querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id');
+    await waitFor(() => expect(item()).toBe('2'));
+    return item;
+  }
+  const hideInBigger = () => {
+    fireEvent.click(within(screen.getByRole('region', { name: 'Item conversation' })).getByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
+  };
+
+  it('row 26: the bigger view’s Hide of its own item follows the rule there and leaves the Map selection', async () => {
+    const transport = await mount(transport => { saved(transport).selected_item_id = '4'; });
+    const item = await biggerOn2(transport);
+    hideInBigger();
     // The bigger view covers the Map (its region is hidden from the accessibility tree meanwhile).
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toContain('2'));
-    await waitFor(() => expect(bigger().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('3'));
+    await waitFor(() => expect(item()).toBe('3'));
     expect(saved(transport).selected_item_id).toBe('4');
   });
 });
@@ -346,20 +420,67 @@ describe('a hide that is not saved moves nothing', () => {
     await waitFor(() => expect(detailOf()).toBe('4'));
   });
 
-  it('S3: a selection the owner makes while the hide is in flight wins', async () => {
+  /** Every selection the screen shows (rows or nodes, and Details), each change once, while `run` goes. */
+  async function shown(run: () => Promise<void>) {
+    const states: string[] = [];
+    const record = () => { const now = `${selectedRows().join(',')}|${detailOf() ?? ''}`; if (states.at(-1) !== now) states.push(now); };
+    record();
+    const watch = new MutationObserver(record);
+    watch.observe(document.body, { childList: true, subtree: true, attributes: true });
+    try { await run(); } finally { watch.disconnect(); }
+    record();
+    return states;
+  }
+
+  it('S3: a node the owner clicks while the hide is in flight wins, and the hide’s own pick never shows', async () => {
     const transport = await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await waitFor(() => expect(node('3')).not.toBeNull());
     fireEvent.click(node('3')!);
     await waitFor(() => expect(saved(transport).selected_item_id).toBe('3')); await ready();
-    transport.hold();
-    node('3')!.focus(); fireEvent.keyDown(node('3')!, { key: 'h' });
-    await waitFor(() => expect(transport.held).toBe(1));
-    fireEvent.click(node('6')!);
-    await waitFor(() => expect(node('6')!.getAttribute('aria-selected')).toBe('true'));
-    await act(async () => { transport.release(); });
-    await hidden(transport, '3');
-    await waitFor(() => expect(saved(transport).selected_item_id).toBe('6'));
+    const states = await shown(async () => {
+      transport.hold();
+      node('3')!.focus(); fireEvent.keyDown(node('3')!, { key: 'h' });
+      await waitFor(() => expect(transport.held).toBe(1));
+      // The click's reveal answers after the hide lands: until then the App still has 3 selected.
+      transport.holdReveals();
+      fireEvent.click(node('6')!);
+      await waitFor(() => expect(node('6')!.getAttribute('aria-selected')).toBe('true'));
+      await act(async () => { transport.release(); });
+      await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toContain('3'));
+      await act(async () => { await new Promise(resolve => { setTimeout(resolve, 50); }); });
+      await act(async () => { transport.releaseReveals(); });
+      await hidden(transport, '3');
+      await waitFor(() => expect(saved(transport).selected_item_id).toBe('6'));
+      await waitFor(() => expect(detailOf()).toBe('6'));
+    });
     expect(node('6')!.getAttribute('aria-selected')).toBe('true');
+    // No 6 → 4 → 6: 4 (the rule's pick after 3) is never selected or in Details.
+    expect(states.filter(state => state.split('|')[0]!.split(',').includes('4') || state.endsWith('|4'))).toEqual([]);
+    // Undo has no move of its own to take back: the owner chose 6.
+    act(() => toasts.runUndo(toasts.current()!.id));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
+    expect(saved(transport).selected_item_id).toBe('6');
+  });
+
+  it('S3, the Map: a row clicked while the hide is in flight is refused, and the hide’s pick shows once, with no back and forth', async () => {
+    const transport = await mount();
+    await select(transport, '3');
+    const states = await shown(async () => {
+      transport.hold();
+      pressH('3');
+      await waitFor(() => expect(transport.held).toBe(1));
+      fireEvent.mouseDown(row('6')!); fireEvent.click(row('6')!);
+      await act(async () => { transport.release(); });
+      await hidden(transport, '3');
+      await waitFor(() => expect(detailOf()).toBe('4'));
+    });
+    expect(saved(transport).selected_item_id).toBe('4');
+    expect(selectedRows()).toEqual(['4']);
+    // 3 and Details on 3, then 4 and Details on 4: the clicked 6 never shows, and nothing goes back.
+    const picks = states.map(state => state.split('|')[0]);
+    expect(picks.filter(pick => pick === '6')).toEqual([]);
+    expect(picks.at(-1)).toBe('4');
+    expect(picks.slice(picks.indexOf('4')).every(pick => pick === '4')).toBe(true);
   });
 });

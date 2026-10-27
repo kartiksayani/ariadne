@@ -38,14 +38,21 @@ export interface HideMove {
   readonly itemId: string;
   /** The item selected now, as the view's own reveal (a click echo: no scroll, no centring); null when none is. */
   readonly own: RevealedItem | null;
-  /** Whether the view selection moves (false when only the bigger view's item follows the rule). */
+  /** Whether the view selection moves (false when only the bigger view's item follows the rule, and for a plain Unhide). */
   readonly select: boolean;
+  /** The session view the write saves (an unhide's: where the item comes back, and whether Focus comes back with it). */
+  readonly after?: Immutable<SessionPreferences>;
 }
 
 export interface HideView {
   readonly route: SessionRef;
   /** The item to select once `itemId` is hidden, from the view as it will show `after` (the saved view with the hide in it). */
   choose(itemId: string, after: Immutable<SessionPreferences>): string | null;
+  /**
+   * The item the owner chose in this view while the hide's write was in flight, outside what the hide takes (`going`): that
+   * newer choice stays selected instead of the hide's (S3). Null when there is none.
+   */
+  newer?(going: ReadonlySet<string>): string | null;
   /** Called in the update that publishes the write, before it publishes: the view takes the move as its own. */
   present(move: HideMove): void;
 }

@@ -380,18 +380,27 @@ export function TreeView(props: TreeViewProps) {
   const toggleStrip = (row: StripRow) => toggleHiddenGroup(hiddenGroupKey(row.topicId, row.parent));
   /** Hide or Unhide (`h`, the row's button): the App runs every hide path through one rule (alpha.24), asking this view (below). */
   const hideItem = (row: ItemRowModel) => { onAct('hide', { ...route, item_id: row.item.id }); };
+  /**
+   * The Map's rows as it will show `after` (the saved view a hide or its Undo writes), with `selected` and `revealed` as given: the
+   * view on screen with `after`'s hidden items and Focus, or `after` itself for a session with no view yet.
+   */
+  const projectRows = (after: Immutable<SessionPreferences>, selected: string | null, revealed: string | null): readonly Row[] | null => {
+    if (!session) return null;
+    const next: Immutable<SessionPreferences> = { ...view ?? after, hidden_item_ids: after.hidden_item_ids ?? [], focused_item_id: after.focused_item_id };
+    const focus = after.focused_item_id ? session.items[after.focused_item_id] : undefined;
+    return treeModel({ session, view: next, filter: filterOf({ session, view: next, later, local: localChips.chips }),
+      focusRootId: focus && !focus.parent && !itemRemoved(session, focus.id) ? focus.id : null, ackHeld, search: query, searchShown, later,
+      collapsedTopics: closedTopics, selectedId: selected, revealId: revealed, filterCollapsedItemIds: filterFolds.items,
+      filterCollapsedTopicIds: filterFolds.topics, attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [],
+      presence, health, summaries, now: minute, places }).rows;
+  };
   /** The Map as it will show once `itemId` is hidden (`after`: the saved view with the hide), and the item the rule selects in it. */
   const chooseAfterHide = useLatest((itemId: string, after: Immutable<SessionPreferences>) => {
-    if (!session || !view) return null;
+    if (!session) return null;
     const going = new Set(subtree(session, itemId).map(item => item.id));
-    const next: Immutable<SessionPreferences> = { ...view, hidden_item_ids: after.hidden_item_ids ?? [], focused_item_id: after.focused_item_id };
-    const focus = after.focused_item_id ? session.items[after.focused_item_id] : undefined;
-    const projected = treeModel({ session, view: next, filter: filterOf({ session, view: next, later, local: localChips.chips }),
-      focusRootId: focus && !focus.parent && !itemRemoved(session, focus.id) ? focus.id : null, ackHeld, search: query, searchShown, later,
-      collapsedTopics: closedTopics, selectedId: selectedId && !going.has(selectedId) ? selectedId : null,
-      revealId: revealId && !going.has(revealId) ? revealId : null, filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
-      attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute, places });
-    return selectionAfterHide(session, itemId, shownItems(projected.rows));
+    const stays = (id: string | null | undefined) => id && !going.has(id) ? id : null;
+    const rows = projectRows(after, stays(selectedId), stays(revealId));
+    return rows && selectionAfterHide(session, itemId, shownItems(rows));
   });
   /** The nearest row above `itemId`'s, at its offset below the reading edge, while the row is on screen below the band. */
   const holdAbove = (itemId: string): { readonly key: string | null; readonly offset: number } | null => {
@@ -407,6 +416,23 @@ export function TreeView(props: TreeViewProps) {
     }
     return { key: null, offset: 0 };
   };
+  /**
+   * Where an unhidden item comes back (`rows`: the Map once it shows again): the nearest row on screen above that place holds its
+   * offset below the reading edge, so the rows above stay and the rows below make room. A place above or below the window changes
+   * nothing on screen: the reading row holds, as before. With no row above it, the scroll position stays at the top.
+   */
+  const holdBack = (itemId: string, rows: readonly Row[]): { readonly key: string | null; readonly offset: number } | null => {
+    const box = scroller.current, at = rows.findIndex(row => row.key === itemId);
+    if (!box || at < 0) return null;
+    const top = readingTop();
+    for (let index = at - 1; index >= 0; index--) {
+      const row = rows[index]!, above = row.kind === 'topic' ? undefined : elements.current.get(row.key);
+      if (!above) continue;
+      const rect = above.getBoundingClientRect();
+      return rect.bottom <= top + READING_EDGE_CLEARANCE || rect.top >= visibleBottom(box) ? null : { key: row.key, offset: rect.top - top };
+    }
+    return box.scrollTop < 1 ? { key: null, offset: 0 } : null;
+  };
   /** A hide's move (or its Undo's), in the update that publishes its write: the reveal is this view's own, so nothing scrolls. */
   const presentMove = useLatest((move: HideMove) => {
     const next = move.own?.kind === 'item' ? move.own.route.item_id : null;
@@ -420,9 +446,19 @@ export function TreeView(props: TreeViewProps) {
       hideHold.current = !ending ? holdAbove(move.itemId)
         : move.select && next && place !== undefined ? { key: next, offset: place, window: true }
         : topic && band !== undefined ? { key: topic, offset: band, window: true } : null;
-      // A reveal held for the owner ends: the hide's commit holds the row above, and a later scroll must not put it back.
-      if (hideHold.current) revealedAnchor.current = null;
+    } else if (move.after) {
+      // An Undo that brings Focus back is the hide's way back: the item takes the window place of the row its hide selected, or with
+      // none selected the topic's band keeps its place. Any other unhide keeps the rows above where the item comes back still.
+      const restoring = !!move.after.focused_item_id && move.after.focused_item_id !== focusedId;
+      const place = restoring && selectedId ? elements.current.get(selectedId)?.getBoundingClientRect().top : undefined;
+      const band = restoring && topic ? elements.current.get(topic)?.getBoundingClientRect().top : undefined;
+      const rows = restoring ? null : projectRows(move.after, next ?? selectedId, revealId);
+      hideHold.current = rows ? holdBack(move.itemId, rows)
+        : place !== undefined ? { key: move.itemId, offset: place, window: true }
+        : topic && band !== undefined ? { key: topic, offset: band, window: true } : null;
     }
+    // A reveal held for the owner ends: the commit holds its own row, and a later scroll must not put the old one back.
+    if (hideHold.current) revealedAnchor.current = null;
     if (!move.select) return;
     hideMove.current = true;
     clickedReveal.current = move.own;
