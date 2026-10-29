@@ -5,8 +5,9 @@ summary item. Keep routine checks in one item; a comment, risk or choice gets
 its own item only if it needs an independent answer or discussion.
 
 A review verdict is one `decision` ask; proposed comments are separate asks
-when the owner needs to approve them individually. Put proposed text in
-`outcome`, the PR/file in `links`, and follow the question shape in `SKILL.md`.
+when the owner needs to approve them individually. Put proposed comment text in
+`note`, the PR/file in `links`, and follow the question shape in `SKILL.md`; the
+`ask` stays one line.
 Post only with existing authorization or the owner's answer.
 
 Compare 2–3 real alternatives in one question with their consequences; avoid

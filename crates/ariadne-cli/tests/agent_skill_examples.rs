@@ -727,6 +727,26 @@ fn the_core_teaches_each_field_by_where_the_owner_sees_it() {
         let pr = files.iter().find(|(name, _)| name == "pr-comments.md");
         let (_, pr) = pr.unwrap();
         assert!(!pr.contains("progress notes are hidden"), "{directory}");
+        // A question's layers live in `note`; `outcome` is the one-line result.
+        let note = core.lines().find(|line| line.starts_with("| `note` |"));
+        assert!(
+            note.unwrap().ends_with(
+                "for a question, the recommendation, no-answer default and affected items (rule 4) |"
+            ),
+            "{directory}"
+        );
+        let review = files.iter().find(|(name, _)| name == "review.md");
+        let review = review
+            .unwrap()
+            .1
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            review.contains("Put proposed comment text in `note`")
+                && !review.contains("text in `outcome`"),
+            "{directory}"
+        );
     }
 }
 
