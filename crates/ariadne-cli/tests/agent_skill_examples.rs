@@ -721,7 +721,7 @@ fn the_core_teaches_each_field_by_where_the_owner_sees_it() {
             assert!(core.contains(&row), "{directory} omits {field}");
         }
         assert!(core.contains("\n| topic `brief` | "), "{directory}");
-        assert!(core.contains("Put a task's description in `note`, never in `question`."));
+        assert!(core.contains("Put an item's description in `note`, never in `question`."));
         assert!(core.contains("plain text in `question`"));
         assert!(!core.contains("`note`:\nprogress") && !core.contains("`note`: progress"));
         let pr = files.iter().find(|(name, _)| name == "pr-comments.md");

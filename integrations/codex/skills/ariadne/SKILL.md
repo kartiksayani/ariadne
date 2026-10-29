@@ -162,7 +162,7 @@ Finished tasks await Ack. Strict validation, CLI repairs and exceptions: `errors
 | `reply` | Item conversation | Explanations, answers |
 | topic `brief` | Topic head in Changes | Rule 3 |
 
-Put a task's description in `note`, never in `question`. `item.ask` starts a new
+Put an item's description in `note`, never in `question`. `item.ask` starts a new
 round. Permission needs an ask with "Got it, go ahead".
 
 **Delete** only clearly wrong/duplicate/obsolete work you created, or what the
