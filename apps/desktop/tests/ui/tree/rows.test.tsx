@@ -5,7 +5,7 @@ import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch } from '../../../src/selectors/tree/rows';
 import { sentenceRows } from './scope';
-import { topicCounts } from '../../../src/ui/tree/model';
+import { matchFields, topicCounts } from '../../../src/ui/tree/model';
 import { branchSlot } from '../../../src/ui/tree/branch';
 import { chipCounts, savedChips, toggleSavedChip, type LocalChip } from '../../../src/selectors/tree/filter';
 import { shimTree } from './shimTree';
@@ -141,18 +141,40 @@ describe('canonical sentence tree projection', () => {
       .toEqual(['1', '2', '3', '4', '5', '6', '7', '10']);
     expect(JSON.stringify(session)).toBe(before);
   });
-  it('uses NFKC and locale-independent token search over questions and outcomes, not the conversation', () => {
+  it('uses NFKC and locale-independent token search over questions, outcomes and notes, not the conversation', () => {
     const session = seed();
     session.items['1']!.question = `${office} ${cafe}`; session.items['1']!.why = 'Preserve network safety';
     expect(normalizeSearch(`office ${decomposed} network`)).toBe(`office ${cafe} network`);
     expect(matching(immutable(session), `office ${decomposed}`)).toEqual(['1']);
-    // The why and the conversation are not searched; every word must be in the question or in the outcome.
+    // The why and the conversation are not searched; every word must be in the question, in the outcome or in the note.
     expect(matching(immutable(session), `office ${decomposed} network`)).toEqual([]);
     const message = session.messages.find(message => message.kind === 'reply' && message.item_id === '1')!;
     message.body = 'Native queue receipt is the explicit domain explanation.';
     expect(matching(immutable(session), 'native queue')).toEqual([]);
     session.items['1']!.outcome = 'A native queue holds the receipt.';
     expect(matching(immutable(session), 'native queue')).toEqual(['1']);
+    // The note is searched on its own: its words never combine with the question's or the outcome's.
+    session.items['1']!.outcome = null; session.items['1']!.note = 'The gateway keeps a spare copy.';
+    expect(matching(immutable(session), 'gateway spare')).toEqual(['1']);
+    expect(matching(immutable(session), `office ${decomposed} gateway`)).toEqual([]);
+  });
+  it.each(['open', 'waiting_on_me', 'in_progress', 'done', 'dropped', 'replaced'] as const)('reports a note match for a %s item', status => {
+    const session = seed(), base = session.items['1']!;
+    const item = immutable({ ...base, status, note: 'The gateway keeps a spare copy.', outcome: null });
+    expect(matchFields(item, false, null, ['gateway', 'spare'])).toEqual(['note']);
+    expect(matchFields(item, false, null, ['gateway', 'absent'])).toEqual([]);
+    expect(matchFields(item, false, null, [])).toEqual([]);
+  });
+  it('reports a note match for an item parked for later, which shows no outcome', () => {
+    const session = seed(), base = session.items['1']!;
+    const item = immutable({ ...base, status: 'open' as const, note: 'The gateway keeps a spare copy.', outcome: 'The gateway is final.' });
+    expect(matchFields(item, true, null, ['gateway'])).toEqual(['note']);
+    expect(matchFields(item, false, null, ['gateway'])).toEqual(['outcome', 'note']);
+  });
+  it('reports the fields in Map order: question, outcome, note', () => {
+    const session = seed(), base = session.items['1']!;
+    const item = immutable({ ...base, status: 'done' as const, question: 'A gateway?', outcome: 'The gateway is final.', note: 'Gateway notes.' });
+    expect(matchFields(item, false, null, ['gateway'])).toEqual(['question', 'outcome', 'note']);
   });
   it('excludes shared activity and unrelated touched-item backlinks from search', () => {
     const session = seed();

@@ -150,7 +150,7 @@ describe('hidden item tree projection', () => {
     const plain = model(), searched = model({ search: 'receipt' });
     // The search changes no count and no row; the hidden 1.1 ("Add the receipt lookup test") is named in the note.
     expect(searched.rows.map(row => row.key)).toEqual(plain.rows.map(row => row.key));
-    expect(searched.rows.find(row => row.key === '3')).toMatchObject({ matches: ['question'] });
+    expect(searched.rows.find(row => row.key === '3')).toMatchObject({ matches: ['question', 'note'] });
     expect(searched.search).toMatchObject({ hidden: 1, collapsed: 0 });
     expect(model({ search: 'unmatched' }).search).toMatchObject({ hidden: 0, collapsed: 0 });
   });

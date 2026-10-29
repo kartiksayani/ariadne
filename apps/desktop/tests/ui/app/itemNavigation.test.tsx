@@ -662,7 +662,8 @@ describe('composed map reveal scrolling', () => {
     treeGeometry(); await setup(); await openSession();
     await act(async () => { fireEvent.change(await searchBox(), { target: { value: 'receipt' } }); });
     // The search finds in place: the top bar counts it and the Map keeps every row.
-    expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 2');
+    // Item 3 counts twice (its question and its note), 1.1 once.
+    expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 3');
     await readAt(600); outsideTree('1.1');
     await pick('1.1');
     expect(treeScroll().scrollTop).toBe(600);

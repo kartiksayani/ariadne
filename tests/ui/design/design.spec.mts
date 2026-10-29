@@ -876,6 +876,80 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
   expect(denied).toEqual([]);
 });
 
+// Alpha.26: a search that matches notes adds an "In notes" tag to rows that do not draw their note. The tag widens the end cluster, so
+// it can rewrap a question; the Map's held-row correction must keep the selected row, and the rows at both ends of the scroll, in place.
+// The frame's items 3.2, 3.3 and 3.9 carry the same note (changes-fixture.ts `notesAfter`, "Owner: the platform team").
+for (const theme of ['light', 'dark'] as const) for (const [size, width, height] of [['wide', 1280, 1100], ['narrow', 900, 650], ['tight', 760, 650]] as const) {
+  test(`A note search adds "In notes" tags and moves no row the owner is looking at: ${size} (${theme})`, async ({ page, origin }, testInfo) => {
+    const denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, { ...frameSpec('changes-notes'), theme, width, height });
+    const scroller = page.locator('.tree-scroll'), rows = page.locator('.tree-scroll [role="treeitem"][data-item-id]');
+    const tops = () => rows.evaluateAll(elements => elements.flatMap(element => {
+      const rect = element.getBoundingClientRect();
+      return [[element.getAttribute('data-item-id')!, Math.round(rect.top * 10) / 10, Math.round(rect.bottom * 10) / 10] as const];
+    }));
+    const selected = page.locator('[role="treeitem"][data-item-id="3.2"]');
+    await expect(selected).toHaveAttribute('aria-selected', 'true');
+    const visibleIn = (box: { top: number; bottom: number }, row: readonly [string, number, number]) => row[2] > box.top && row[1] < box.bottom;
+    // The reading row is the first row that starts inside the Map: the one the view holds still while a row above it rewraps.
+    const reading = (box: { top: number; bottom: number }, rows: readonly (readonly [string, number, number])[]) => rows.find(row => row[1] >= box.top && row[1] < box.bottom)!;
+    const type = async (text: string) => {
+      if (!await page.locator('.tb-search-input').count()) await page.getByRole('button', { name: 'Search the Map' }).click();
+      await page.locator('.tb-search-input').fill(text);
+      await settle(page);
+    };
+    // (a) and (b): at the top of the scroll, the selected row and the first row stay where they are.
+    await scroller.evaluate(element => { element.scrollTop = 0; });
+    await selected.scrollIntoViewIfNeeded();
+    await settle(page);
+    const topBox = await scroller.evaluate(element => { const rect = element.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; });
+    const before = await tops(), selectedBefore = before.find(row => row[0] === '3.2')!;
+    await type('platform team');
+    await expect(page.locator('.tree-note-hit').first()).toBeVisible();
+    // The selected row is open, so it draws no note: its note match is named by the tag.
+    await expect(selected.locator('.tree-note-hit')).toHaveText('In notes');
+    const after = await tops();
+    expect(after.find(row => row[0] === '3.2')![1], 'the selected row keeps its y').toBe(selectedBefore[1]);
+    const firstSeen = reading(topBox, before);
+    expect(after.find(row => row[0] === firstSeen[0])![1], 'the first visible row keeps its y').toBe(firstSeen[1]);
+    // The tag is drawn in the hit tint, and the current match's tag has the strong ring.
+    const look = await page.locator('.tree-note-hit').evaluateAll(tags => tags.map(tag => ({ current: tag.hasAttribute('data-current'), shadow: getComputedStyle(tag).boxShadow,
+      background: getComputedStyle(tag).backgroundColor, height: tag.getBoundingClientRect().height })));
+    expect(look.some(tag => tag.current)).toBe(true);
+    for (const tag of look) {
+      expect(tag.background).not.toBe('rgba(0, 0, 0, 0)');
+      expect(tag.height).toBe(18);
+      expect(tag.shadow === 'none').toBe(!tag.current);
+    }
+    await testInfo.attach(`in-notes-${size}-${theme}`, { body: await page.locator('.tree-scroll').screenshot(), contentType: 'image/png' });
+    // Clearing the search takes the tags away and moves nothing either.
+    await type('');
+    await expect(page.locator('.tree-note-hit')).toHaveCount(0);
+    expect((await tops()).find(row => row[0] === '3.2')![1], 'the selected row keeps its y when the search clears').toBe(selectedBefore[1]);
+    // (c): at the bottom of the scroll, the last row stays where it is (a Map that does not scroll has its bottom at its end).
+    await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await settle(page);
+    const bottomBox = await scroller.evaluate(element => { const rect = element.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; });
+    const atBottom = await tops(), last = atBottom.filter(row => visibleIn(bottomBox, row)).at(-1)!;
+    await type('platform team');
+    await expect(page.locator('.tree-note-hit').first()).toBeVisible();
+    // A matched row above the reading row rewraps upward and one below it grows downward; the reading row itself stays.
+    const afterBottom = await tops(), held = reading(bottomBox, atBottom);
+    expect(afterBottom.find(row => row[0] === held[0])![1], 'the first visible row keeps its y at the bottom of the scroll').toBe(held[1]);
+    for (const row of atBottom.slice(atBottom.indexOf(held), atBottom.indexOf(last))) expect(afterBottom.find(other => other[0] === row[0])![1], `row ${row[0]} between the reading row and the last keeps its y`).toBe(row[1]);
+    // (d) The tight Map wraps a matched row to three lines or more once its tag is drawn; the selected row still held its y above.
+    if (size === 'tight') {
+      const lines = await page.locator('[role="treeitem"]:has(.tree-note-hit) .tree-question').evaluateAll(elements => elements.map(element => {
+        const style = getComputedStyle(element);
+        return Math.round(element.getBoundingClientRect().height / parseFloat(style.lineHeight));
+      }));
+      expect(Math.max(...lines), 'a matched row wraps to three lines').toBeGreaterThanOrEqual(3);
+    }
+    expect(denied).toEqual([]);
+  });
+}
+
 test('a long waiting conversation opens at its latest ask and keeps the question visible', async ({ page, origin }) => {
   const denied: string[] = [];
   await route(page.context(), origin, denied);

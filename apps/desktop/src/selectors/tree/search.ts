@@ -4,8 +4,8 @@
 
 export const normalizeSearch = (text: string): string => text.normalize('NFKC').toLowerCase();
 
-export type MatchField = 'question' | 'outcome';
-/** One match: an item's question or its outcome holds every word of the search. */
+export type MatchField = 'question' | 'outcome' | 'note';
+/** One match: an item's question, its outcome or its note holds every word of the search. */
 export interface MapMatch { readonly id: string; readonly field: MatchField }
 
 /** The search as normalised words; none while the search is empty. */

@@ -28,7 +28,8 @@ import { STATUS } from '../shared/status';
 import { Chat } from './Chat';
 import { Composer } from './Composer';
 import { AnswerSlot, answerSlotError, changedText } from './AnswerSlot';
-import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, useProjectFile } from '../shared/MarkdownText';
+import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, MarkdownHighlight, useProjectFile } from '../shared/MarkdownText';
+import { holdsTerms, searchTerms } from '../../selectors/tree/search';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
@@ -101,6 +102,8 @@ export interface ItemDetailProps extends ItemActionsProps {
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
+  /** The Map's search as typed (the header search). While it is on, a hit in this item's note is lit in Details. */
+  readonly searchQuery?: string;
   readonly later: boolean;
   readonly onLater?: (value: boolean) => Promise<boolean>;
   readonly onBring?: () => void;
@@ -185,10 +188,11 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, dividerAt, onHide, onRemove, onActions, onMarkSeen }: ItemDetailProps) {
+export function ItemConversation({ drafts, store, itemId, searchQuery = '', later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, dividerAt, onHide, onRemove, onActions, onMarkSeen }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const pendingRemoval = useHidden();
   const item = session?.items[itemId];
+  const terms = useMemo(() => searchTerms(searchQuery), [searchQuery]);
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts, session);
   // A failed answer stays reachable after the question closes, outside the answer control.
@@ -242,6 +246,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
     replyDraft: mode === 'reply' || submit.written.length > 0, hiddenItemIds }) : null;
+  // The Map's search lights the note when the note holds every word (the Map's rule); Details has no current match to ring.
+  const noteHit = useMemo(() => model?.note && holdsTerms(model.note.text, terms) ? { terms, current: false } : null, [model?.note?.text, terms]);
   const round = item?.current_round_id ? session?.rounds[item.current_round_id] : null;
   const currentQuestionOpen = item?.status === 'waiting_on_me' && !!round && round.closed_at === null
     && round.question_revision === item.question_revision;
@@ -576,10 +582,12 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       <Markdown className="detail-outcome-text" text={model.outcome.text} />
     </section>}
 
-    {model.note?.progress && <div className="detail-note" data-testid="detail-note"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={model.note.text} inline /></div>}
+    {model.note?.progress && <div className="detail-note" data-testid="detail-note"><i className="ph ph-robot" aria-hidden="true" />
+      <MarkdownHighlight.Provider value={noteHit}><Markdown text={model.note.text} inline /></MarkdownHighlight.Provider></div>}
 
     {model.note && !model.note.progress && <section className="detail-section detail-notes" aria-label="Notes">
-      <div className="detail-label detail-notes-label">Notes</div><Markdown className="detail-notes-text" text={model.note.text} />
+      <div className="detail-label detail-notes-label">Notes</div>
+      <MarkdownHighlight.Provider value={noteHit}><Markdown className="detail-notes-text" text={model.note.text} /></MarkdownHighlight.Provider>
     </section>}
 
     {model.why && <section className="detail-section detail-why">{sectionLabel('Why')}<Markdown className="detail-why-text" text={model.why} /></section>}

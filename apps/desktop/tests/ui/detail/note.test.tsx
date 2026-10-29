@@ -37,11 +37,11 @@ describe('the Details model: where the note is drawn', () => {
   });
 });
 
-async function detail(patch: Partial<Item>) {
+async function detail(patch: Partial<Item>, searchQuery?: string) {
   const value = setup(); opened.push(value);
   Object.assign(value.transport.session.items['1.1']!, patch);
   await value.store.refresh();
-  return render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
+  return render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1.1" searchQuery={searchQuery} later={false} onOpenItem={vi.fn()} />);
 }
 
 describe('Details', () => {
@@ -82,6 +82,42 @@ describe('Details', () => {
     const notes = screen.getByRole('region', { name: 'Notes' });
     expect(screen.getByRole('region', { name: 'Current outcome' }).nextElementSibling).toBe(notes);
     expect(notes.nextElementSibling).toBe(screen.getByText('Why').parentElement);
+  });
+});
+
+// Alpha.26: the Map's search words light a note hit in Details. Only the note is lit; the question stays plain.
+describe('Details under a search', () => {
+  // A hit is a span the Map's highlight marks; found by its class name, not a selector.
+  const hitSpans = (root: HTMLElement) => [...root.querySelectorAll('span')].filter(span => span.classList.contains('tree-hit'));
+  const hits = (root: HTMLElement) => hitSpans(root).map(hit => hit.textContent);
+  it('lights a hit in the Notes section', async () => {
+    await detail({ status: 'open', note: 'The gateway keeps a spare copy.', question: 'A gateway question?' }, 'gateway spare');
+    const notes = screen.getByRole('region', { name: 'Notes' });
+    expect(hits(notes)).toEqual(['gateway', 'spare']);
+    expect(hitSpans(notes).some(hit => hit.hasAttribute('data-current'))).toBe(false);
+    expect(hitSpans(screen.getByRole('heading', { level: 2 }))).toHaveLength(0);
+  });
+  it('lights a hit in the In progress note line', async () => {
+    await detail({ status: 'in_progress', note: 'Reading the gateway log.' }, 'gateway');
+    expect(hits(screen.getByTestId('detail-note'))).toEqual(['gateway']);
+  });
+  it('lights a hit inside inline code and inside a code block', async () => {
+    await detail({ status: 'open', note: 'Edit `gateway.toml` first.\n\n```\ngateway --reload\n```' }, 'gateway');
+    const notes = screen.getByRole('region', { name: 'Notes' });
+    expect(hits(notes)).toEqual(['gateway', 'gateway']);
+    expect(hitSpans(notes).every(hit => hit.closest('code') !== null)).toBe(true);
+  });
+  it('lights nothing when the search is empty or absent', async () => {
+    await detail({ status: 'open', note: 'The gateway keeps a spare copy.' }, '');
+    expect(hitSpans(document.body)).toHaveLength(0);
+  });
+  it('lights nothing when the note does not hold every word', async () => {
+    await detail({ status: 'open', note: 'The gateway keeps a spare copy.' }, 'gateway absent');
+    expect(hitSpans(document.body)).toHaveLength(0);
+  });
+  it('is not lit without a search prop', async () => {
+    await detail({ status: 'open', note: 'The gateway keeps a spare copy.' });
+    expect(hitSpans(document.body)).toHaveLength(0);
   });
 });
 

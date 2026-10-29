@@ -8,6 +8,7 @@
 // | a heartbeat that changes no row            | none                                               | the same rows                       |
 // | selection                                  | the new selected row and the rows its thread runs  | aria-selected, the row's Ack        |
 // |                                            | down (never another topic's)                       |                                     |
+// | a click's view save, pending then settled  | the click's own rows only (alpha.26: no busy flip) | the tree's aria-busy, then clear     |
 // | the keyboard moves focus                   | the row it left and the row it reached             | roving tabIndex                     |
 // | an Ack held for its Undo                   | that row                                           | "Acked · Undo"                      |
 // | the agent stops (same revision)            | every row (each row's hover bar greys)             | "…: the agent is not running"       |
@@ -201,6 +202,83 @@ describe('each change redraws the rows it changed, and they show it (F6 risk tab
   });
 });
 
+describe('a click does not redraw every row (alpha.26 R1)', () => {
+  /**
+   * Holds the owner's view save of a row click (the `set_session_view` that selects `id`) until `release()`; `entered()` says it is in
+   * flight. The click also queues an automatic Recent write, which the owner never waits on, so that one is let through.
+   */
+  function holdViewSave(transport: AppTransport, id: string) {
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === id)) { entered = true; await gate; }
+      return invoke(name, args);
+    });
+    return { release: () => release(), entered: () => entered };
+  }
+  const hasAck = (id: string) => !!within(row(id)).queryByRole('button', { name: /^Ack/ });
+
+  it('draws no row for the busy flip: rows the click did not touch render 0 times through the whole click, and no row without an Ack slot renders while the save is pending or after it settles', async () => {
+    const { transport } = await mount();
+    const held = holdViewSave(transport, '3');
+    const ids = shownRows(), withAck = ids.filter(hasAck);
+    // The rows a selection of 3 changes (the new selection and its thread), from the model, so the test does not guess them.
+    const session = immutable(transport.sessions.get(route.session_id)!), view = { ...new AppTransport().preferences.sessions[0]!, expanded_item_ids: ['1'] };
+    const input = { session, view, search: '', later: new Set<string>(), collapsedTopics: new Set<string>(), selectedId: null, revealId: null, temporaryExpanded: [],
+      presence: null, summaries: [], now: Date.parse('2026-10-07T12:00:00Z') };
+    const first = shimTree(input).rows, selected = shimTree({ ...input, selectedId: '3', previous: first }).rows;
+    const touched = new Set(selected.filter((value, at) => !sameRow(value, first[at]!)).map(value => value.key));
+    const untouched = ids.filter(id => !touched.has(id) && !withAck.includes(id));
+    expect(untouched).toContain('8');
+    expect(touched.has('3')).toBe(true);
+
+    drawn.length = 0;
+    fireEvent.click(row('3'));
+    await waitFor(() => expect(held.entered()).toBe(true));
+    await settle();
+    expect(row('3').getAttribute('aria-selected')).toBe('true');
+    const pendingFrom = drawn.length;
+    await act(async () => { held.release(); });
+    await settle();
+    // (a) Across the whole click, through busy and settle, an untouched row never renders.
+    expect(drawn.filter(id => untouched.includes(id))).toEqual([]);
+    // (b) From the moment the save is pending until after it settles, no row without an Ack slot renders at all.
+    expect(drawn.slice(pendingFrom).filter(id => !withAck.includes(id))).toEqual([]);
+  });
+
+  it('the tree, not each row, says a view save is pending, and clears when it settles', async () => {
+    const { transport } = await mount();
+    const held = holdViewSave(transport, '3');
+    const ids = shownRows();
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('false');
+    fireEvent.click(row('3'));
+    await waitFor(() => expect(held.entered()).toBe(true));
+    await settle();
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('true');
+    for (const id of ids) expect(row(id).getAttribute('aria-disabled')).toBeNull();
+    await act(async () => { held.release(); });
+    await settle();
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('false');
+  });
+
+  it('refuses a second click while the save is pending, as before', async () => {
+    const { transport } = await mount();
+    const held = holdViewSave(transport, '3');
+    fireEvent.click(row('3'));
+    await waitFor(() => expect(held.entered()).toBe(true));
+    const reads = transport.queries.length, saves = transport.mutations.length;
+    fireEvent.click(row('8'));
+    await settle();
+    expect(row('8').getAttribute('aria-selected')).toBe('false');
+    expect(transport.queries).toHaveLength(reads);
+    expect(transport.mutations).toHaveLength(saves);
+    await act(async () => { held.release(); });
+    await settle();
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('false');
+  });
+});
+
 describe('treeModel keeps a row that draws the same (F6c)', () => {
   const demoSession = () => new AppTransport().sessions.get(route.session_id)!;
   const build = (session: Immutable<Session>, change: Partial<ShimInput> = {}) => {
@@ -233,6 +311,30 @@ describe('treeModel keeps a row that draws the same (F6c)', () => {
       branch: null, delivery: null, place: { reason: 'removed', topicId: 't', itemId: 'i', parent: null, order: 1, name: 'n', count: 1, covers: ['i'] } };
     expect(reuseRows([strip], [structuredClone(strip)])[0]).toBe(strip);
     expect(reuseRows([strip], [{ ...strip, place: { ...strip.place!, covers: ['i', 'j'] } }])[0]).not.toBe(strip);
+  });
+  it.each([
+    ['Dates', () => new Date(1), () => new Date(2)],
+    ['Sets', () => new Set(['a']), () => new Set(['b'])],
+    ['Maps', () => new Map([['a', 1]]), () => new Map([['a', 2]])],
+  ] as const)('is not the same for a field holding two different %s, and is the same for the same instance (alpha.26 R2)', (_name, make, other) => {
+    const base = build(immutable(demoSession())).rows[0]!, value = make();
+    const withField = (field: unknown) => ({ ...base, extra: field }) as unknown as Row;
+    expect(sameRow(withField(value), withField(other()))).toBe(false);
+    expect(sameRow(withField(value), withField(value))).toBe(true);
+    // The same holds one level down, inside a plain object or an array.
+    expect(sameRow(withField({ inner: value }), withField({ inner: other() }))).toBe(false);
+    expect(sameRow(withField([value]), withField([other()]))).toBe(false);
+    expect(sameRow(withField({ inner: value }), withField({ inner: value }))).toBe(true);
+  });
+  it('still compares plain objects, null-prototype objects and arrays by their members', () => {
+    const base = build(immutable(demoSession())).rows[0]!;
+    const withField = (field: unknown) => ({ ...base, extra: field }) as unknown as Row;
+    const bare = (entries: Record<string, unknown>) => Object.assign(Object.create(null) as Record<string, unknown>, entries);
+    expect(sameRow(withField({ a: [1, 2] }), withField({ a: [1, 2] }))).toBe(true);
+    expect(sameRow(withField({ a: [1, 2] }), withField({ a: [1, 3] }))).toBe(false);
+    expect(sameRow(withField(bare({ a: 1 })), withField(bare({ a: 1 })))).toBe(true);
+    expect(sameRow(withField(bare({ a: 1 })), withField(bare({ a: 2 })))).toBe(false);
+    expect(sameRow(withField(bare({ a: 1 })), withField({ a: 1 }))).toBe(true);
   });
 });
 

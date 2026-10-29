@@ -167,12 +167,15 @@ for (const target of ['filter', 'session', 'row']) test(`${target} click readine
   const frames = new Map(), listeners = new Map(), scrolls = [];
   let nextFrame = 0, rect = { top: 200, bottom: 220, left: 400, right: 440, width: 40, height: 20 };
   const parent = { scrollLeft: 0, scrollTop: 0, parentElement: null };
-  let softDisabled = false;
+  let softDisabled = false, treeBusy = false;
+  // Only a row sits inside the tree; its busy state is the tree's (alpha.26 R1), not the row's own aria-disabled.
+  const tree = { getAttribute: name => name === 'aria-busy' ? String(treeBusy) : null };
   const selector = target === 'filter' ? null : target === 'session' ? '[data-session-id="fixture"]' : '.tree-rows [data-item-id="fixture"]';
   const button = { textContent: target === 'filter' ? 'Me17' : 'Me', children: target === 'filter' ? [{ tagName: 'SPAN', textContent: 'Me' }, { tagName: 'SPAN', textContent: '17' }] : [],
     disabled: target === 'row' ? undefined : false, isConnected: true, parentElement: parent, outerHTML: '<button>Me</button>',
     scrollIntoView: options => { scrolls.push(options); if (rect.top > 700) rect = { ...rect, top: 200, bottom: 220 }; }, getBoundingClientRect: () => ({ ...rect }),
-    getAttribute: name => name === 'aria-disabled' ? String(softDisabled) : 'false', contains: value => value === button };
+    getAttribute: name => name === 'aria-disabled' ? String(softDisabled) : 'false', contains: value => value === button,
+    closest: value => target === 'row' && value === '[role="tree"]' ? tree : null };
   let named = button, hit = button;
   const document = {
     visibilityState: 'visible', hidden: false, hasFocus: () => true,
@@ -196,6 +199,7 @@ for (const target of ['filter', 'session', 'row']) test(`${target} click readine
   assert.equal(state.readiness.visibilityState, 'visible'); assert.equal(state.readiness.hidden, false); assert.equal(state.readiness.hasFocus, true);
   const frame = () => { const [id, callback] = frames.entries().next().value; frames.delete(id); callback(); };
   frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
+  assert.equal(state.readiness.enabled, true, 'An idle tree (aria-busy="false") admits a row');
   rect = { ...rect, top: 210, bottom: 230 };
   frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
   parent.scrollTop = 20;
@@ -203,12 +207,15 @@ for (const target of ['filter', 'session', 'row']) test(`${target} click readine
   for (const change of [
     () => { button.disabled = true; },
     () => { softDisabled = true; },
+    // A busy tree holds a row; a filter chip or session button is not inside the tree, so the tree never holds it.
+    ...target === 'row' ? [() => { treeBusy = true; }] : [],
     () => { button.isConnected = false; },
     () => { named = { ...button }; },
     () => { hit = parent; },
   ]) {
     change(); frame(); assert.equal(state.readiness.ready, false); assert.equal(state.readiness.frames, 0);
-    button.disabled = target === 'row' ? undefined : false; softDisabled = false; button.isConnected = true; named = button; hit = button;
+    if (treeBusy) assert.equal(state.readiness.enabled, false, 'A busy tree (aria-busy="true") holds a row');
+    button.disabled = target === 'row' ? undefined : false; softDisabled = false; treeBusy = false; button.isConnected = true; named = button; hit = button;
     frame(); assert.equal(state.readiness.ready, false); frame(); assert.equal(state.readiness.ready, true);
   }
   assert.equal(scrolls.length, 1); assert.equal(scrolls[0].behavior, 'instant');
