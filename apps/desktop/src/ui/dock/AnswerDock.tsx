@@ -19,6 +19,7 @@ import type { SeenState } from '../../selectors/changes/seen';
 import type { Immutable } from '../../data/session-store';
 import type { Item, Session } from '../../generated/domain/models';
 import { peekNames } from '../peek/names';
+import { Markdown } from '../shared/MarkdownText';
 import { navigationVisits } from '../navigation/visits';
 import { ownerName } from '../shell/model';
 import { agentProduct } from '../../state/navigation/switcher';
@@ -266,7 +267,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
               : item.question}</h2>
           </DockQuestionHead>
           {item.ask && <p className="dock-question-ask">{item.ask}</p>}
-          {item.note && item.note.split(/\n{2,}/).map((paragraph, at) => <p key={at} className="dock-question-body">{paragraph}</p>)}
+          {item.note?.trim() && <Markdown className="dock-question-body" text={item.note} />}
         </div>
         <AnswerSlot drafts={drafts} store={store} itemId={item.id} layout="dock" onEscape={() => {}} onAgentNotRunning={onAgentNotRunning}
           onSent={() => { navigationVisits.record(route, item.id, 'answered'); model.sent(state.current!.id); void store.refresh(); }} />

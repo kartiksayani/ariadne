@@ -26,7 +26,8 @@ describe('item change box and history', () => {
     const box = screen.getByRole('region', { name: 'What changed' });
     expect(box.getAttribute('data-state')).toBe('unseen');
     expect(within(box).getByText(`Changed since you looked · ${timeText(value.record().at)}`)).toBeTruthy();
-    const row = within(box).getByText('Progress').parentElement!;
+    // The fixture item is open, so its note is "Notes" (alpha.25 C); "Progress" is only for an item in progress.
+    const row = within(box).getByText('Notes').parentElement!;
     expect(row.querySelector('del')?.textContent).toBe('Earlier note.');
     expect(row.querySelector('.change-after')?.textContent).toBe('Current note.');
     expect(within(box).getByText('Why').parentElement?.textContent).toContain('The owner chose a smaller change.');

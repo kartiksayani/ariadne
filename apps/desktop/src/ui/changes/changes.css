@@ -82,6 +82,9 @@
 .change-comparison { margin: 6px 0 10px; }
 .change-field { margin-top: 8px; }
 .change-field del, .change-field mark { white-space: pre-wrap; }
+
+/* The renderer draws a soft break as <br> plus a newline: inside these pre-wrap hosts its root sets its own white space, or each break shows twice. */
+.change-field .md, .change-row-value .md { white-space: normal; }
 .change-field del { color: var(--a-label); }
 
 .change-field mark {
@@ -184,6 +187,15 @@
   color: var(--a-label);
 }
 
+/* A struck before in Markdown stays muted: its links and nested lists carry the strike of the <del> and none of the accent colour. */
+.change-before .md-link { color: inherit; }
+
+/* A multi-line value stacks: the struck before, then the arrow, then the after, each on its own line. */
+.change-row-value[data-stacked] > .change-before,
+.change-row-value[data-stacked] > .change-arrow,
+.change-row-value[data-stacked] > .change-after { display: block; }
+.change-row-value[data-stacked] > .change-arrow { margin: 2px 0; }
+
 .change-box-older, .change-history-head {
   display: inline-flex;
   align-items: center;
@@ -220,7 +232,7 @@
   gap: 6px;
 }
 
-.change-timeline ol {
+.change-timeline > ol {
   padding: 0 0 0 10px;
   margin: 0;
   border-left: 2px solid var(--a-guide);

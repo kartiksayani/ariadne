@@ -472,6 +472,11 @@
   margin: 0 6px;
 }
 
+/* The note is Markdown now; its paragraphs keep the 7px the dock's column gave them when each was its own line of the column. */
+.dock-question-body > p + p {
+  margin-top: 7px;
+}
+
 /* The board's list is a flat column 2px apart: a session's name, then its questions as 6px/8px rows. */
 .dock-other-group {
   display: flex;

@@ -5,6 +5,9 @@ const id = (n: number) => `00000000-0000-4000-8000-f${String(950 + n).padStart(1
 const old = '2026-10-03T14:00:00.000Z', at = '2026-10-07T15:02:00.000Z';
 export const ownerWords = 'Keep retries quiet while offline.\nTell me when my saved changes are safe.';
 export const interpretation = 'Read as: Keep saved changes safe and explain recovery without repeated alerts.';
+/** The "notes" frame: item bodies written as Markdown (a list, bold, a link, a soft line break) and one of them changed. */
+export const notesAfter = '**From:** the support queue\nOwner: the platform team\n\n- first check, see [the ticket](https://example.com/ticket/7)\n- second check\n\n1. reproduce it\n2. write the test';
+export const notesBefore = '**From:** the old queue\nOwner: nobody yet\n\n- a single check, see [the old ticket](https://example.com/ticket/3)\n\n1. look into it';
 export const changeNames = ['Recovery policy', 'Retry schedule', 'Saved receipt', 'Offline wording', 'Old retry policy', 'Wake-up check', 'Clock change check', 'Recovery note'];
 
 /** Nineteen decided names for the long brief frame; some are long enough to need a line of their own on a narrow Map. */
@@ -14,7 +17,7 @@ export const longDecided = ['Backoff curve', 'Jitter range', 'Offline banner', '
   'Battery saver mode', 'Error vocabulary'];
 
 /** Fixed, app-only M2 data: five existing changes, three new items, and one waiting question. */
-export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | 'away' | 'long'): SessionSeen {
+export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | 'away' | 'long' | 'notes'): SessionSeen {
   const template = session.items['3.1']!;
   const topic = session.topics[template.topic_id]!;
   const binding = session.bindings[session.active_binding_id!]!;
@@ -44,6 +47,20 @@ export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | '
       ],
     }];
   }));
+  if (mode === 'notes') {
+    // "Retry schedule" (open) carries the changed Markdown note; "Recovery question" waits, so its note shows in the dock.
+    const retry = session.items['3.2']!;
+    retry.note = notesAfter;
+    retry.changes = [
+      { revision: 1, at: '2026-10-03T14:30:00.000Z', cause_message_id: id(7), reason: 'First draft of the schedule.', before: { note: 'Earlier draft.\n\n1. one\n2. two' } },
+      { revision: 2, at, cause_message_id: agentId, reason: 'Linked the **ticket** and trimmed the rest.', before: { note: notesBefore } },
+    ];
+    // "Saved receipt" carries the same change for the popover, which lists the other items (the selected one has its box).
+    const receipt = session.items['3.3']!;
+    receipt.note = notesAfter;
+    receipt.changes = [{ revision: 2, at, cause_message_id: agentId, reason: 'Linked the **ticket** and trimmed the rest.', before: { note: notesBefore } }];
+    session.items['3.9']!.note = notesAfter;
+  }
   if (mode === 'long') {
     // A topic that has settled a lot: the brief's Decided list holds many short and a few long names.
     for (const [index, name] of longDecided.entries()) {
