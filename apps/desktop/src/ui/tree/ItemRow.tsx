@@ -195,8 +195,6 @@ export interface ItemRowProps {
   /** The last N target keeps its outline after its brief arrival pulse. */
   readonly nextUnseen?: boolean;
   readonly nextUnseenPulse?: boolean;
-  /** Selection is held while a view write is unconfirmed. */
-  readonly disabled?: boolean;
   readonly closedReason?: string;
   readonly note: string | null;
   /** Why the agent's slots are greyed ("archived", "the agent is not running"); null while the agent can be asked. */
@@ -224,7 +222,7 @@ export interface ItemRowProps {
   readonly onPeekLeave?: () => void;
 }
 
-export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, stopped, ackDisabled, run, current = null, terms = NO_TERMS, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
+export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, closedReason, note, stopped, ackDisabled, run, current = null, terms = NO_TERMS, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   // A note match shows on the In progress preview when the row draws one; any other row names it with the "In notes" tag.
@@ -242,7 +240,7 @@ export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMar
   };
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   const bar = useRef<HTMLSpanElement>(null), dockInset = useDockInset();
-  return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
+  return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
     data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-branch={row.branch}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}

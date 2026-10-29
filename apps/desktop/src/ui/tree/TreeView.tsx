@@ -1471,7 +1471,7 @@ export function TreeView(props: TreeViewProps) {
     };
   };
   const closedReason = session ? sessionAnswerBlocked(session) : undefined;
-  const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={itemRefs}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
+  const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={itemRefs}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading' || focusDisabled} className="tree-rows" onBlur={saveScroll}>
     {sections.map(section => {
       if (!section.topic) return <div key={section.place.key} className="tree-topic-group tree-topic-place" role="presentation">
         <Strip variant="row" row={section.place} focused={focusKey === section.place.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
@@ -1486,7 +1486,7 @@ export function TreeView(props: TreeViewProps) {
         />
       {items.map(row => row.kind === 'strip'
         ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} onPlace={onPlace} />
-        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={closedReason}
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} closedReason={closedReason}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
         stopped={stopped} ackDisabled={!!row.ack && (ackBusy || ackHeld.has(row.key))} run={runRow}

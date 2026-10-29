@@ -901,6 +901,8 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
 
   it.each(['click', 'Enter'] as const)('opens a row at once from the loaded copy while a read is held, with %s', async method => {
     const value = await mount(), { release } = await staleTree(value);
+    // A held read is no write: the tree is not busy and the row opens.
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('false');
     expect(row('3').getAttribute('aria-disabled')).toBeNull();
     vi.useFakeTimers();
     if (method === 'click') fireEvent.click(row('3'));
@@ -1507,7 +1509,9 @@ describe('session tree filters', () => {
     transport.failNext = 'preferences_patch';
     fireEvent.click(chip('Open'));
     await waitFor(() => expect((chip('In progress') as HTMLButtonElement).disabled).toBe(true));
-    expect(row('4').getAttribute('aria-disabled')).toBe('true');
+    // The tree says it is busy (aria-busy); the rows carry no flag of their own.
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('true');
+    expect(row('4').getAttribute('aria-disabled')).toBeNull();
   });
 });
 

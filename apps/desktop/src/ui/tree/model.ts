@@ -627,13 +627,18 @@ export function treeModel(input: TreeInput): TreeModel {
  * equality contract), so the same object means the same item; a new revision brings new objects, and those rows redraw.
  */
 const BY_IDENTITY: ReadonlySet<string> = new Set(['item', 'replacedBy', 'topic']);
-/** Plain values by value; arrays and plain objects of them member by member, two levels down (a guide list, a strip's covers). */
+const plainObject = (value: object): boolean => { const proto = Object.getPrototypeOf(value) as unknown; return proto === Object.prototype || proto === null; };
+/**
+ * Plain values by value; arrays and plain objects of them member by member, two levels down (a guide list, a strip's covers).
+ * Any other object (a Date, Set, Map or class instance) is the same only when it is the same instance: its keys say nothing about it.
+ */
 function sameValue(a: unknown, b: unknown, depth = 2): boolean {
   if (Object.is(a, b)) return true;
   if (depth === 0 || typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
   if (Array.isArray(a) || Array.isArray(b)) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, at) => sameValue(value, b[at], depth - 1));
   }
+  if (!plainObject(a) || !plainObject(b)) return false;
   const left = a as Record<string, unknown>, right = b as Record<string, unknown>, keys = Object.keys(left);
   return keys.length === Object.keys(right).length && keys.every(key => key in right && sameValue(left[key], right[key], depth - 1));
 }

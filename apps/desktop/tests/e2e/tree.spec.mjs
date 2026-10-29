@@ -310,7 +310,8 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
       const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
         .find(value => value.textContent.trim() === name || [...value.children].some(child => child.tagName === 'SPAN' && child.textContent.trim() === name));
       const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-      const enabled = !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+      // A row is held while a view write is pending or the session loads: the tree says so (aria-busy), not each row (alpha.26 R1).
+      const enabled = !button.disabled && button.getAttribute('aria-disabled') !== 'true' && button.closest('[role="tree"]')?.getAttribute('aria-busy') !== 'true';
       const scroll = [];
       for (let parent = button.parentElement; parent; parent = parent.parentElement) scroll.push([parent.scrollLeft, parent.scrollTop]);
       const geometry = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, scroll };
