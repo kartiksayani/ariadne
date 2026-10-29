@@ -668,7 +668,7 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
         let files = generated(directory);
         let skill = &files[0].1;
         assert!(
-            skill.len() <= 10_000,
+            skill.len() <= 10_800,
             "{directory} core skill is {} bytes",
             skill.len()
         );
@@ -705,6 +705,29 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
         "the read-once rule belongs in reconnect.md only"
     );
     assert!(RECONNECT.contains("`ariadne read` once"));
+}
+
+/// Agents pick a field by where the owner sees it: the core carries the field
+/// table, keeps `question` a plain line and puts descriptions in `note`.
+#[test]
+fn the_core_teaches_each_field_by_where_the_owner_sees_it() {
+    for directory in SKILL_DIRECTORIES {
+        let files = generated(directory);
+        let core = &files[0].1;
+        assert!(core.contains("| Field | Shows | Write |"), "{directory}");
+        let fields = "question short note ask options outcome why links reply";
+        for field in fields.split(' ').map(|name| format!("`{name}`")) {
+            let row = format!("\n| {field} | ");
+            assert!(core.contains(&row), "{directory} omits {field}");
+        }
+        assert!(core.contains("\n| topic `brief` | "), "{directory}");
+        assert!(core.contains("Put a task's description in `note`, never in `question`."));
+        assert!(core.contains("plain text in `question`"));
+        assert!(!core.contains("`note`:\nprogress") && !core.contains("`note`: progress"));
+        let pr = files.iter().find(|(name, _)| name == "pr-comments.md");
+        let (_, pr) = pr.unwrap();
+        assert!(!pr.contains("progress notes are hidden"), "{directory}");
+    }
 }
 
 #[test]
@@ -1028,7 +1051,10 @@ fn the_review_and_checklist_examples_default_owner_and_status_as_the_rules_say()
         .options
         .iter()
         .all(|option| !option.consequence.is_empty()));
+    // The ask is one plain line; the question's layers live in the note.
     let ask = verdict.ask.as_deref().unwrap();
+    assert!(!ask.contains('\n') && !ask.contains('['), "{ask}");
+    let note = verdict.note.as_deref().unwrap();
     for part in [
         "I recommend",
         "fairly sure",
@@ -1037,7 +1063,7 @@ fn the_review_and_checklist_examples_default_owner_and_status_as_the_rules_say()
         "If you don't answer",
         "[retry implementation](item:2)",
     ] {
-        assert!(ask.contains(part), "missing question part {part}");
+        assert!(note.contains(part), "missing question part {part}");
     }
     assert_eq!(verdict.affects, Some(vec![ItemRef::new("2").unwrap()]));
     assert_eq!(
