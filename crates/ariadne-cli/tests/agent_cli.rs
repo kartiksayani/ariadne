@@ -1919,6 +1919,41 @@ fn dry_run_reports_what_would_change_and_commits_nothing() {
 }
 
 #[test]
+fn a_multi_line_question_warns_in_preview_and_apply_and_is_saved_unchanged() {
+    let setup = Setup::new(&seed());
+    let topic = seed().topics.0.keys().next().unwrap().clone();
+    let added = "Pick a cache\nThe old one is slow under load";
+    let edited = "Ship the fix\r\nAfter the cache lands";
+    let revision = seed().items.0[&ItemRef::new("1").unwrap()].revision.value();
+    let body = serde_json::to_vec(
+        &json!({"expected_item_revisions": {"1": revision}, "operations": [
+            {"op": "item.add", "topic": {"id": topic}, "type": "task", "question": added},
+            {"op": "item.edit", "item": {"id": "1"}, "patch": {"question": edited}}
+        ]}),
+    )
+    .unwrap();
+    let expected = json!([
+        "Item Pick a cache The old one is slow under load (3): `question` is the title and shows on one line. Put the description in `note`.",
+        "Item Ship the fix After the cache lands (1): `question` is the title and shows on one line. Put the description in `note`.",
+        // The third item in the seed topic also earns the existing brief advice.
+        "Topic Release choice (1) has at least 3 items and no brief. Add one with topic.edit."
+    ]);
+    let before = setup.bytes();
+    let preview = envelope(&setup.apply_with(&["--dry-run"], &body), 0);
+    assert_eq!(preview["data"]["warnings"], expected);
+    assert_eq!(setup.bytes(), before);
+    let applied = envelope(&setup.apply_with(&[], &body), 0);
+    assert_eq!(applied["data"]["warnings"], expected);
+    // Advice only: the saved titles keep their line breaks.
+    let session = setup.store().read(&id(2)).unwrap();
+    assert_eq!(session.items.0[&ItemRef::new("3").unwrap()].question, added);
+    assert_eq!(
+        session.items.0[&ItemRef::new("1").unwrap()].question,
+        edited
+    );
+}
+
+#[test]
 fn dry_run_rejects_what_the_real_apply_would_reject_and_still_commits_nothing() {
     let setup = Setup::new(&seed());
     let before = setup.bytes();

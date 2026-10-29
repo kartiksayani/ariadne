@@ -45,7 +45,7 @@ Reuse receipt revisions/numbers as `{"id":...}`.
 | `round.close` | `round_id` | |
 
 Set `topic` if neither default applies.
-Defaults, children, refs, transitions, limits: `errors.md`.
+Defaults, children, refs, transitions, limits, CLI repairs: `errors.md`.
 
 Delete accepts number/UUID strings, `{id}`, earlier batch refs or `{ref}`.
 Guard the existing root item/topic; history stays.
@@ -73,15 +73,15 @@ Owner instructions win; apply these rules while connected or told "use Ariadne".
    if that's wrong, Z"; "If you don't answer, I'll …"; named affected items
    (and `affects`). 2–3 real `options`, each with a consequence; mark the
    recommendation `recommended`; include "Not now"/"Neither" when real.
-   Put questions in Ariadne; no options means free text.
+   No options means free text.
 5. **Ask only what needs the owner.** Explore the code and evidence first, ask
    unsettled scope before building, and keep at most three questions
    `waiting_on_me`. Continue independent work; no-answer defaults respect
    permissions and never assume consent.
-6. **Layer the explanation.** `question` is the title. A result's bottom line
-   and "What this means for you" go in `outcome`; while asking or working they
-   open the `note`. Details go in `note`/`why`. Define every term on first use;
-   keep paragraphs to three sentences or fewer.
+6. **Layer the explanation.** A result's bottom line and "What this means for
+   you" go in `outcome`; while asking or working they open the `note`. Details
+   go in `note`/`why`. Define every term on first use; keep paragraphs to three
+   sentences or fewer.
 7. **Name connections.** Write `[retry cap](item:3.2)`, never bare item numbers.
    Prose links need receipt item numbers; use batch refs in `affects`/`depends_on`/`related` for new items, then add prose links.
    Use `affects` for consequences, `depends_on` for prerequisites, `related`
@@ -96,7 +96,6 @@ Owner instructions win; apply these rules while connected or told "use Ariadne".
    becomes a question on the item (`inputs.md`).
 9. **Leave results for Ack.** New results start `open` with a deliberate `ack_to`,
    result/evidence; never create `decided`, `done`, `dropped` or `replaced`.
-   Keep unanswered asks `waiting_on_me`.
 
 | Point | Type | New status / Ack choice |
 |---|---|---|
@@ -110,10 +109,8 @@ Owner instructions win; apply these rules while connected or told "use Ariadne".
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `open`, `ack_to: "dropped"` |
 
-**Ack:** type never chooses it. Findings/explanations without asks and
-Open/InProgress results need `ack_to`; Ack sets its target and sends no input.
+**Ack:** type never chooses it. Ack sets its target and sends no input.
 `item.edit.patch.ack_to` changes that choice without changing prose/status.
-Finished tasks await Ack. Strict validation, CLI repairs and exceptions: `errors.md`.
 
 **Fields**, where the owner sees them:
 
@@ -121,7 +118,7 @@ Finished tasks await Ack. Strict validation, CLI repairs and exceptions: `errors
 |---|---|---|
 | `question` | Title: Map row, Details top | One line; no lists, bold, links or context |
 | `short` | Name in paths, breadcrumbs, references | 2–4 words |
-| `note` | Details "Notes" (In progress: a progress line, also under the Map title if no outcome); answer dock | Description, context, source, links; progress |
+| `note` | Details "Notes" (In progress: a progress line, also under the Map title if no outcome); answer dock | Description, context, source, links; progress; for a question, the recommendation, no-answer default and affected items (rule 4) |
 | `ask` | While `waiting_on_me`: under the Map title, answer dock; Details conversation | Rule 4 |
 | `options` | Answer box | `label`, `consequence`, at most one `recommended` |
 | `outcome` | Details "Outcome"; under the Map title unless waiting, parked or replaced | The result, one line |
