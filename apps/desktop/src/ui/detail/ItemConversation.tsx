@@ -576,7 +576,11 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       <Markdown className="detail-outcome-text" text={model.outcome.text} />
     </section>}
 
-    {model.note && <div className="detail-note"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={model.note} inline /></div>}
+    {model.note?.progress && <div className="detail-note" data-testid="detail-note"><i className="ph ph-robot" aria-hidden="true" /><Markdown text={model.note.text} inline /></div>}
+
+    {model.note && !model.note.progress && <section className="detail-section detail-notes" aria-label="Notes">
+      <div className="detail-label detail-notes-label">Notes</div><Markdown className="detail-notes-text" text={model.note.text} />
+    </section>}
 
     {model.why && <section className="detail-section detail-why">{sectionLabel('Why')}<Markdown className="detail-why-text" text={model.why} /></section>}
 

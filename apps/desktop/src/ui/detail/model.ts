@@ -122,7 +122,11 @@ export interface DetailModel {
   readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean; readonly answered: boolean } | null;
   readonly answer: AnswerModel | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
-  readonly note: string | null;
+  /**
+   * The agent's `note`, the item's body. In progress it is the blue one-line progress row (`progress: true`); every other status
+   * draws it as a "Notes" section above "Why". Null when the note is empty or only whitespace.
+   */
+  readonly note: { readonly text: string; readonly progress: boolean } | null;
   readonly why: string | null;
   readonly replaced: Kid | null;
   readonly kidLabel: string;
@@ -479,7 +483,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     // The chat carries the ask once; the composer only carries the answer control.
     answer: answerable ? { options: item.options, recommended, blocked } : null,
     outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${status})` } : null,
-    note: item.note && status === 'progress' ? item.note : null,
+    note: item.note?.trim() ? { text: item.note, progress: status === 'progress' } : null,
     why: item.why,
     replaced: replacement ? kid(replacement) : null,
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,

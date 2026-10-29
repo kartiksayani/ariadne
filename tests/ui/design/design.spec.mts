@@ -129,6 +129,19 @@ async function changesFit(surface: Locator) {
   }
 }
 
+/**
+ * Whether a strike really draws on `target`. A strike that a <del> passes down to a nested list item, link or chip is not in the
+ * descendant's computed style, so this compares the target's pixels with and without the decoration of `struck` (the element that holds it).
+ */
+async function strikeDrawn(target: Locator, struck: Locator, expected: boolean) {
+  await target.scrollIntoViewIfNeeded();
+  const withStrike = await target.screenshot({ animations: 'disabled' });
+  await struck.evaluate(element => element.style.setProperty('text-decoration', 'none', 'important'));
+  const without = await target.screenshot({ animations: 'disabled' });
+  await struck.evaluate(element => element.style.removeProperty('text-decoration'));
+  expect(withStrike.equals(without), expected ? 'the strike draws on it' : 'nothing is struck on it').toBe(!expected);
+}
+
 /** Opens the band's What changed popover (D18) over the Map and returns it. */
 async function openChanges(page: Page) {
   await page.getByRole('button', { name: /new|changed|\d+ changes/ }).first().click();
@@ -211,6 +224,156 @@ for (const theme of ['dark', 'light'] as const) {
     await changesFit(sinceCard);
     expect(answerControl.width).toBeGreaterThanOrEqual(24);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  /**
+   * Alpha.25: an item's `note` is its body and the change comparisons draw prose as Markdown. jsdom has no stylesheets, so the
+   * pixels are checked here: Notes above Why, block label, full text colour, list markers kept, no doubled breaks, the before struck
+   * and muted in the box and not struck in the popover, the timeline's rule on its own list only.
+   */
+  test(`Item notes and changed notes read as Markdown: Details, the change box, its timeline, the popover and the dock (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('changes-notes'), theme });
+    // Details: a "Notes" section for an open item, a block label over block Markdown, right above Why.
+    const notes = page.getByRole('region', { name: 'Notes', exact: true });
+    await notes.scrollIntoViewIfNeeded();
+    await expect(notes.getByRole('listitem')).toHaveCount(4);
+    await expect(notes.getByRole('link', { name: 'the ticket' })).toBeVisible();
+    await expect(notes).not.toContainText('**');
+    const look = await notes.evaluate(element => {
+      const label = element.querySelector('.detail-notes-label')!, text = element.querySelector('.detail-notes-text')!;
+      const probe = document.createElement('i'); probe.style.color = 'var(--color-text)'; document.body.append(probe);
+      const full = getComputedStyle(probe).color; probe.remove();
+      const paragraph = text.querySelector('p')!, line = parseFloat(getComputedStyle(paragraph).lineHeight);
+      return { labelBottom: label.getBoundingClientRect().bottom, textTop: text.getBoundingClientRect().top, labelDisplay: getComputedStyle(label).display,
+        color: getComputedStyle(text).color, full, bullets: getComputedStyle(text.querySelector('ul')!).listStyleType,
+        numbers: getComputedStyle(text.querySelector('ol')!).listStyleType, breakLines: paragraph.getBoundingClientRect().height / line,
+        next: element.nextElementSibling?.querySelector('.detail-label')?.textContent ?? null };
+    });
+    expect(look.labelDisplay).toBe('block');
+    expect(look.labelBottom).toBeLessThanOrEqual(look.textTop);
+    expect(look.color).toBe(look.full);
+    expect(look.bullets).toBe('disc'); expect(look.numbers).toBe('decimal');
+    expect(look.breakLines, 'a soft break is one line break').toBeCloseTo(2, 0);
+    expect(look.next).toBe('Why');
+    await testInfo.attach(`item-notes-${theme}`, { body: await notes.screenshot(), contentType: 'image/png' });
+
+    // The change box: the Notes row stacks the struck before, the arrow and the after.
+    const box = page.getByTestId('change-box');
+    await box.scrollIntoViewIfNeeded();
+    const value = box.getByTestId('change-row-value').first();
+    await expect(value.locator('del a')).toBeVisible();
+    const stack = await value.evaluate(element => {
+      const before = element.querySelector('del')!, arrow = element.querySelector('.change-arrow')!, after = element.lastElementChild!;
+      const rect = (target: Element) => target.getBoundingClientRect();
+      const paragraph = before.querySelector('p')!, line = parseFloat(getComputedStyle(paragraph).lineHeight);
+      return { beforeBottom: rect(before).bottom, arrowTop: rect(arrow).top, arrowBottom: rect(arrow).bottom, afterTop: rect(after).top,
+        strike: getComputedStyle(before).textDecorationLine, afterStrike: getComputedStyle(after).textDecorationLine,
+        beforeColor: getComputedStyle(before).color, linkColor: getComputedStyle(before.querySelector('a')!).color,
+        afterLinkColor: getComputedStyle(after.querySelector('a')!).color, breakLines: rect(paragraph).height / line,
+        rootSpace: getComputedStyle(before.firstElementChild!).whiteSpace };
+    });
+    expect(stack.beforeBottom).toBeLessThanOrEqual(stack.arrowTop + 1);
+    expect(stack.arrowBottom).toBeLessThanOrEqual(stack.afterTop + 1);
+    expect(stack.strike).toContain('line-through'); expect(stack.afterStrike).toBe('none');
+    expect(stack.linkColor, 'a struck link stays muted').toBe(stack.beforeColor);
+    expect(stack.afterLinkColor).not.toBe(stack.beforeColor);
+    expect(stack.breakLines, 'no doubled break').toBeCloseTo(2, 0);
+    expect(stack.rootSpace).toBe('normal');
+    // The strike reaches what is nested in the before: a list item, a link and an item chip (Details has the peek, so the chip is a button).
+    const struckBefore = value.locator('del.change-before'), chip = struckBefore.locator('button.name-chip');
+    await expect(chip).toHaveCount(1);
+    await page.mouse.move(0, 0);
+    await strikeDrawn(struckBefore.locator('li').first(), struckBefore, true);
+    await strikeDrawn(struckBefore.locator('a').first(), struckBefore, true);
+    await strikeDrawn(chip, struckBefore, true);
+    await strikeDrawn(value.locator('.change-after li').first(), struckBefore, false);
+    const chips = await value.evaluate(element => {
+      const before = element.querySelector('del.change-before')!, after = element.querySelector('.change-after')!;
+      return { beforeColor: getComputedStyle(before).color, chipColor: getComputedStyle(before.querySelector('.name-chip')!).color,
+        afterChipColor: getComputedStyle(after.querySelector('.name-chip')!).color };
+    });
+    expect(chips.chipColor, 'a struck chip stays muted').toBe(chips.beforeColor);
+    expect(chips.afterChipColor, 'the after chip keeps the accent').not.toBe(chips.beforeColor);
+    // A ~~struck~~ word inside a value is Markdown's own strike: it draws, and keeps normal white space.
+    const wordBefore = struckBefore.locator('.md del'), wordAfter = value.locator('.change-after del');
+    await strikeDrawn(wordBefore, wordBefore, true);
+    await strikeDrawn(wordAfter, wordAfter, true);
+    expect(await wordBefore.evaluate(element => getComputedStyle(element).whiteSpace)).toBe('normal');
+    await changesFit(box);
+    await testInfo.attach(`item-notes-box-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+
+    // Its timeline: the rule sits on the timeline's own list; a Markdown numbered list inside keeps its numbers and has no rule.
+    await box.getByRole('button', { name: /^Older history/ }).click();
+    const timeline = box.getByTestId('change-timeline');
+    await timeline.getByRole('button', { name: 'Before → after', exact: true }).click();
+    const rule = await timeline.evaluate(element => {
+      const own = element.querySelector(':scope > ol')!, inner = element.querySelector('.change-comparison ol')!;
+      return { own: getComputedStyle(own).borderLeftWidth, inner: getComputedStyle(inner).borderLeftWidth, numbers: getComputedStyle(inner).listStyleType,
+        innerStrike: getComputedStyle(element.querySelector('.change-comparison del')!).textDecorationLine };
+    });
+    expect(rule.own).toBe('2px'); expect(rule.inner).toBe('0px'); expect(rule.numbers).toBe('decimal');
+    expect(rule.innerStrike).toContain('line-through');
+    // The comparison's before is struck down to its nested list item, link and chip; its multi-line After keeps its tint (a block <mark>).
+    const comparisonBefore = timeline.locator('.change-comparison > .change-field > span > del');
+    await page.mouse.move(0, 0);
+    await strikeDrawn(comparisonBefore.locator('li').first(), comparisonBefore, true);
+    await strikeDrawn(comparisonBefore.locator('a').first(), comparisonBefore, true);
+    await strikeDrawn(comparisonBefore.locator('button.name-chip'), comparisonBefore, true);
+    const timelineChips = await timeline.locator('.change-comparison').evaluate(element => ({
+      before: getComputedStyle(element.querySelector('del')!).color, chip: getComputedStyle(element.querySelector('del .name-chip')!).color,
+      link: getComputedStyle(element.querySelector('del a')!).color }));
+    expect(timelineChips.chip, 'a chip in the comparison’s before stays muted').toBe(timelineChips.before);
+    expect(timelineChips.link, 'a link in the comparison’s before stays muted').toBe(timelineChips.before);
+    const tint = await timeline.locator('.change-comparison mark').first().evaluate(mark => {
+      const root = mark.firstElementChild!, own = mark.getBoundingClientRect(), inner = root.getBoundingClientRect();
+      return { background: getComputedStyle(mark).backgroundColor, display: getComputedStyle(mark).display, root: root.tagName,
+        coversHeight: own.height >= inner.height - 1, coversWidth: own.width > 0 };
+    });
+    expect(tint.root).toBe('DIV');
+    expect(tint.display).not.toBe('inline');
+    expect(tint.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(tint.coversHeight, 'the tint paints behind the whole block value').toBe(true); expect(tint.coversWidth).toBe(true);
+    await changesFit(box);
+
+    // The popover keeps its look: the before is not struck there, and nothing breaks twice.
+    const popover = await openChanges(page);
+    const card = popover.getByTestId('changes-row').filter({ has: page.getByRole('button', { name: 'Saved receipt', exact: true }) });
+    await card.getByRole('button', { name: 'Before → after', exact: true }).click();
+    const comparison = card.getByTestId('change-comparison');
+    await expect(comparison.locator('del a')).toBeVisible();
+    const pop = await comparison.evaluate(element => {
+      const before = element.querySelector('del')!, after = element.querySelector('mark')!, paragraph = before.querySelector('p')!;
+      return { strike: getComputedStyle(before).textDecorationLine, rootSpace: getComputedStyle(before.firstElementChild!).whiteSpace,
+        breakLines: paragraph.getBoundingClientRect().height / parseFloat(getComputedStyle(paragraph).lineHeight),
+        numbers: getComputedStyle(after.querySelector('ol')!).listStyleType, label: element.querySelector('strong')!.textContent };
+    });
+    expect(pop.strike).toBe('none'); expect(pop.rootSpace).toBe('normal');
+    expect(pop.breakLines, 'no doubled break').toBeCloseTo(2, 0);
+    expect(pop.numbers).toBe('decimal'); expect(pop.label).toBe('Notes');
+    // Its own before stays unstruck, but a ~~struck~~ word inside a value draws its strike with normal white space, and the popover has no tint.
+    const ownBefore = comparison.locator(':scope > .change-field > span > del'), word = comparison.locator('.md del');
+    await expect(word).toHaveCount(2);
+    await page.mouse.move(0, 0);
+    await strikeDrawn(ownBefore.locator('li').first(), ownBefore, false);
+    await strikeDrawn(word.first(), word.first(), true);
+    await strikeDrawn(word.last(), word.last(), true);
+    const words = await word.evaluateAll(nodes => nodes.map(node => ({ line: getComputedStyle(node).textDecorationLine, space: getComputedStyle(node).whiteSpace })));
+    for (const entry of words) { expect(entry.line).toContain('line-through'); expect(entry.space).toBe('normal'); }
+    expect(await comparison.locator('mark').first().evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    await changesFit(card);
+    await testInfo.attach(`item-notes-popover-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+
+    // The answer dock: a waiting item's note is Markdown too.
+    const dock = page.getByRole('region', { name: 'Answer dock' });
+    await dock.getByRole('button', { name: /waiting$/ }).click();
+    await expect(dock.getByRole('link', { name: 'the ticket' })).toBeVisible();
+    await expect(dock.getByRole('listitem')).toHaveCount(4);
+    await expect(dock).not.toContainText('**');
+    const bullets = await dock.locator('ul').first().evaluate(element => getComputedStyle(element).listStyleType);
+    expect(bullets).toBe('disc');
+    await testInfo.attach(`item-notes-dock-${theme}`, { body: await dock.screenshot(), contentType: 'image/png' });
   });
 
   test(`M2 chosen answer and attributed topic lists (${theme})`, async ({ page, origin }, testInfo) => {

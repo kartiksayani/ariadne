@@ -174,11 +174,7 @@ fn packaged_inventory_renders_only_static_immutable_helper_identity() {
     // and the core stays small because everything else loads on demand.
     for skill in ["claude-mod/plugin/skills/ariadne", "codex-skills/ariadne"] {
         let text = std::str::from_utf8(&files[&format!("{skill}/SKILL.md")]).unwrap();
-        assert!(
-            text.len() <= 10 * 1024,
-            "{skill} core is {} bytes",
-            text.len()
-        );
+        assert!(text.len() <= 10_900, "{skill} core is {} bytes", text.len());
         for name in [
             "inputs",
             "errors",

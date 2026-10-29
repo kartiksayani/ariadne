@@ -50,38 +50,38 @@ Defaults, children, refs, transitions, limits: `errors.md`.
 Delete accepts number/UUID strings, `{id}`, earlier batch refs or `{ref}`.
 Guard the existing root item/topic; history stays.
 
-New topics/items need stable `short`: 2–4 words, at most 40 characters.
-
-Markdown text; plain topic names, `short`, option labels.
+New topics/items need stable `short`, at most 40 characters.
+Markdown in `note`, `outcome`, `why`, `reply`; plain text in `question`, `short`,
+`ask`, topic `name` and `brief`, option labels.
 
 ## Shape the work
 
 Owner instructions win; apply these rules while connected or told "use Ariadne".
 
-1. **Keep only useful work.** File decisions, risks and results the owner needs.
-   Otherwise use chat. Put routine lists the owner needs in one
-   checklist; split only for independent discussion/tracking. Chat points to
-   filed work in 1–3 lines.
+1. **Keep only useful work.** File decisions, risks and results the owner needs;
+   otherwise use chat. Put routine lists in one checklist; split only for
+   independent discussion/tracking. Chat points to filed work in 1–3 lines.
 2. **One point, one place.** Update the existing item instead of repeating it in
    reports/follow-ups. Answering a point once settles it everywhere. Merge
    duplicates with `item.replace`; children need independent usefulness.
-3. **Topics are owner actions.** Name the owner action plainly, without
-   codes/ticket numbers. `topic.edit` keeps a 2–3 sentence `brief`: where
-   things stand and what it means. Do not repeat Ariadne's decided/waiting/replaced
-   lists or add a summary item.
-4. **Make questions easy to answer.** In this order: the decision in plain words;
-   "I recommend X (fairly sure / not sure) because Y; if that's wrong, Z";
-   2–3 real options with a consequence each; "If you don't answer, I'll …";
-   named affected items and `affects`. Mark the
+3. **Topics are owner actions.** Name the action plainly, without codes/ticket
+   numbers. `topic.edit` keeps a 2–3 sentence `brief`: where things stand and
+   what it means. Do not repeat Ariadne's decided/waiting/replaced lists or add
+   a summary item.
+4. **Make questions easy to answer.** `ask` is the decision in plain words, one
+   line. `note`, in order: "I recommend X (fairly sure / not sure) because Y;
+   if that's wrong, Z"; "If you don't answer, I'll …"; named affected items
+   (and `affects`). 2–3 real `options`, each with a consequence; mark the
    recommendation `recommended`; include "Not now"/"Neither" when real.
    Put questions in Ariadne; no options means free text.
-5. **Ask only what needs the owner.** Explore the code and evidence before asking,
-   ask scope up front before building if it is not already settled, and keep
-   at most three questions `waiting_on_me` at once. Continue independent work;
-   no-answer defaults respect permissions and never assume consent.
-6. **Layer the explanation.** Use a clear `question` title, bottom line first,
-   "What this means for you", then details. Define every
-   term on first use; keep paragraphs to three sentences or fewer.
+5. **Ask only what needs the owner.** Explore the code and evidence first, ask
+   unsettled scope before building, and keep at most three questions
+   `waiting_on_me`. Continue independent work; no-answer defaults respect
+   permissions and never assume consent.
+6. **Layer the explanation.** `question` is the title. A result's bottom line
+   and "What this means for you" go in `outcome`; while asking or working they
+   open the `note`. Details go in `note`/`why`. Define every term on first use;
+   keep paragraphs to three sentences or fewer.
 7. **Name connections.** Write `[retry cap](item:3.2)`, never bare item numbers.
    Prose links need receipt item numbers; use batch refs in `affects`/`depends_on`/`related` for new items, then add prose links.
    Use `affects` for consequences, `depends_on` for prerequisites, `related`
@@ -115,16 +115,28 @@ Open/InProgress results need `ack_to`; Ack sets its target and sends no input.
 `item.edit.patch.ack_to` changes that choice without changing prose/status.
 Finished tasks await Ack. Strict validation, CLI repairs and exceptions: `errors.md`.
 
-**Fields:** `ask`/`options`: answer box (`label`, `consequence`, at most one
-`recommended`); `item.ask`: new round. `outcome`/`why`: result/evidence; `note`:
-progress; `links`: `pr`, `file`, `doc`; `reply`: detail. Permission needs an ask
-with "Got it, go ahead".
+**Fields**, where the owner sees them:
 
-**Delete:** remove clearly wrong/duplicate/obsolete work you created or the
-owner asks to delete; prefer Drop/Replace for real work. Explain with `reply`
-before item deletion; for empty topics, use a live item or chat. Owner requests
-include `input_result` in that request (`inputs.md`). Reads omit Bin work with
-a notice; owner Restore: `errors.md`.
+| Field | Shows | Write |
+|---|---|---|
+| `question` | Title: Map row, Details top | One line; no lists, bold, links or context |
+| `short` | Name in paths, breadcrumbs, references | 2–4 words |
+| `note` | Details "Notes" (In progress: a progress line, also under the Map title if no outcome); answer dock | Description, context, source, links; progress |
+| `ask` | While `waiting_on_me`: under the Map title, answer dock; Details conversation | Rule 4 |
+| `options` | Answer box | `label`, `consequence`, at most one `recommended` |
+| `outcome` | Details "Outcome"; under the Map title unless waiting, parked or replaced | The result, one line |
+| `why` | Details "Why" | Evidence |
+| `links` | Details | `pr`, `file`, `doc` |
+| `reply` | Item conversation | Explanations, answers |
+| topic `brief` | Topic head in Changes | Rule 3 |
+
+Put an item's description in `note`, never in `question`. `item.ask` starts a new
+round. Permission needs an ask with "Got it, go ahead".
+
+**Delete** only clearly wrong/duplicate/obsolete work you created, or what the
+owner asks to delete; prefer Drop/Replace for real work. `reply` before deleting
+an item; for empty topics, use a live item or chat. Owner requests include
+`input_result` in it (`inputs.md`). Reads omit Bin work with a notice; Restore: `errors.md`.
 
 ## Examples
 

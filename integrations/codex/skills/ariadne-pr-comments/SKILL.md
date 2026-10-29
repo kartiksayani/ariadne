@@ -88,8 +88,8 @@ On conflicts, re-read keys before rebuilding. Retry uncertain apply only with
 identical body/op_id, then re-read. Never blindly add again.
 
 Add item and context reply atomically; the local ref targets the new item.
-Keep `ask` one line. Put context in `reply`, not `note` or `why`: waiting detail
-shows replies; progress notes are hidden while deciding.
+Keep `ask` one line. Context goes in `note` (shown in Details and the answer
+dock) or `reply`; this flow uses `reply`.
 
 ```json
 {"operations":[{"op":"item.add","ref":"review_comment","topic":{"id":"$topic"},"question":"$question","short":"Review choice","type":"decision","ask":"$ask","options":[{"label":"Fix","consequence":"Make the suggested local change; post nothing to GitHub."},{"label":"Reply","consequence":"$reply_consequence"},{"label":"Skip","consequence":"Leave this comment alone; post nothing to GitHub."}],"links":[{"kind":"pr","label":"Review comment","target":"$comment_url"}]},{"op":"reply","item":{"ref":"review_comment"},"text":"$context"}]}

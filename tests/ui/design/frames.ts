@@ -27,7 +27,7 @@ export interface FrameSpec {
   /** Compare a stopped turn after delivery with a rejection before delivery. */
   readonly acceptedFailure?: boolean;
   /** App-only M2 changes states, independent of the original handoff baselines. */
-  readonly changes?: 'typed' | 'choice' | 'away' | 'long';
+  readonly changes?: 'typed' | 'choice' | 'away' | 'long' | 'notes';
   /** The frame's own wall clock in ms (the final-board frames); the handoff frames derive theirs from the scenario. */
   readonly now?: number;
   /** The project the 'projectpage' scenario shows (default: the handoff's current project, 'notes'). */
@@ -51,6 +51,8 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 1280, height: 900, id: 'changes-typed', selected: '3.1', detail: true, changes: 'typed' },
   { ...base, width: 1280, height: 900, id: 'changes-choice', selected: '3.1', detail: true, changes: 'choice' },
   { ...base, width: 1000, height: 800, id: 'changes-away', changes: 'away' },
+  // Item bodies as Markdown (alpha.25): the Notes section, a changed multi-line note in the box, the timeline and the popover, and the dock's note.
+  { ...base, width: 1280, height: 1100, id: 'changes-notes', selected: '3.2', detail: true, changes: 'notes' },
   // Map layout frames: the brief with many decided names, and the plain Map with the selected thread passing the topic cards.
   { ...base, ...narrow, id: 'map-brief-long', selected: '3.1', changes: 'long' },
   { ...base, width: 900, height: 650, id: 'map-brief-long-small', selected: '3.1', changes: 'long' },

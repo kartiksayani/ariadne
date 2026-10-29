@@ -1,13 +1,17 @@
 import { useId, useState } from 'react';
 import type { Immutable } from '../../data/session-store';
-import type { Session } from '../../generated/domain/models';
+import type { Item, Session } from '../../generated/domain/models';
 import type { ChangeRow, ChangedField } from '../../selectors/changes/card';
+import { Markdown } from '../shared/MarkdownText';
+import { parseMarkdown } from '../shared/markdown';
 import { shortLabel } from '../shared/short';
 import { STATUS } from '../shared/status';
 import './changes.css';
 
 export const fieldNames: Record<ChangedField['field'], string> = { question: 'Name', short: 'Short name', type: 'Kind', status: 'Status',
-  note: 'Note', ask: 'Question for you', options: 'Choices', outcome: 'Outcome', why: 'Why', links: 'Links', related: 'Related', affects: 'Affects', depends_on: 'Depends on' };
+  note: 'Notes', ask: 'Question for you', options: 'Choices', outcome: 'Outcome', why: 'Why', links: 'Links', related: 'Related', affects: 'Affects', depends_on: 'Depends on' };
+/** A field's label on every surface: the board names the note "Progress" while the item is in progress; for every other status it is "Notes". */
+export const labelFor = (field: ChangedField['field'], item: Immutable<Item>) => field === 'note' && item.status === 'in_progress' ? 'Progress' : fieldNames[field];
 export function valueText(value: ChangedField['before'], field: ChangedField['field'], session: Immutable<Session>): string {
   if (value === null || value === undefined || value === '') return 'None';
   if (typeof value === 'string') return field === 'status' && value in STATUS ? STATUS[value as keyof typeof STATUS].label : value;
@@ -16,6 +20,24 @@ export function valueText(value: ChangedField['before'], field: ChangedField['fi
     return 'consequence' in entry ? `${entry.label}${entry.consequence ? ` — ${entry.consequence}` : ''}` : entry.label || entry.target;
   }).join('\n') : 'None';
   return String(value);
+}
+
+/** The fields that hold the agent's prose: their before and after read as Markdown, like the text they came from. */
+const proseFields: ReadonlySet<ChangedField['field']> = new Set(['question', 'note', 'ask', 'outcome', 'why']);
+const isProse = (value: ChangedField['before'], field: ChangedField['field']): value is string => proseFields.has(field) && typeof value === 'string' && value.trim() !== '';
+/** True when a prose value would not draw as one plain line (several lines, a list, a heading, a quote...). Other values are one line. */
+export function isBlockValue(value: ChangedField['before'], field: ChangedField['field']): boolean {
+  if (!isProse(value, field)) return false;
+  const { blocks, rest } = parseMarkdown(value);
+  return rest !== '' || /\n/.test(value.trim()) || blocks.length !== 1 || blocks[0].t !== 'p';
+}
+/**
+ * One before or after value. Prose renders as Markdown; `block` draws it as a block (the box stacks a multi-line value), otherwise
+ * a one-paragraph value stays a span in its line. Everything else, and an empty value ("None"), keeps `valueText`.
+ */
+export function ChangeValue({ value, field, session, block = false }: { readonly value: ChangedField['before']; readonly field: ChangedField['field'];
+  readonly session: Immutable<Session>; readonly block?: boolean }) {
+  return isProse(value, field) ? <Markdown text={value} inline={!block} /> : <>{valueText(value, field, session)}</>;
 }
 
 /** All before/after surfaces share this compact control and accessible label. */
@@ -34,9 +56,9 @@ export function Compare({ row, session, why, variant = 'icon' }: { readonly row:
         <path d="M4 3h6v18H4zM14 3h6v18h-6M7 8h10m-3-3 3 3-3 3M17 16H7m3-3-3 3 3 3" />
       </svg>
     </button>}
-    {open && <span id={id} className="change-comparison" data-single={row.fields.length === 1 || undefined}>{row.fields.map(field => <span key={field.field} className="change-field">
-      <strong>{fieldNames[field.field]}</strong><span><span className="change-value-label">Before</span><del>{valueText(field.before, field.field, session)}</del></span>
-      <span><span className="change-value-label">After</span><mark>{valueText(field.current, field.field, session)}</mark></span>
-    </span>)}{why && !row.fields.some(field => field.field === 'why') && <span className="change-field"><strong>Why</strong><span>{why}</span></span>}</span>}
+    {open && <span id={id} className="change-comparison" data-testid="change-comparison" data-single={row.fields.length === 1 || undefined}>{row.fields.map(field => <span key={field.field} className="change-field">
+      <strong>{labelFor(field.field, row.item)}</strong><span><span className="change-value-label">Before</span><del><ChangeValue value={field.before} field={field.field} session={session} /></del></span>
+      <span><span className="change-value-label">After</span><mark><ChangeValue value={field.current} field={field.field} session={session} /></mark></span>
+    </span>)}{why && !row.fields.some(field => field.field === 'why') && <span className="change-field"><strong>Why</strong><span><Markdown text={why} inline /></span></span>}</span>}
   </span>;
 }

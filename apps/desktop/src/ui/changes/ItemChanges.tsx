@@ -4,9 +4,10 @@ import type { Item, ItemChangeRecord, ItemChangesProjection, Page, QueryCursor, 
 import type { SessionRef } from '../../generated/core';
 import { ServiceFailure, type RendererService } from '../../data/service';
 import { useHistory } from '../../components/history/useHistory';
-import { changeRow, type ChangedField } from '../../selectors/changes/card';
+import { changeRow } from '../../selectors/changes/card';
 import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
-import { Compare, fieldNames, valueText } from './Compare';
+import { ChangeValue, Compare, isBlockValue, labelFor } from './Compare';
+import { Markdown } from '../shared/MarkdownText';
 import { clockTime } from './clock';
 import { causeLabel } from './model';
 
@@ -30,9 +31,6 @@ export async function loadItemChanges(service: RendererService, route: SessionRe
   return { items: changes, next_cursor: null, snapshot_revision: revision };
 }
 
-/** The box's labels: the board names the note "Progress". */
-const labelFor = (field: ChangedField['field']) => field === 'note' ? 'Progress' : fieldNames[field];
-
 /** "Status  ~~Open~~ → Decided": one row per changed field, then the agent's reason. */
 function ChangeRows({ session, item, records, onOpenAnswer }: { readonly session: Immutable<Session>; readonly item: Immutable<Item>;
   readonly records: readonly Immutable<ItemChangeRecord>[]; readonly onOpenAnswer: (itemId: string, messageId: string) => void }) {
@@ -44,12 +42,16 @@ function ChangeRows({ session, item, records, onOpenAnswer }: { readonly session
   const sourceMessage = answer?.message_id ?? input?.message_id;
   const reasonLabel = row.fields.some(field => field.field === 'why') ? 'Agent’s reason' : 'Why';
   return <div className="change-rows">
-    {row.fields.map(field => <div className="change-row" key={field.field}>
-      <span className="change-row-label">{labelFor(field.field)}</span>
-      <span className="change-row-value"><del className="change-before">{valueText(field.before, field.field, session)}</del>
-        <span className="change-arrow" aria-hidden="true">→</span><span className="change-after">{valueText(field.current, field.field, session)}</span></span>
-    </div>)}
-    {row.reasons.length ? <div className="change-row"><span className="change-row-label">{reasonLabel}</span><span className="change-row-value">{row.reasons.join('\n')}</span></div>
+    {row.fields.map(field => {
+      // A multi-line value stacks: the struck before as a block, then → and the after as a block. A one-line value keeps its line.
+      const stacked = isBlockValue(field.before, field.field) || isBlockValue(field.current, field.field);
+      return <div className="change-row" key={field.field}>
+        <span className="change-row-label">{labelFor(field.field, item)}</span>
+        <span className="change-row-value" data-testid="change-row-value" data-stacked={stacked || undefined}><del className="change-before"><ChangeValue value={field.before} field={field.field} session={session} block={stacked} /></del>
+          <span className="change-arrow" aria-hidden="true">→</span><span className="change-after"><ChangeValue value={field.current} field={field.field} session={session} block={stacked} /></span></span>
+      </div>;
+    })}
+    {row.reasons.length ? <div className="change-row"><span className="change-row-label">{reasonLabel}</span><span className="change-row-value" data-testid="change-row-value"><Markdown text={row.reasons.join('\n\n')} inline /></span></div>
       : !row.fields.length && <p className="change-row-plain">The agent updated this item.</p>}
     {cause?.input_id && sourceItem && sourceMessage && <button type="button" className="change-link change-origin" onClick={() => onOpenAnswer(sourceItem, sourceMessage)}>{causeLabel(session, cause.input_id)}</button>}
   </div>;
@@ -59,7 +61,7 @@ function ChangeRows({ session, item, records, onOpenAnswer }: { readonly session
 function Timeline({ session, item, records, loading, error, retry, onOpenAnswer }: { readonly session: Immutable<Session>; readonly item: Immutable<Item>;
   readonly records: readonly Immutable<ItemChangeRecord>[]; readonly loading: boolean; readonly error: unknown; readonly retry: () => void;
   readonly onOpenAnswer: (itemId: string, messageId: string) => void }) {
-  return <div className="change-timeline">
+  return <div className="change-timeline" data-testid="change-timeline">
     {loading && <p role="status">Reading change history…</p>}
     {!!error && <p role="status">Change history could not be read. <button type="button" className="change-link" onClick={retry}>Try again</button></p>}
     <ol>{records.map(record => {
