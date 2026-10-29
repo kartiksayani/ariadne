@@ -530,6 +530,50 @@ test('Quit wait rejects live identity changes and waits for a same-birth macOS z
     await waitForQuitExit(owned.exe, owned); assert.equal(alive(child.pid), false);
   } finally { if (alive(child.pid)) child.kill(); }
 });
+const waiter = () => spawn(process.execPath, ['-e', 'process.stdout.write("ready"); process.stdin.once("data",()=>process.exit(0))'], { stdio: ['pipe', 'pipe', 'pipe'] });
+const ready = child => new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
+test('Quit wait with an acknowledgement path starts its grace only once that file exists, and not before', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-quit-ack-')), acknowledgement = join(root, 'quit-note.json'), grace = 200;
+  const child = waiter();
+  try {
+    await ready(child);
+    const owned = identity(child.pid);
+    let settled = false;
+    const waiting = waitForQuitExit(owned.exe, owned, acknowledgement, grace).then(() => 'exited', error => error);
+    waiting.then(() => { settled = true; });
+    // Several graces pass with the app alive and no acknowledgement: still waiting.
+    await delay(grace * 4);
+    assert.equal(settled, false);
+    const written = Date.now();
+    await writeFile(acknowledgement, ''); // existence only: an empty or half-written file counts
+    const outcome = await waiting;
+    assert.match(outcome.message, /did not exit before WDIO teardown/);
+    assert.ok(Date.now() - written >= grace, 'the grace runs from the acknowledgement, not from the call');
+    assert.ok(alive(child.pid));
+  } finally { if (alive(child.pid)) child.kill(); await rm(root, { recursive: true }); }
+});
+test('Quit wait with an acknowledgement path ends when the app exits first, and checks identity while it waits', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-quit-ack-')), acknowledgement = join(root, 'quit-note.json');
+  const child = waiter();
+  try {
+    await ready(child);
+    const owned = identity(child.pid);
+    await assert.rejects(waitForQuitExit('/different-live-executable', owned, acknowledgement, 100), /identity changed/);
+    const waiting = waitForQuitExit(owned.exe, owned, acknowledgement, 100);
+    await delay(150); child.stdin.end('quit');
+    await waiting;
+    assert.equal(alive(child.pid), false);
+  } finally { if (alive(child.pid)) child.kill(); await rm(root, { recursive: true }); }
+});
+test('Quit wait without an acknowledgement path keeps its grace from the call', async () => {
+  const child = waiter();
+  try {
+    await ready(child);
+    const owned = identity(child.pid), started = Date.now();
+    await assert.rejects(waitForQuitExit(owned.exe, owned, undefined, 150), /did not exit before WDIO teardown/);
+    assert.ok(Date.now() - started >= 150);
+  } finally { if (alive(child.pid)) child.kill(); }
+});
 test('occupied loopback port fails without touching listener, invalid ports fail', async () => {
   const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;

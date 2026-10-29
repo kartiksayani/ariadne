@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, chmod, readFile, writeFile, rm } from 'node:fs/promises';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,19 +123,26 @@ export async function releasedLeases(home, bindingId) {
   await command('python3', ['-c', source, ...paths], { timeout: 10000 });
   return { paths, released: true };
 }
-export async function proveQuit(root, binary, nonce, owned, home, bindingId, port) {
+export async function proveQuit(root, binary, nonce, owned, home, bindingId, port, acknowledgement) {
   const request = JSON.parse(await readFile(join(root, 'quit-request.json'), 'utf8'));
   if (request.nonce !== nonce || request.pid !== owned.pid) throw new Error('Quit witness identity mismatch');
-  await waitForQuitExit(binary, owned);
+  await waitForQuitExit(binary, owned, acknowledgement);
   await portFree(port);
   return { request, pidExited: true, portFree: true, leases: await releasedLeases(home, bindingId) };
 }
 export function isSameBirthZombie(owned, current, state) {
   return current.pid === owned.pid && current.birth === owned.birth && state?.startsWith('Z') === true;
 }
-export async function waitForQuitExit(binary, owned) {
-  const end = Date.now() + 30000;
+// A hang guard, not a timing check: it only stops a stuck app from outliving
+// the run. With `acknowledgement` (the path the runner writes once the native
+// Quit note's OK is pressed) the app cannot exit before that file exists, so the
+// 30 s grace starts then and the identity checks run all the while. Only the
+// file's existence is tested; it is never parsed, because it is not written
+// atomically. Without it the grace starts at the call.
+export async function waitForQuitExit(binary, owned, acknowledgement, grace = 30000) {
+  let end = acknowledgement ? Infinity : Date.now() + grace;
   while (alive(owned.pid) && Date.now() < end) {
+    if (end === Infinity && existsSync(acknowledgement)) end = Date.now() + grace;
     let current;
     try { current = identity(owned.pid); }
     catch (error) { if (!alive(owned.pid)) break; throw error; }

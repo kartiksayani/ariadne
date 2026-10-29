@@ -3,7 +3,7 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { acknowledgeQuitNote, quitNoteScript, selectQuitNote } from '../../../scripts/native-quit-note.mjs';
+import { acknowledgeQuitNote, isTransientNativeError, isVanishedElement, noteEvidence, quitNoteScript, selectQuitNote } from '../../../scripts/native-quit-note.mjs';
 
 const pid = 4242;
 const message = 'Host work already sent can continue after Ariadne quits.';
@@ -12,29 +12,44 @@ const dialog = () => ({ texts: [message, informative], buttons: [{ name: 'OK', e
 
 // Run the actual JXA adapter with an observed native hierarchy fixture, retaining
 // whether a native action was requested. No App, AX permission or service calls.
-function nativeFixture({ dialogs = [dialog()], actualPid = pid, trusted = true, permission = 0, serviceRunning = true, sameNamePeer = false, processCount = 1 } = {}) {
-  let pressed = 0, applicationCalls = 0, permissionChecks = 0;
+// `vanish` names one native read that raises the error macOS gives when the live
+// AX tree changes under the walk (-1719 for an index, -1728 for an object); it
+// stays vanished, so each run observes the same half-read tree. `vanish: 'other'`
+// raises an unrelated error. `pressFailures` makes the first N AXPress performs
+// raise -1728, as when the dialog is dismissed between the inspect and the press.
+function nativeFixture({ dialogs = [dialog()], actualPid = pid, trusted = true, permission = 0, serviceRunning = true, sameNamePeer = false, processCount = 1, vanish, pressFailures = 0 } = {}) {
+  let pressed = 0, applicationCalls = 0, permissionChecks = 0, failedPresses = 0;
   const accesses = [];
-  const collection = (elements, path) => {
+  const gone = (kind, value, code = '-1719') => vanish === kind || (vanish === 'other' && kind === 'text') ? () => { throw new Error(vanish === 'other' ? 'Unrelated failure' : `Error: Error: Invalid index. (${code})`); } : value;
+  const collection = (elements, path, failAt) => {
     // Evaluated collections lose their anchored specifiers in JXA. Make the
     // mock reject that operation even when only one process happens to exist.
     const query = () => assert.fail(`Materialized native handles at ${path}`);
     Object.defineProperty(query, 'length', { get: () => { accesses.push({ pid, path }); return elements.length; } });
-    query.at = index => { accesses.push({ pid, path }); assert.ok(index >= 0 && index < elements.length); return elements[index]; };
+    query.at = index => {
+      accesses.push({ pid, path });
+      if (index === failAt) throw new Error('Error: Error: Invalid index. (-1719)');
+      assert.ok(index >= 0 && index < elements.length); return elements[index];
+    };
     query.byName = name => { accesses.push({ pid, path }); return elements.find(element => element.name() === name); };
     return query;
   };
-  const children = (elements, path) => collection(elements, `${path}.uiElements`);
+  const children = (elements, path, failAt) => collection(elements, `${path}.uiElements`, failAt);
   const windows = dialogs.map(dialog => {
-    const texts = dialog.texts.map(value => ({ role: () => 'AXStaticText', value: () => value, uiElements: children([], 'text') }));
+    const texts = dialog.texts.map((value, index) => ({ role: index === 0 ? gone('role', () => 'AXStaticText') : () => 'AXStaticText',
+      value: index === 0 ? gone('text', () => value) : () => value, uiElements: children([], 'text') }));
     const buttons = dialog.buttons.map(button => {
       const actions = collection(button.actions.map(name => ({ name: () => name,
-        perform: () => { assert.equal(name, 'AXPress'); pressed++; } })), 'button.actions');
-      return { role: () => 'AXButton', name: () => button.name, enabled: () => button.enabled, actions, uiElements: children([], 'button') };
+        perform: () => {
+          assert.equal(name, 'AXPress');
+          if (failedPresses < pressFailures) { failedPresses++; throw new Error('Error: Error: Can\'t get object. (-1728)'); }
+          pressed++;
+        } })), 'button.actions', vanish === 'action' ? 0 : undefined);
+      return { role: () => 'AXButton', name: gone('button', () => button.name, '-1728'), enabled: () => button.enabled, actions, uiElements: children([], 'button') };
     });
     // A group forces the adapter to retain the PID anchor through descendants.
-    const group = { role: () => 'AXGroup', uiElements: children([...texts, ...buttons], 'group') };
-    return { subrole: () => 'AXDialog', uiElements: children([group], 'window') };
+    const group = { role: () => 'AXGroup', uiElements: children([...texts, ...buttons], 'group', vanish === 'child' ? 0 : undefined) };
+    return { subrole: gone('window', () => 'AXDialog'), uiElements: children([group], 'window') };
   });
   const processes = [{ name: 'Ariadne', unixId: actualPid, windows }];
   if (sameNamePeer) processes.unshift({ name: 'Ariadne', unixId: pid + 1, windows: [] });
@@ -151,7 +166,7 @@ test('acknowledgement refreshes prerequisites at owned Quit and revalidates the 
     const acknowledge = runInNewContext(`(${acknowledgeQuitNote.toString()})`, {
       join, readFile: async path => JSON.stringify(path.endsWith('launcher.json') ? { pid: 10 } : { pid, nonce }),
       identity: () => owned, observeOwned: async () => owned, alive: () => true,
-      preflightQuitNote: async () => { refreshed = true; },
+      preflightQuitNote: async () => { refreshed = true; }, delay: async () => {}, isTransientNativeError, noteEvidence,
       native: (mode, target) => {
         assert.equal(target, pid);
         assert.ok(refreshed, 'refresh prerequisites before observing the owned Quit dialog');
@@ -180,7 +195,8 @@ test('request nonce/PID, process birth and launcher ancestry gate acknowledgemen
       if (launcherPid !== 10) throw new Error('Process is outside the owned launcher ancestry');
       return owned;
     },
-    preflightQuitNote: async () => {}, native: () => assert.fail('Rejected witness must not access native UI'),
+    preflightQuitNote: async () => {}, delay: async () => {}, isTransientNativeError, noteEvidence,
+    native: () => assert.fail('Rejected witness must not access native UI'),
   });
   const signal = new globalThis.AbortController().signal;
   try {
@@ -197,4 +213,128 @@ test('request nonce/PID, process birth and launcher ancestry gate acknowledgemen
     const interrupted = new globalThis.AbortController(); interrupted.abort(new Error('Owned runner cancelled'));
     await assert.rejects(acknowledge(root, owned.exe, nonce, owned, interrupted.signal), /Owned runner cancelled/);
   } finally { await rm(root, { recursive: true }); }
+});
+
+// The acknowledgement loop, run in a sandbox like the tests above. `natives` is
+// a script of results for successive osascript passes: a value is returned, an
+// Error is thrown. The last entry repeats.
+const owned = { pid, exe: '/owned/Ariadne', birth: 'owned birth' }, nonce = 'owned Quit';
+function acknowledger({ natives, alive = () => true, delay = async () => {}, ...extra }) {
+  const passes = [];
+  const next = (mode) => {
+    const step = natives[Math.min(passes.length, natives.length - 1)];
+    passes.push(mode);
+    if (step instanceof Error) throw step;
+    return typeof step === 'function' ? step(mode) : step;
+  };
+  const acknowledge = runInNewContext(`(${acknowledgeQuitNote.toString()})`, {
+    join, readFile: async path => JSON.stringify(path.endsWith('launcher.json') ? { pid: 10 } : { pid, nonce }),
+    identity: () => owned, observeOwned: async () => owned, alive,
+    preflightQuitNote: async () => {}, delay, isTransientNativeError, noteEvidence,
+    native: (mode, target) => { assert.equal(target, pid); return next(mode); },
+    ...extra,
+  });
+  return { run: signal => acknowledge('/owned', owned.exe, nonce, owned, signal), passes };
+}
+const vanished = () => new Error('Command failed: osascript\nexecution error: Error: Error: Invalid index. (-1719)');
+const receipt = { pid, message, informative, button: 'OK', action: 'AXPress', pressed: true };
+
+test('Quit note error classification: vanished elements, AE timeouts and osascript timeouts are retried; everything else is fatal', () => {
+  const stderr = text => Object.assign(new Error('Command failed: osascript'), { stderr: text });
+  for (const error of [vanished(), new Error("Can't get object. (-1728)"), stderr('execution error: Invalid index. (-1719)'),
+    stderr('execution error: AppleEvent timed out. (-1712)'), Object.assign(new Error('spawnSync /usr/bin/osascript ETIMEDOUT'), { code: 'ETIMEDOUT', signal: 'SIGTERM' })])
+    assert.equal(isTransientNativeError(error), true, error.message);
+  for (const error of [new Error('Unexpected native Quit note text'), new Error('Quit note belongs to another PID'),
+    new Error('System Events automation permission is unavailable (-1743); no prompt was requested'), stderr('execution error: Not authorized. (-1743)'),
+    Object.assign(new Error('spawn /usr/bin/osascript ENOENT'), { code: 'ENOENT' }), new Error('Owned native process is unavailable'), undefined])
+    assert.equal(isTransientNativeError(error), false, String(error?.message));
+  assert.equal(isVanishedElement(new Error('Invalid index. (-1719)')), true);
+  assert.equal(isVanishedElement(new Error('AppleEvent timed out. (-1712)')), false);
+});
+
+test('an element or attribute that vanishes mid-walk gives an incomplete observation, never a note check or a press', () => {
+  for (const vanish of ['text', 'role', 'button', 'action', 'child', 'window']) {
+    for (const mode of ['inspect', 'press']) {
+      const native = nativeFixture({ vanish });
+      assert.deepEqual(native.run(mode), { complete: false }, `${vanish} during ${mode}`);
+      assert.equal(native.effects().pressed, 0, `${vanish} must not press`);
+    }
+  }
+  // The other half of the dialog being unreadable must not surface as a text or button failure.
+  assert.equal(nativeFixture().run('press').pressed, true);
+  // Only the two vanished-element codes are skipped; any other error still escapes the walk.
+  assert.throws(() => nativeFixture({ vanish: 'other' }).run('inspect'), /Unrelated failure/);
+});
+
+test('an incomplete observation or a transient osascript error is retried until the note is seen, then pressed', async () => {
+  const half = nativeFixture({ vanish: 'text' }), whole = nativeFixture();
+  const timeout = Object.assign(new Error('spawnSync /usr/bin/osascript ETIMEDOUT'), { code: 'ETIMEDOUT' });
+  const { run, passes } = acknowledger({ natives: [() => half.run('inspect'), vanished(), timeout, null, mode => whole.run(mode)] });
+  assert.equal((await run()).pressed, true);
+  assert.deepEqual(passes, ['inspect', 'inspect', 'inspect', 'inspect', 'inspect', 'press']);
+  assert.equal(half.effects().pressed, 0); assert.equal(whole.effects().pressed, 1);
+});
+
+test('a transient error on press goes back to the loop: inspect again, then press again', async () => {
+  const native = nativeFixture({ pressFailures: 2 });
+  const { run, passes } = acknowledger({ natives: [mode => {
+    try { return native.run(mode); } catch (error) { error.message += ' (-1728)'; throw error; }
+  }] });
+  const result = await run();
+  assert.equal(result.pressed, true);
+  assert.deepEqual(passes, ['inspect', 'press', 'inspect', 'press', 'inspect', 'press']);
+  assert.equal(native.effects().pressed, 1);
+  // An incomplete walk during the press pass takes the same road.
+  const sentinel = acknowledger({ natives: [mode => mode === 'press' && !sentinel.passes.some((m, i) => i > 1 && m === 'press') ? { complete: false } : receipt] });
+  assert.equal((await sentinel.run()).pressed, true);
+});
+
+test('a fatal error on inspect or press escapes the retry loop at once', async () => {
+  const fatal = new Error('Unexpected native Quit note text');
+  const onInspect = acknowledger({ natives: [fatal] });
+  await assert.rejects(onInspect.run(), /Unexpected native Quit note text/);
+  assert.deepEqual(onInspect.passes, ['inspect']);
+  const onPress = acknowledger({ natives: [receipt, fatal] });
+  await assert.rejects(onPress.run(), /Unexpected native Quit note text/);
+  assert.deepEqual(onPress.passes, ['inspect', 'press']);
+  const dismissed = acknowledger({ natives: [receipt, null] });
+  await assert.rejects(dismissed.run(), /Native Quit note was not acknowledged: null/);
+});
+
+test('the note wait has no deadline: a clock far past the old 15 s still gets the note', async () => {
+  let clock = 1_000_000;
+  const fakeDate = { now: () => (clock += 60_000) };
+  const { run, passes } = acknowledger({ natives: [{ complete: false }, null, vanished(), { complete: false }, receipt], Date: fakeDate });
+  assert.equal((await run()).pressed, true);
+  assert.ok(passes.length > 3 && clock > 1_000_000 + 15_000);
+  // A reviewer can also see it in the source: no wall-clock bound on the wait.
+  const code = acknowledgeQuitNote.toString().replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(code, /15000|deadline/i);
+  assert.doesNotMatch(code, /while \(Date\.now\(\) </);
+});
+
+test('an aborted note wait reports passes, longest inspect, request-to-last-pass time and whether the app lived', async () => {
+  const controller = new globalThis.AbortController();
+  let waits = 0;
+  const { run } = acknowledger({ natives: [{ complete: false }],
+    delay: async () => { if (++waits === 3) controller.abort(new Error('WDIO exited before startup observation')); } });
+  await assert.rejects(run(controller.signal), error => {
+    assert.match(error.message, /^WDIO exited before startup observation \(inspect passes: 3; longest inspect: \d+ ms; quit request to last inspect: \d+ ms; app alive: true\)$/);
+    assert.equal(error.cause.message, 'WDIO exited before startup observation');
+    return true;
+  });
+});
+
+test('an app that exits without showing the note fails at once with the same evidence', async () => {
+  let checks = 0;
+  const { run } = acknowledger({ natives: [null], alive: () => ++checks <= 2 });
+  await assert.rejects(run(), error => {
+    assert.match(error.message, /^Owned app exited without the expected native Quit note \(inspect passes: 2; longest inspect: \d+ ms; quit request to last inspect: \d+ ms; app alive: false\)$/);
+    return true;
+  });
+});
+
+test('noteEvidence names every field', () => {
+  assert.equal(noteEvidence({ passes: 7, longest: 812, sinceRequest: 9000, alive: true }),
+    'inspect passes: 7; longest inspect: 812 ms; quit request to last inspect: 9000 ms; app alive: true');
 });
