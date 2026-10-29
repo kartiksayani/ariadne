@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-27
+# Ariadne handoff — 2026-10-29
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,9 +21,10 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `6aa66024` (#181). Alpha.24 released as
-[`v0.1.0-alpha.24`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.24)**
-(tag at `6aa66024`). Alpha.23 is `v0.1.0-alpha.23` (tag at `37cdfc69`, #179), alpha.22 is
+**Main: `79942f51` (#183). Alpha.25 released as
+[`v0.1.0-alpha.25`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.25)**
+(tag at `79942f51`). Alpha.24 is `v0.1.0-alpha.24` (tag at `6aa66024`, #181), alpha.23 is
+`v0.1.0-alpha.23` (tag at `37cdfc69`, #179), alpha.22 is
 `v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
 `v0.1.0-alpha.21` (tag at `8ed87b66`, #173), alpha.20 is
 `v0.1.0-alpha.20` (tag at `c5c8f6a9`, #171), alpha.19 is
@@ -34,6 +35,18 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.25 released
+
+[#183](https://github.com/kartiksayani/ariadne/pull/183), `79942f51`, "Every item has a body": every item now shows its notes, and the skill tells agents where each field is shown. The release is a pre-release with the asset `ariadne-0.1.0-alpha.25-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.25` on 2026-10-29. What changed for the owner:
+
+- Details: an item's notes show for every status, in a "Notes" section above "Why", with lists, bold and links drawn properly. In progress items keep their one-line progress row.
+- The answer dock draws an item's notes with lists, bold and links too.
+- Changes: the "Changed at" box, the history and the changes popover draw old and new text as markdown instead of raw `**` and `[link](url)`. Each surface keeps its own look, and old text stays crossed out, including links and item names inside it.
+- A notes change is labelled "Notes", or "Progress" while the item is In progress, the same way everywhere.
+- Agents: the Ariadne skill (Claude and Codex) has a fields table that says where each item field is shown. Rules 4 and 6 changed: a `question` is one plain line, and the description, context and links go in `note`. The recommendation, what happens if the owner does not answer and the affected items also go in `note`. Items filed before this release keep their long titles until the owner asks an agent to tidy them.
+- The core `SKILL.md` size cap is now 10,900 bytes, in both `agent_skill_examples.rs` and `setup.rs`.
+- Three first occurrences of known flakes (details under Known flakes).
 
 ## Alpha.24 released
 
@@ -205,9 +218,15 @@ built.
 
 ## Next steps
 
-Alpha.24 fixed the alpha.23 follow-up about the keyboard focus ring hiding after `.` or Enter (it now stays visible after `x`, `.` and Enter). Item 1 is the follow-ups carried to the next release (alpha.25); the owner picks the order.
+Alpha.25 gave every item a body in Details, the answer dock and the change views, and rewrote the skill's field rules. No alpha.24 follow-up closed, so all stay open. Item 1 is the follow-ups carried to the next release (alpha.26); the owner picks the order.
 
 1. **Follow-ups carried to the next release** (none blocks it).
+   - Map search does not match `note`: `ui/tree/model.ts` matches only `question` and a shown `outcome`.
+   - A CLI warning for a multi-line `question`.
+   - Owner check: in the installed (WebKit) app, an item chip inside a struck before value in the "Changed at" box should be struck. It was verified only in Chromium.
+   - Minor wording from the review: `integrations/rules/review.md` says "Put proposed text in `outcome`", and the fields table's `note` row does not name the question layers.
+   - The core skill is 10,820 of 10,900 bytes, so the next skill addition needs trimming.
+   - Existing items with long `question` titles stay until the owner asks an agent to tidy them.
    - Native "Quit note observation" failed once locally and passed on rerun: a second occurrence (alpha.23, alpha.24), so investigate before the next merge (see Known flakes).
    - Owner checks for alpha.24: the two-finger swipe direction and feel on a real trackpad, the width of the dashed `n` box on depth-1 items, and its colour in the light theme.
    - `ui/tree/model.ts` `sameValue` treats Sets, Maps and Dates as equal. This is latent, since no row field holds one today. Recurse only into arrays and plain objects.
@@ -225,6 +244,9 @@ Alpha.24 fixed the alpha.23 follow-up about the keyboard focus ring hiding after
 - Run `cargo test --workspace` before pushing integration-resource changes.
   Installed-plugin fixtures live in several crates, so a CLI-only test run is
   insufficient for that push.
+- The local gate's coverage stage runs `--ts-only`, so a change to installed resources
+  (skill text, plugin files) also needs `cargo test --workspace` before push. Alpha.25's
+  first CI run failed on `setup.rs`'s packaged-skill size cap for that reason.
 - Fix rounds, moved UI code, saved formats, CI parity and flakes follow the
   ORCHESTRATOR rules under "Delivery feedback rules" ([ORCHESTRATOR](../../ORCHESTRATOR.md)).
 
@@ -237,6 +259,18 @@ Refresh this page, tasks.json and the roadmap chart using
 ## Known flakes
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
+
+- **`tests/ui/app/hide-moves.test.tsx`, “row 23: hiding the focused root ends Focus in the same write and selects the next root” and “row 23: Undo of a hide that ended Focus puts the Focus back…”.** First occurrence (alpha.25, 2026-10-29); not fixed.
+  - Evidence: local full coverage run under load; the write count was 2 vs 1 and 3 vs 2. The file passed 29/29 twice alone on the same head.
+  - Suspected cause: a slow run splits one preferences write in two, so the assertion counts the split write.
+
+- **Native `runTreeAcceptance`, “Native filter target did not become stable and enabled” (`apps/desktop/tests/e2e/tree.spec.mjs:404`).** First occurrence (alpha.25, 2026-10-29); not fixed.
+  - Evidence: a local native run started right after the design suite, at a load average of about 44. A quiet rerun passed (6 delivery and 4 restoration blocks), and CI passed.
+  - Suspected cause: heavy machine load from the design suite that ran just before.
+
+- **`tests/e2e/tree-layout/details-keys.spec.mts:87`, “holding ⌥↓ … when frames are slow (10 a second)”.** First occurrence (alpha.25, 2026-10-29); not fixed.
+  - Evidence: CI static job; `settled.length` was 2, expected more than 2 (line 118). The spec passed 42/42 locally (all tests ×3) and in the CI rerun.
+  - Suspected cause: CI frame timing leaves only two frames after the settle window.
 
 - **Native Quit note observation deadline (`scripts/native-quit-note.mjs:145`, the delivery phase).** Second occurrence; not fixed. Investigate before the next merge.
   - First failed: local alpha.23 integration run, 2026-10-22, under machine load. A rerun passed 10/10 blocks and CI native passed.
