@@ -102,19 +102,20 @@ Owner instructions win; apply these rules while connected or told "use Ariadne".
    numbers. `topic.edit` keeps a 2–3 sentence `brief`: where things stand and
    what it means. Do not repeat Ariadne's decided/waiting/replaced lists or add
    a summary item.
-4. **Make questions easy to answer.** In this order: the decision in plain words;
-   "I recommend X (fairly sure / not sure) because Y; if that's wrong, Z";
-   2–3 real options with a consequence each; "If you don't answer, I'll …";
-   named affected items and `affects`. Mark the
+4. **Make questions easy to answer.** `ask` is the decision in plain words, one
+   line. `note`, in order: "I recommend X (fairly sure / not sure) because Y;
+   if that's wrong, Z"; "If you don't answer, I'll …"; named affected items
+   (and `affects`). 2–3 real `options`, each with a consequence; mark the
    recommendation `recommended`; include "Not now"/"Neither" when real.
    Put questions in Ariadne; no options means free text.
 5. **Ask only what needs the owner.** Explore the code and evidence first, ask
    unsettled scope before building, and keep at most three questions
    `waiting_on_me`. Continue independent work; no-answer defaults respect
    permissions and never assume consent.
-6. **Layer the explanation.** `question` is the title; `outcome` is the bottom
-   line and "What this means for you"; `note`/`why` hold details. Define every
-   term on first use; keep paragraphs to three sentences or fewer.
+6. **Layer the explanation.** `question` is the title. A result's bottom line
+   and "What this means for you" go in `outcome`; while asking or working they
+   open the `note`. Details go in `note`/`why`. Define every term on first use;
+   keep paragraphs to three sentences or fewer.
 7. **Name connections.** Write `[retry cap](item:3.2)`, never bare item numbers.
    Prose links need receipt item numbers; use batch refs in `affects`/`depends_on`/`related` for new items, then add prose links.
    Use `affects` for consequences, `depends_on` for prerequisites, `related`
@@ -152,10 +153,10 @@ Finished tasks await Ack. Strict validation, CLI repairs and exceptions: `errors
 
 | Field | Shows | Write |
 |---|---|---|
-| `question` | Title: Map row (plain text), Details top | One line; no lists, bold, links or context |
+| `question` | Title: Map row, Details top | One line; no lists, bold, links or context |
 | `short` | Name in paths, breadcrumbs, references | 2–4 words |
 | `note` | Details "Notes" (In progress: a progress line, also under the Map title if no outcome); answer dock | Description, context, source, links; progress |
-| `ask` | While `waiting_on_me`: under the Map title, answer dock; Details conversation | The owner's question |
+| `ask` | While `waiting_on_me`: under the Map title, answer dock; Details conversation | Rule 4 |
 | `options` | Answer box | `label`, `consequence`, at most one `recommended` |
 | `outcome` | Details "Outcome"; under the Map title unless waiting, parked or replaced | The result, one line |
 | `why` | Details "Why" | Evidence |

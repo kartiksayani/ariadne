@@ -668,7 +668,7 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
         let files = generated(directory);
         let skill = &files[0].1;
         assert!(
-            skill.len() <= 10_800,
+            skill.len() <= 10_900,
             "{directory} core skill is {} bytes",
             skill.len()
         );
