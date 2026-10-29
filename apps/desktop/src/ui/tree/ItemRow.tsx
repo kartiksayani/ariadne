@@ -112,7 +112,13 @@ const CLAMP_LINES = 3;
 /** Folding must hide at least this many lines; a text one line over is shown whole. */
 const MIN_HIDDEN_LINES = 1;
 
-interface Preview { readonly node: ReactNode; /** The long text the clamp applies to, if any. */ readonly text: string | null }
+interface Preview {
+  readonly node: ReactNode;
+  /** The long text the clamp applies to, if any. */
+  readonly text: string | null;
+  /** The searched field this preview shows, when it shows one: a match in it lights the preview. */
+  readonly field?: 'outcome' | 'note';
+}
 
 /** The outer box clips; the inner Markdown keeps its natural height for ResizeObserver. */
 function PreviewText({ text }: { readonly text: string }) {
@@ -131,11 +137,11 @@ function preview(row: Row): Preview | null {
   }
   // The same rule tells the search which outcomes are on the Map (model.ts `outcomeShown`).
   if (outcomeShown(item, row.later, row.replacedBy) && item.outcome) {
-    return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
+    return { text: item.outcome, field: 'outcome', node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
       <PreviewText text={item.outcome} /></div> };
   }
   if (item.status === 'in_progress' && item.note) {
-    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress-ink)' }}><i className="ph ph-robot" /><PreviewText text={item.note} /></div> };
+    return { text: item.note, field: 'note', node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress-ink)' }}><i className="ph ph-robot" /><PreviewText text={item.note} /></div> };
   }
   return null;
 }
@@ -221,6 +227,8 @@ export interface ItemRowProps {
 export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, stopped, ackDisabled, run, current = null, terms = NO_TERMS, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
+  // A note match shows on the In progress preview when the row draws one; any other row names it with the "In notes" tag.
+  const showsNoteTag = row.matches.includes('note') && details?.field !== 'note';
   const muted = closed(item.status) || row.context || row.later || row.hidden;
   const actions = rowActions(row, stopped, ackDisabled, run);
   const actionButton = (action: RowAction) => {
@@ -257,7 +265,7 @@ export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMar
             data-current={segment.hit && current === 'question' || undefined}>{segment.text}</span>)}
         </div></div>
       </ClampBlock></div>
-      <MarkdownHighlight.Provider value={row.matches.includes('outcome') ? { terms, current: current === 'outcome' } : null}>
+      <MarkdownHighlight.Provider value={details?.field && row.matches.includes(details.field) ? { terms, current: current === details.field } : null}>
         <ClampBlock text={details?.text} open={unfolded} onToggle={() => onUnfold(item.id)}>{details?.node}</ClampBlock>
       </MarkdownHighlight.Provider>
       {delivery(row)}
@@ -269,6 +277,7 @@ export const ItemRow = memo(function ItemRow({ row, selected, focused, changeMar
     {hover.length > 0 && <span ref={bar} className="tree-actions" data-side="above">{hover.map(actionButton)}</span>}
     {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). */}
     <div className={`tree-end${persistent.some(action => action.label) ? ' tree-end-labelled' : ''}`}>
+      {showsNoteTag && <span className="tree-note-hit" title="The search matches this item's notes" data-current={current === 'note' || undefined}><i className="ph ph-file-text" aria-hidden="true" />In notes</span>}
       {row.outside && <span className="tree-outside-tag" title="Outside your filter"><i className="ph ph-funnel" aria-hidden="true" />Outside filter</span>}
       <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
         {changeMarker && <ChangeMarker kind={changeMarker} />}

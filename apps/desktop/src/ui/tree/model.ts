@@ -79,6 +79,19 @@ export function outcomeShown(item: Immutable<Item>, later: boolean, replacedBy: 
   return closed(item.status) || item.status === 'open' || item.status === 'in_progress';
 }
 
+/**
+ * The fields of `item` that hold every search word, in Map order: question, outcome (only where the row shows it), note.
+ * The note is the item's body and Details always shows it, so it is searched for every status, parked included.
+ * The rows and the tally of matches the Map does not draw both read this, so they cannot drift.
+ */
+export function matchFields(item: Immutable<Item>, later: boolean, replacedBy: Immutable<Item> | null, terms: readonly string[]): MatchField[] {
+  const fields: MatchField[] = [];
+  if (holdsTerms(item.question, terms)) fields.push('question');
+  if (outcomeShown(item, later, replacedBy) && holdsTerms(item.outcome, terms)) fields.push('outcome');
+  if (holdsTerms(item.note, terms)) fields.push('note');
+  return fields;
+}
+
 /** What "Show them" opens for this search, in memory only: ancestors to expand, topics to unfold, hidden groups to show. */
 export interface SearchReveal { readonly items: readonly string[]; readonly topics: readonly string[]; readonly groups: readonly string[] }
 export const NO_REVEAL: SearchReveal = { items: [], topics: [], groups: [] };
@@ -480,9 +493,7 @@ export function treeModel(input: TreeInput): TreeModel {
         }
         const parked = item.status === 'open' && later.has(item.id);
         const replacedBy = item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null;
-        const matches: MatchField[] = [];
-        if (holdsTerms(item.question, terms)) matches.push('question');
-        if (outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms)) matches.push('outcome');
+        const matches = matchFields(item, parked, replacedBy, terms);
         built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0 || placed, expanded: open,
           hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), outside: filtering && forced.has(item.id) && !matched.has(item.id), later: parked,
           segments: matches.includes('question') ? hitSegments(item.question, terms) : [{ text: item.question, hit: false }], matches,
@@ -570,10 +581,10 @@ export function treeModel(input: TreeInput): TreeModel {
   if (terms.length) {
     for (const item of live) {
       if (shownIds.has(item.id) || filtering && !include.has(item.id)) continue;
-      // The same gate as the rows: an outcome counts only where the row would show it.
+      // The same fields as the rows: an outcome counts only where the row would show it.
       const parked = item.status === 'open' && later.has(item.id);
       const replacedBy = item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null;
-      if (!holdsTerms(item.question, terms) && !(outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms))) continue;
+      if (matchFields(item, parked, replacedBy, terms).length === 0) continue;
       if (focusRootId && rootOf(item.id) !== focusRootId) outsideFocus++;
       else if (hidden.has(item.id)) hiddenMatches++;
       else collapsedMatches++;

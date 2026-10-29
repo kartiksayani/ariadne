@@ -855,7 +855,7 @@ function Workspace({ application }: { application: Application }) {
       detail={conversationOpen ? <div data-covered-detail="" />
         : store && route && detailOpen && detailTarget.target?.kind === 'topic' ? <TopicConversation key={`${key}:topic:${detailTarget.target.topicId}`} drafts={application.drafts} store={store}
           topicId={detailTarget.target.topicId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} />
-        : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
+        : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId} searchQuery={query}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
         onHide={() => hideItem(selectedId)} onRemove={() => removeItem(selectedId)} onActions={actionsFrom(selectedId)}

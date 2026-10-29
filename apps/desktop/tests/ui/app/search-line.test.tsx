@@ -56,3 +56,18 @@ it('saves an explicit clear before switching to another session and typing there
   expect(first.filters.search).toBe('');
   expect(first.filters.statuses).toEqual(['open']);
 });
+
+it('lights a note hit in Details from the top bar search, and stops when the search clears', async () => {
+  const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+  session.items['8']!.note = 'Needs the zebra export too.';
+  transport.preferences.sessions[0]!.filters.search = 'zebra export';
+  render(<DesktopApp service={createDesktopService(transport)} />);
+  await goToSession(route);
+  fireEvent.click(await screen.findByText(session.items['8']!.question));
+  const notes = await screen.findByRole('region', { name: 'Notes' });
+  await waitFor(() => expect([...notes.querySelectorAll('.tree-hit')].map(hit => hit.textContent)).toEqual(['zebra', 'export']));
+  // The Map row names the same match.
+  expect(document.querySelector('[data-row="8"] .tree-note-hit')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Clear the search' }));
+  await waitFor(() => expect(notes.querySelector('.tree-hit')).toBeNull());
+});

@@ -42,4 +42,31 @@ describe('the search tally', () => {
     child.status = 'waiting_on_me'; child.ask = session.items['2']!.ask;
     expect(model({ search: 'zebra' }).search).toMatchObject({ hidden: 0, collapsed: 0 });
   });
+
+  it('counts a note match in a collapsed branch, a hidden item and outside the focus', () => {
+    const { session, view, model } = fixture();
+    // 1 is folded (1.1 sits inside it) and 4 is hidden.
+    view.expanded_item_ids = ['2', '3']; view.hidden_item_ids = ['4'];
+    session.items['1.1']!.note = 'The zebra export is attached.';
+    expect(model({ search: 'zebra' }).search).toMatchObject({ hidden: 0, collapsed: 1, outsideFocus: 0 });
+    session.items['4']!.note = 'A zebra in the notes.';
+    expect(model({ search: 'zebra' }).search).toMatchObject({ hidden: 1, collapsed: 1, outsideFocus: 0 });
+    // With the focus on 3, both matches (and a note match on 8) lie outside it.
+    session.items['8']!.note = 'Another zebra.';
+    expect(model({ search: 'zebra', focusRootId: '3' }).search).toMatchObject({ hidden: 0, collapsed: 0, outsideFocus: 3 });
+  });
+
+  it('does not count a note match twice: an item on the Map is not in the tally', () => {
+    const { session, model } = fixture();
+    session.items['8']!.note = 'A zebra on the Map.';
+    expect(model({ search: 'zebra' }).search).toMatchObject({ hidden: 0, collapsed: 0, outsideFocus: 0 });
+  });
+
+  it('counts a note match under a parked row, which shows no outcome but does keep its note in Details', () => {
+    const { session, view, model } = fixture();
+    view.expanded_item_ids = ['2', '3'];
+    const child = session.items['1.1']!;
+    child.question = 'Plain title'; child.outcome = null; child.note = 'a zebra in the notes';
+    expect(model({ search: 'zebra', later: new Set(['1.1']) }).search).toMatchObject({ hidden: 0, collapsed: 1 });
+  });
 });

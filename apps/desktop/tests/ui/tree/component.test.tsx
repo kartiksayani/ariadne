@@ -1239,8 +1239,8 @@ describe('session tree filters', () => {
   const searchCount = (status: ReturnType<typeof vi.fn>) => (status.mock.calls.at(-1)?.[0] as { count: string } | null)?.count ?? null;
   it('counts the matches themselves, excluding context and forced selections', async () => {
     const status = vi.fn(), { rerender } = await mount({ props: { query: 'receipt', selectedId: '4', onSearchStatus: status } });
-    // "Implement receipt lookup" and "Add the receipt lookup test": not their parent 1, not the selected 4.
-    expect(searchCount(status)).toBe('1 of 2');
+    // "Implement receipt lookup" (question, then its note "Receipt lookup is underway.") and "Add the receipt lookup test": not their parent 1, not the selected 4.
+    expect(searchCount(status)).toBe('1 of 3');
     expect(ids()).toHaveLength(9);
     expect(screen.queryByText(/items matching/)).toBeNull();
     rerender({ query: '' });
@@ -1276,7 +1276,8 @@ describe('session tree filters', () => {
       const session = value.sessions.get(route.session_id)!;
       session.topics[session.items['8']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
     }, props: { query: 'receipt', onSearchStatus: status } });
-    expect(searchCount(status)).toBe('1 of 2');
+    // Item 3 counts twice (its question and its note), 1.1 once.
+    expect(searchCount(status)).toBe('1 of 3');
     viewOf(view.transport).filters.archived = true;
     await act(async () => { await view.navigation.refresh(); });
     expect(searchCount(status)).toBe('No matches');

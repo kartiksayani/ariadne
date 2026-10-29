@@ -273,8 +273,9 @@ the PR on its own. Fix does not post a reply or push your change.
   answer at once. The agent replies on the item and the history is kept.
 - **Terminal chat.** The agent's general conversation stays in its terminal;
   each item's replies and history stay in item detail.
-- **Search box** in the top bar filters items. The sun/moon button cycles the
-  theme (system, light, dark).
+- **Search box** in the top bar highlights items whose question, outcome or
+  notes hold every word. The sun/moon button cycles the theme (system, light,
+  dark).
 - **Menu-bar icon.** Shows how many questions wait on you and lists the oldest.
   Clicking one opens it. Ariadne can also send a macOS notification when an
   agent asks something.
