@@ -129,6 +129,19 @@ async function changesFit(surface: Locator) {
   }
 }
 
+/**
+ * Whether a strike really draws on `target`. A strike that a <del> passes down to a nested list item, link or chip is not in the
+ * descendant's computed style, so this compares the target's pixels with and without the decoration of `struck` (the element that holds it).
+ */
+async function strikeDrawn(target: Locator, struck: Locator, expected: boolean) {
+  await target.scrollIntoViewIfNeeded();
+  const withStrike = await target.screenshot({ animations: 'disabled' });
+  await struck.evaluate(element => element.style.setProperty('text-decoration', 'none', 'important'));
+  const without = await target.screenshot({ animations: 'disabled' });
+  await struck.evaluate(element => element.style.removeProperty('text-decoration'));
+  expect(withStrike.equals(without), expected ? 'the strike draws on it' : 'nothing is struck on it').toBe(!expected);
+}
+
 /** Opens the band's What changed popover (D18) over the Map and returns it. */
 async function openChanges(page: Page) {
   await page.getByRole('button', { name: /new|changed|\d+ changes/ }).first().click();
@@ -266,6 +279,26 @@ for (const theme of ['dark', 'light'] as const) {
     expect(stack.afterLinkColor).not.toBe(stack.beforeColor);
     expect(stack.breakLines, 'no doubled break').toBeCloseTo(2, 0);
     expect(stack.rootSpace).toBe('normal');
+    // The strike reaches what is nested in the before: a list item, a link and an item chip (Details has the peek, so the chip is a button).
+    const struckBefore = value.locator('del.change-before'), chip = struckBefore.locator('button.name-chip');
+    await expect(chip).toHaveCount(1);
+    await page.mouse.move(0, 0);
+    await strikeDrawn(struckBefore.locator('li').first(), struckBefore, true);
+    await strikeDrawn(struckBefore.locator('a').first(), struckBefore, true);
+    await strikeDrawn(chip, struckBefore, true);
+    await strikeDrawn(value.locator('.change-after li').first(), struckBefore, false);
+    const chips = await value.evaluate(element => {
+      const before = element.querySelector('del.change-before')!, after = element.querySelector('.change-after')!;
+      return { beforeColor: getComputedStyle(before).color, chipColor: getComputedStyle(before.querySelector('.name-chip')!).color,
+        afterChipColor: getComputedStyle(after.querySelector('.name-chip')!).color };
+    });
+    expect(chips.chipColor, 'a struck chip stays muted').toBe(chips.beforeColor);
+    expect(chips.afterChipColor, 'the after chip keeps the accent').not.toBe(chips.beforeColor);
+    // A ~~struck~~ word inside a value is Markdown's own strike: it draws, and keeps normal white space.
+    const wordBefore = struckBefore.locator('.md del'), wordAfter = value.locator('.change-after del');
+    await strikeDrawn(wordBefore, wordBefore, true);
+    await strikeDrawn(wordAfter, wordAfter, true);
+    expect(await wordBefore.evaluate(element => getComputedStyle(element).whiteSpace)).toBe('normal');
     await changesFit(box);
     await testInfo.attach(`item-notes-box-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
 
@@ -280,6 +313,26 @@ for (const theme of ['dark', 'light'] as const) {
     });
     expect(rule.own).toBe('2px'); expect(rule.inner).toBe('0px'); expect(rule.numbers).toBe('decimal');
     expect(rule.innerStrike).toContain('line-through');
+    // The comparison's before is struck down to its nested list item, link and chip; its multi-line After keeps its tint (a block <mark>).
+    const comparisonBefore = timeline.locator('.change-comparison > .change-field > span > del');
+    await page.mouse.move(0, 0);
+    await strikeDrawn(comparisonBefore.locator('li').first(), comparisonBefore, true);
+    await strikeDrawn(comparisonBefore.locator('a').first(), comparisonBefore, true);
+    await strikeDrawn(comparisonBefore.locator('button.name-chip'), comparisonBefore, true);
+    const timelineChips = await timeline.locator('.change-comparison').evaluate(element => ({
+      before: getComputedStyle(element.querySelector('del')!).color, chip: getComputedStyle(element.querySelector('del .name-chip')!).color,
+      link: getComputedStyle(element.querySelector('del a')!).color }));
+    expect(timelineChips.chip, 'a chip in the comparison’s before stays muted').toBe(timelineChips.before);
+    expect(timelineChips.link, 'a link in the comparison’s before stays muted').toBe(timelineChips.before);
+    const tint = await timeline.locator('.change-comparison mark').first().evaluate(mark => {
+      const root = mark.firstElementChild!, own = mark.getBoundingClientRect(), inner = root.getBoundingClientRect();
+      return { background: getComputedStyle(mark).backgroundColor, display: getComputedStyle(mark).display, root: root.tagName,
+        coversHeight: own.height >= inner.height - 1, coversWidth: own.width > 0 };
+    });
+    expect(tint.root).toBe('DIV');
+    expect(tint.display).not.toBe('inline');
+    expect(tint.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(tint.coversHeight, 'the tint paints behind the whole block value').toBe(true); expect(tint.coversWidth).toBe(true);
     await changesFit(box);
 
     // The popover keeps its look: the before is not struck there, and nothing breaks twice.
@@ -297,6 +350,16 @@ for (const theme of ['dark', 'light'] as const) {
     expect(pop.strike).toBe('none'); expect(pop.rootSpace).toBe('normal');
     expect(pop.breakLines, 'no doubled break').toBeCloseTo(2, 0);
     expect(pop.numbers).toBe('decimal'); expect(pop.label).toBe('Notes');
+    // Its own before stays unstruck, but a ~~struck~~ word inside a value draws its strike with normal white space, and the popover has no tint.
+    const ownBefore = comparison.locator(':scope > .change-field > span > del'), word = comparison.locator('.md del');
+    await expect(word).toHaveCount(2);
+    await page.mouse.move(0, 0);
+    await strikeDrawn(ownBefore.locator('li').first(), ownBefore, false);
+    await strikeDrawn(word.first(), word.first(), true);
+    await strikeDrawn(word.last(), word.last(), true);
+    const words = await word.evaluateAll(nodes => nodes.map(node => ({ line: getComputedStyle(node).textDecorationLine, space: getComputedStyle(node).whiteSpace })));
+    for (const entry of words) { expect(entry.line).toContain('line-through'); expect(entry.space).toBe('normal'); }
+    expect(await comparison.locator('mark').first().evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
     await changesFit(card);
     await testInfo.attach(`item-notes-popover-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
     await page.keyboard.press('Escape');

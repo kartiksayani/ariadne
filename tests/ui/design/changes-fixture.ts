@@ -5,9 +5,13 @@ const id = (n: number) => `00000000-0000-4000-8000-f${String(950 + n).padStart(1
 const old = '2026-10-03T14:00:00.000Z', at = '2026-10-07T15:02:00.000Z';
 export const ownerWords = 'Keep retries quiet while offline.\nTell me when my saved changes are safe.';
 export const interpretation = 'Read as: Keep saved changes safe and explain recovery without repeated alerts.';
-/** The "notes" frame: item bodies written as Markdown (a list, bold, a link, a soft line break) and one of them changed. */
-export const notesAfter = '**From:** the support queue\nOwner: the platform team\n\n- first check, see [the ticket](https://example.com/ticket/7)\n- second check\n\n1. reproduce it\n2. write the test';
-export const notesBefore = '**From:** the old queue\nOwner: nobody yet\n\n- a single check, see [the old ticket](https://example.com/ticket/3)\n\n1. look into it';
+/**
+ * The "notes" frame: item bodies written as Markdown (a list, bold, a link, an item reference, a ~~struck~~ word, a soft line break)
+ * and one of them changed. The item reference points at "Recovery policy" (3.1).
+ */
+export const notesAfter = '**From:** the support queue\nOwner: the platform team\n\n- first check, see [the ticket](https://example.com/ticket/7)\n- second check, ~~a guess~~ confirmed with [the policy](item:3.1)\n\n1. reproduce it\n2. write the test';
+export const notesBefore = '**From:** the old queue\nOwner: nobody yet\n\n- a single check, see [the old ticket](https://example.com/ticket/3) and [the policy](item:3.1), ~~maybe~~ later\n\n1. look into it';
+export const notesDraft = 'Earlier draft, see [the draft](https://example.com/draft/1) and [the policy](item:3.1).\n\n1. one\n2. two';
 export const changeNames = ['Recovery policy', 'Retry schedule', 'Saved receipt', 'Offline wording', 'Old retry policy', 'Wake-up check', 'Clock change check', 'Recovery note'];
 
 /** Nineteen decided names for the long brief frame; some are long enough to need a line of their own on a narrow Map. */
@@ -52,7 +56,7 @@ export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | '
     const retry = session.items['3.2']!;
     retry.note = notesAfter;
     retry.changes = [
-      { revision: 1, at: '2026-10-03T14:30:00.000Z', cause_message_id: id(7), reason: 'First draft of the schedule.', before: { note: 'Earlier draft.\n\n1. one\n2. two' } },
+      { revision: 1, at: '2026-10-03T14:30:00.000Z', cause_message_id: id(7), reason: 'First draft of the schedule.', before: { note: notesDraft } },
       { revision: 2, at, cause_message_id: agentId, reason: 'Linked the **ticket** and trimmed the rest.', before: { note: notesBefore } },
     ];
     // "Saved receipt" carries the same change for the popover, which lists the other items (the selected one has its box).

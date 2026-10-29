@@ -170,6 +170,53 @@ describe('Compare', () => {
     expect(why.querySelector('a')?.textContent).toBe('the log');
   });
 
+  it('labels a note change like the Details box: "Progress" while the item is in progress, "Notes" otherwise', () => {
+    const open = row();
+    const view = render(<Compare row={open.row} session={open.value.session} variant="link" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Before → after' }));
+    expect(within(screen.getByTestId('change-comparison')).getByText('Notes', { selector: 'strong' })).toBeTruthy();
+    view.unmount();
+    const progress = row();
+    progress.value.session.items['updated-0']!.status = 'in_progress';
+    const changed = changeRow(progress.value.session, progress.value.session.items['updated-0']!, progress.value.session.items['updated-0']!.changes!);
+    render(<Compare row={changed} session={progress.value.session} variant="link" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Before → after' }));
+    expect(within(screen.getByTestId('change-comparison')).getByText('Progress', { selector: 'strong' })).toBeTruthy();
+    expect(within(screen.getByTestId('change-comparison')).queryByText('Notes', { selector: 'strong' })).toBeNull();
+  });
+
+  it('keeps the comparison’s own before and after the only direct <del> and <mark>; a ~~struck~~ word sits below the Markdown root', () => {
+    const { value, row: changed } = row('Now ~~gone~~ here.\nSecond line.', 'Was ~~gone~~ there.\nOld second line.');
+    render(<Compare row={changed} session={value.session} variant="link" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Before → after' }));
+    const field = within(screen.getByTestId('change-comparison')).getByText('Notes', { selector: 'strong' }).parentElement!;
+    expect(field.querySelectorAll(':scope > span > del')).toHaveLength(1);
+    expect(field.querySelectorAll('del')).toHaveLength(3);
+    const inner = within(field).getAllByText('gone', { selector: 'del' });
+    expect(inner).toHaveLength(2);
+    // Each one sits inside the Markdown root, which is the only child of the comparison's own <del> or <mark>.
+    for (const node of inner) {
+      const own = [...field.querySelectorAll(':scope > span > del, :scope > span > mark')].find(host => host.contains(node))!;
+      expect(own.children).toHaveLength(1);
+      expect(own.firstElementChild!.contains(node)).toBe(true);
+      expect(own.firstElementChild).not.toBe(node);
+    }
+  });
+
+  it('draws a block value (a list) as a <div> Markdown root alone inside <mark>, and a soft-broken line as a span (the stylesheet makes the first kind a block that paints its tint)', () => {
+    const block = row();
+    const view = render(<Compare row={block.row} session={block.value.session} variant="link" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Before → after' }));
+    const mark = screen.getByTestId('change-comparison').querySelector('mark')!;
+    expect(mark.firstElementChild!.tagName).toBe('DIV');
+    expect(mark.children).toHaveLength(1);
+    view.unmount();
+    const line = row('One\nTwo', 'Old one\nOld two');
+    render(<Compare row={line.row} session={line.value.session} variant="link" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Before → after' }));
+    expect(screen.getByTestId('change-comparison').querySelector('mark')!.firstElementChild!.tagName).toBe('SPAN');
+  });
+
   it('keeps links, refs and status as plain text', () => {
     const value = changesFixture(), item = value.session.items['updated-0']!;
     item.changes![0].before = { status: 'open' };

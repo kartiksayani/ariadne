@@ -536,7 +536,7 @@
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
 
-.changes-row .change-field del {
+.changes-row .change-field > span > del {
   color: color-mix(in srgb, var(--color-text) 68%, transparent);
   text-decoration: none;
 }

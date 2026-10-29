@@ -4,9 +4,9 @@ import type { Item, ItemChangeRecord, ItemChangesProjection, Page, QueryCursor, 
 import type { SessionRef } from '../../generated/core';
 import { ServiceFailure, type RendererService } from '../../data/service';
 import { useHistory } from '../../components/history/useHistory';
-import { changeRow, type ChangedField } from '../../selectors/changes/card';
+import { changeRow } from '../../selectors/changes/card';
 import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
-import { ChangeValue, Compare, fieldNames, isBlockValue } from './Compare';
+import { ChangeValue, Compare, isBlockValue, labelFor } from './Compare';
 import { Markdown } from '../shared/MarkdownText';
 import { clockTime } from './clock';
 import { causeLabel } from './model';
@@ -30,9 +30,6 @@ export async function loadItemChanges(service: RendererService, route: SessionRe
   } while (cursor);
   return { items: changes, next_cursor: null, snapshot_revision: revision };
 }
-
-/** The box's labels: the board names the note "Progress" while the item is in progress; for every other status it is "Notes". */
-const labelFor = (field: ChangedField['field'], item: Immutable<Item>) => field === 'note' && item.status === 'in_progress' ? 'Progress' : fieldNames[field];
 
 /** "Status  ~~Open~~ → Decided": one row per changed field, then the agent's reason. */
 function ChangeRows({ session, item, records, onOpenAnswer }: { readonly session: Immutable<Session>; readonly item: Immutable<Item>;

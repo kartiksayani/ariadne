@@ -81,15 +81,24 @@
 .change-comparison, .change-field, .change-field > span { display: block; }
 .change-comparison { margin: 6px 0 10px; }
 .change-field { margin-top: 8px; }
-.change-field del, .change-field mark { white-space: pre-wrap; }
-
-/* The renderer draws a soft break as <br> plus a newline: inside these pre-wrap hosts its root sets its own white space, or each break shows twice. */
-.change-field .md, .change-row-value .md { white-space: normal; }
-.change-field del { color: var(--a-label); }
 
 .change-field mark {
   color: var(--color-text);
   background: color-mix(in srgb, var(--attention) 12%, transparent);
+}
+
+/* Only the comparison's own before and after: a ~~struck~~ word inside a value is Markdown's own <del> and keeps its own look. */
+.change-field > span > del, .change-field > span > mark { white-space: pre-wrap; }
+.change-field > span > del { color: var(--a-label); }
+
+/* The renderer draws a soft break as <br> plus a newline: inside these pre-wrap hosts its root sets its own white space, or each break shows twice. */
+.change-field .md, .change-row-value .md { white-space: normal; }
+
+/* A multi-line value is a block: inside an inline <mark> it would paint no tint, so the mark is a block as wide as its text. */
+.change-field > span > mark:has(> div.md) {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .change-value-label {
@@ -187,8 +196,14 @@
   color: var(--a-label);
 }
 
-/* A struck before in Markdown stays muted: its links and nested lists carry the strike of the <del> and none of the accent colour. */
-.change-before .md-link { color: inherit; }
+/* A struck before in Markdown (the box's, or a comparison's) stays muted: its links, item chips and nested lists carry the strike of the <del> and none of the accent colour. */
+.change-before .md-link, .change-field > span > del .md-link { color: inherit; }
+
+.change-before .name-chip,
+.change-field > span > del .name-chip {
+  color: inherit;
+  text-decoration: inherit;
+}
 
 /* A multi-line value stacks: the struck before, then the arrow, then the after, each on its own line. */
 .change-row-value[data-stacked] > .change-before,

@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import type { Immutable } from '../../data/session-store';
-import type { Session } from '../../generated/domain/models';
+import type { Item, Session } from '../../generated/domain/models';
 import type { ChangeRow, ChangedField } from '../../selectors/changes/card';
 import { Markdown } from '../shared/MarkdownText';
 import { parseMarkdown } from '../shared/markdown';
@@ -10,6 +10,8 @@ import './changes.css';
 
 export const fieldNames: Record<ChangedField['field'], string> = { question: 'Name', short: 'Short name', type: 'Kind', status: 'Status',
   note: 'Notes', ask: 'Question for you', options: 'Choices', outcome: 'Outcome', why: 'Why', links: 'Links', related: 'Related', affects: 'Affects', depends_on: 'Depends on' };
+/** A field's label on every surface: the board names the note "Progress" while the item is in progress; for every other status it is "Notes". */
+export const labelFor = (field: ChangedField['field'], item: Immutable<Item>) => field === 'note' && item.status === 'in_progress' ? 'Progress' : fieldNames[field];
 export function valueText(value: ChangedField['before'], field: ChangedField['field'], session: Immutable<Session>): string {
   if (value === null || value === undefined || value === '') return 'None';
   if (typeof value === 'string') return field === 'status' && value in STATUS ? STATUS[value as keyof typeof STATUS].label : value;
@@ -55,7 +57,7 @@ export function Compare({ row, session, why, variant = 'icon' }: { readonly row:
       </svg>
     </button>}
     {open && <span id={id} className="change-comparison" data-testid="change-comparison" data-single={row.fields.length === 1 || undefined}>{row.fields.map(field => <span key={field.field} className="change-field">
-      <strong>{fieldNames[field.field]}</strong><span><span className="change-value-label">Before</span><del><ChangeValue value={field.before} field={field.field} session={session} /></del></span>
+      <strong>{labelFor(field.field, row.item)}</strong><span><span className="change-value-label">Before</span><del><ChangeValue value={field.before} field={field.field} session={session} /></del></span>
       <span><span className="change-value-label">After</span><mark><ChangeValue value={field.current} field={field.field} session={session} /></mark></span>
     </span>)}{why && !row.fields.some(field => field.field === 'why') && <span className="change-field"><strong>Why</strong><span><Markdown text={why} inline /></span></span>}</span>}
   </span>;
