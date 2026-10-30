@@ -58,7 +58,7 @@ Markdown in `note`, `outcome`, `why`, `reply`; plain text in `question`, `short`
 
 Owner instructions win; apply these rules while connected or told "use Ariadne".
 
-1. **Keep only useful work.** File decisions, risks and results the owner needs;
+1. **Keep only useful work.** File decisions, risks, questions and results the owner needs;
    otherwise use chat. Put routine lists in one checklist; split only for
    independent discussion/tracking. Chat points to filed work in 1–3 lines.
 2. **One point, one place.** Update the existing item instead of repeating it in
