@@ -6,9 +6,10 @@ import { createDesktopService } from '../../../src/data/service';
 import type { ItemChangeRecord } from '../../../src/generated/domain/models';
 import { applySeen } from '../../../src/state/preferences/seen';
 import { notices } from '../../../src/ui/pages/notices';
+import { resetBoxOpen } from '../../../src/ui/changes/boxOpen';
 import { AppTransport, route } from './transport';
 
-afterEach(() => { cleanup(); notices.clear(); });
+afterEach(() => { cleanup(); notices.clear(); resetBoxOpen(); });
 
 describe('Mark seen in the app', () => {
   it('turns the unseen change box to seen at once, inside the dwell', async () => {

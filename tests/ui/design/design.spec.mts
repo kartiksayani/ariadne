@@ -150,6 +150,14 @@ async function openChanges(page: Page) {
   return popover;
 }
 
+/** The Details change box starts collapsed (alpha.27): open it to read its rows. Clicks only while it is closed. */
+async function openChangeBox(box: Locator) {
+  const toggle = box.getByRole('button', { name: /^Changed (at|since you looked)/ });
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  return box;
+}
+
 async function compactCompare(surface: Locator) {
   const control = surface.getByRole('button', { name: 'Show before and after', exact: true }).first();
   await control.scrollIntoViewIfNeeded();
@@ -199,6 +207,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The change box on the item itself draws before → after inline, and its older history is a timeline behind one toggle.
     const current = page.getByTestId('change-box');
     await current.scrollIntoViewIfNeeded();
+    await openChangeBox(current);
     await expect(current.locator('.change-row del').first()).toBeVisible();
     await changesFit(current);
     await current.getByRole('button', { name: /^Older history/ }).click();
@@ -224,6 +233,64 @@ for (const theme of ['dark', 'light'] as const) {
     await changesFit(sinceCard);
     expect(answerControl.width).toBeGreaterThanOrEqual(24);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  /**
+   * Alpha.27: the change box starts collapsed to one head line, "› Changed since you looked · 20:51 · Notes" with Mark seen at the right.
+   * jsdom has no layout, so the pixels are checked here: one line (the head's 26px), the summary giving way before the title when the
+   * box is narrow, Mark seen beside the toggle and never over it, and the head the same height unseen and seen.
+   */
+  test(`The collapsed change box is one line: caret, title, field names, Mark seen at the right (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('changes-notes'), theme });
+    const box = page.getByTestId('change-box');
+    await box.scrollIntoViewIfNeeded();
+    const toggle = box.getByRole('button', { name: /^Changed (at|since you looked)/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(box.getByTestId('change-row-value')).toHaveCount(0);
+    const head = async () => box.evaluate(element => {
+      const rect = (target: Element | null) => target?.getBoundingClientRect() ?? null;
+      const button = element.querySelector('.change-box-toggle')!, title = element.querySelector('.change-box-title-text')!, summary = element.querySelector('.change-box-summary')!;
+      const mark = element.querySelector('.change-box-mark'), headBox = element.querySelector('.change-box-head')!;
+      const overflowing = (target: Element) => target.scrollWidth > target.clientWidth;
+      return { state: element.getAttribute('data-state'), head: rect(headBox)!.height, toggle: rect(button)!.height, toggleRight: rect(button)!.right,
+        boxRight: rect(element)!.right, markLeft: rect(mark)?.left ?? null, markRight: rect(mark)?.right ?? null, caret: button.firstElementChild!.className,
+        text: button.textContent, summaryWidth: rect(summary)!.width, boxWidth: rect(element)!.width, spare: rect(button)!.width - (rect(summary)!.right - rect(button.firstElementChild)!.left),summaryTop: rect(summary)!.top, titleTop: rect(title)!.top, summaryCut: overflowing(summary), titleCut: overflowing(title),
+        overflow: element.scrollWidth - element.clientWidth };
+    });
+    const measure = (state: string, size: Awaited<ReturnType<typeof head>>) => {
+      expect(size.state).toBe(state);
+      expect(size.toggle, 'one line: the toggle is at most the head\'s 26px').toBeLessThanOrEqual(26.5);
+      expect(size.head).toBeLessThanOrEqual(26.5);
+      expect(size.caret).toContain('ph-caret-right');
+      expect(size.text).toMatch(/ · Notes$/);
+      expect(Math.abs(size.summaryTop - size.titleTop), 'the summary is on the title\'s line').toBeLessThanOrEqual(2);
+      expect(size.overflow, 'the box does not scroll sideways').toBeLessThanOrEqual(1);
+    };
+    // Unseen: Mark seen sits at the right of the toggle, not over it, inside the box.
+    const unseen = await head();
+    measure('unseen', unseen);
+    expect(unseen.markLeft).not.toBeNull();
+    expect(unseen.markLeft!).toBeGreaterThanOrEqual(unseen.toggleRight - 0.5);
+    expect(unseen.markRight!).toBeLessThanOrEqual(unseen.boxRight);
+    await testInfo.attach(`change-box-collapsed-unseen-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    // Seen: the head's text flips, Mark seen goes, the head keeps its height, and the field names show after the title.
+    await box.getByRole('button', { name: 'Mark seen', exact: true }).click();
+    await expect(box).toHaveAttribute('data-state', 'seen');
+    const seen = await head();
+    measure('seen', seen);
+    expect(seen.markLeft).toBeNull();
+    expect(seen.head).toBe(unseen.head);
+    expect(seen.summaryWidth, 'the field names are drawn once the head has room').toBeGreaterThan(0);
+    expect(seen.summaryCut).toBe(false);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await testInfo.attach(`change-box-collapsed-seen-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    // A narrower box (the head's spare room and half of the field names' width lost): the field names are cut with an ellipsis first, and the title keeps its words.
+    await box.evaluate((element, width) => { element.style.width = `${width}px`; }, seen.boxWidth - seen.spare - seen.summaryWidth / 2);
+    const narrow = await head();
+    measure('seen', narrow);
+    expect(narrow.summaryCut, 'the field names give way first').toBe(true);
+    expect(narrow.titleCut, 'the title keeps its words while the field names are cut').toBe(false);
+    await testInfo.attach(`change-box-collapsed-narrow-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
   });
 
   /**
@@ -260,6 +327,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The change box: the Notes row stacks the struck before, the arrow and the after.
     const box = page.getByTestId('change-box');
     await box.scrollIntoViewIfNeeded();
+    await openChangeBox(box);
     const value = box.getByTestId('change-row-value').first();
     await expect(value.locator('del a')).toBeVisible();
     const stack = await value.evaluate(element => {

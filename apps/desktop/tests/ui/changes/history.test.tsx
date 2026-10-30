@@ -7,9 +7,11 @@ import { AppTransport, route } from '../app/transport';
 import { cursor } from '../history/fixtures';
 import { changesFixture } from './fixture';
 import { clockTime } from '../../../src/ui/changes/clock';
+import { resetBoxOpen } from '../../../src/ui/changes/boxOpen';
+import { openBox } from './open-box';
 
 const sessions: OpenSessions[] = [];
-afterEach(() => { cleanup(); sessions.splice(0).forEach(value => value.closeAll()); });
+afterEach(() => { cleanup(); sessions.splice(0).forEach(value => value.closeAll()); resetBoxOpen(); });
 async function setup(value: ReturnType<typeof changesFixture>) {
   const transport = new AppTransport(); transport.sessions.set(value.session.id, value.session);
   const service = createDesktopService(transport), opened = new OpenSessions(service); sessions.push(opened);
@@ -23,7 +25,7 @@ describe('item change box and history', () => {
     const value = changesFixture(), item = value.session.items['updated-0']!;
     const { service, store } = await setup(value), onOpenAnswer = vi.fn(), onMarkSeen = vi.fn();
     render(<ItemChanges service={service} store={store} session={value.session} item={item} seen={value.seen} onOpenAnswer={onOpenAnswer} onMarkSeen={onMarkSeen} />);
-    const box = screen.getByRole('region', { name: 'What changed' });
+    const box = openBox(screen.getByRole('region', { name: 'What changed' }));
     expect(box.getAttribute('data-state')).toBe('unseen');
     expect(within(box).getByText(`Changed since you looked · ${timeText(value.record().at)}`)).toBeTruthy();
     // The fixture item is open, so its note is "Notes" (alpha.25 C); "Progress" is only for an item in progress.
@@ -40,7 +42,7 @@ describe('item change box and history', () => {
     const value = changesFixture(), item = value.session.items['updated-0']!;
     const { service, store } = await setup(value), onMarkSeen = vi.fn();
     const view = render(<ItemChanges service={service} store={store} session={value.session} item={item} seen={value.seen} onOpenAnswer={vi.fn()} onMarkSeen={onMarkSeen} />);
-    const before = screen.getByRole('region', { name: 'What changed' }).querySelector('.change-rows')!.textContent;
+    const before = openBox(screen.getByRole('region', { name: 'What changed' })).querySelector('.change-rows')!.textContent;
     const seen = { ...value.seen, items: [{ item_id: item.id, revision: item.revision }] };
     view.rerender(<ItemChanges service={service} store={store} session={value.session} item={item} seen={seen} onOpenAnswer={vi.fn()} onMarkSeen={onMarkSeen} />);
     const box = screen.getByRole('region', { name: 'What changed' });
@@ -56,7 +58,7 @@ describe('item change box and history', () => {
     const seen = { ...value.seen, items: [{ item_id: item.id, revision: 3 }] };
     const { service, store } = await setup(value);
     render(<ItemChanges service={service} store={store} session={value.session} item={item} seen={seen} onOpenAnswer={vi.fn()} onMarkSeen={vi.fn()} />);
-    const box = screen.getByRole('region', { name: 'What changed' });
+    const box = openBox(screen.getByRole('region', { name: 'What changed' }));
     expect(box.getAttribute('data-state')).toBe('seen');
     expect(within(box).getByText(`Changed at ${timeText(value.record().at)}`)).toBeTruthy();
     expect(within(box).queryByRole('button', { name: 'Mark seen' })).toBeNull();
