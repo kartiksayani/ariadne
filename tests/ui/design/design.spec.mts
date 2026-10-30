@@ -717,7 +717,6 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
     await testInfo.attach(`thread-${theme}`, { body: shot, contentType: 'image/png' });
     // Paint order, not positions: the blue must be unbroken at every row boundary and through the elbow, with the halo at its sides.
     const pixels = await readThreadPixels(page, shot);
-    console.log(`THREAD PROBES ${frame} (${theme}) seams=${pixels.seams}\n${describeProbes([...pixels.notch, ...pixels.elbow])}\n${pixels.note}`);
     expect(pixels.note, 'the elbow can be probed').toBe('');
     expect(pixels.seams, 'a row boundary lies between the band and the selected row').toBeGreaterThan(0);
     // Soft, so a failing run names the notch probes and the elbow probes each on their own.
