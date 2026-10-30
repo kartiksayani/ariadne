@@ -157,9 +157,11 @@
 
 .change-box-toggle > .ph { flex: none; }
 
-/* The field names are one quiet line after the title; they give way first, so the title keeps its words until they are gone. */
+/* The field names are one quiet line after the title; they give way first, so the title keeps its words until they are gone. The title
+   does not shrink at all while the summary has width left (a sub-pixel shrink would draw "Changed at 15:…"); it is capped at the
+   button's width less the caret and the gap, so it still ends in "…" when it alone does not fit. */
 .change-box-summary {
-  flex: 0 999 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -171,7 +173,9 @@
 .change-box-title {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 6px;
+  max-width: calc(100% - 1em - 6px);
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;

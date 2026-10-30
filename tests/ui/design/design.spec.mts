@@ -258,9 +258,16 @@ for (const theme of ['dark', 'light'] as const) {
       const button = element.querySelector('.change-box-toggle')!, title = element.querySelector('.change-box-title-text')!, summary = element.querySelector('.change-box-summary')!;
       const mark = element.querySelector('.change-box-mark'), headBox = element.querySelector('.change-box-head')!;
       const overflowing = (target: Element) => target.scrollWidth > target.clientWidth;
+      // The title's ellipsis can start at a sub-pixel; `scrollWidth` and `clientWidth` round to whole pixels and miss "Changed at 15:…".
+      // So measure the words' own width with a Range and compare it to the room the title text and its wrapper give them.
+      const wordsCut = (text: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        return range.getBoundingClientRect().width > Math.min(rect(text)!.width, rect(text.parentElement)!.width) + 0.01;
+      };
       return { state: element.getAttribute('data-state'), head: rect(headBox)!.height, toggle: rect(button)!.height, toggleRight: rect(button)!.right,
         boxRight: rect(element)!.right, markLeft: rect(mark)?.left ?? null, markRight: rect(mark)?.right ?? null, caret: button.firstElementChild!.className,
-        text: button.textContent, summaryWidth: rect(summary)!.width, boxWidth: rect(element)!.width, spare: rect(button)!.width - (rect(summary)!.right - rect(button.firstElementChild)!.left),summaryTop: rect(summary)!.top, titleTop: rect(title)!.top, summaryCut: overflowing(summary), titleCut: overflowing(title),
+        text: button.textContent, summaryWidth: rect(summary)!.width, boxWidth: rect(element)!.width, spare: rect(button)!.width - (rect(summary)!.right - rect(button.firstElementChild)!.left),summaryTop: rect(summary)!.top, titleTop: rect(title)!.top, titleRight: rect(title)!.right,summaryCut: overflowing(summary), titleCut: wordsCut(title),
         overflow: element.scrollWidth - element.clientWidth };
     });
     const measure = (state: string, size: Awaited<ReturnType<typeof head>>) => {
@@ -297,12 +304,21 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await testInfo.attach(`change-box-collapsed-seen-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
     // A narrower box (the head's spare room and half of the field names' width lost): the field names are cut with an ellipsis first, and the title keeps its words.
-    await box.evaluate((element, width) => { element.style.width = `${width}px`; }, seen.boxWidth - seen.spare - seen.summaryWidth / 2);
-    const narrow = await head();
-    measure('seen', narrow);
-    expect(narrow.summaryCut, 'the field names give way first').toBe(true);
-    expect(narrow.titleCut, 'the title keeps its words while the field names are cut').toBe(false);
-    await testInfo.attach(`change-box-collapsed-narrow-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    // Then nearly all of them lost: the title still has every word, down to the last sub-pixel.
+    for (const [lost, label] of [[0.5, 'narrow'], [0.9, 'narrower']] as const) {
+      await box.evaluate((element, width) => { element.style.width = `${width}px`; }, seen.boxWidth - seen.spare - seen.summaryWidth * lost);
+      const cut = await head();
+      measure('seen', cut);
+      expect(cut.summaryCut, `the field names give way first (${label})`).toBe(true);
+      expect(cut.titleCut, `the title keeps its words while the field names are cut (${label})`).toBe(false);
+      await testInfo.attach(`change-box-collapsed-${label}-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    }
+    // So narrow that the title alone does not fit: it ends in "…" and stays inside the toggle.
+    await box.evaluate(element => { element.style.width = '110px'; });
+    const tiny = await head();
+    measure('seen', tiny);
+    expect(tiny.titleCut, 'the title alone does not fit, so it is cut').toBe(true);
+    expect(tiny.titleRight, 'the cut title stays inside the toggle').toBeLessThanOrEqual(tiny.toggleRight + 0.5);
   });
 
   /**
