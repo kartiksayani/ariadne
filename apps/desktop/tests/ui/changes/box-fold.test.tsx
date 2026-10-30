@@ -116,10 +116,10 @@ describe('the change box starts collapsed', () => {
     expect(within(box()).queryByText(`Changed since you looked · ${at}`)).toBeNull();
   });
 
-  it('names the toggle with the full title and the field names: "Changed since you looked" while unseen, "Changed at" once seen', async () => {
+  it('names the toggle with its visible words and the field names, plus "not seen yet" while a collapsed change is unseen', async () => {
     const { props } = await changed();
     const view = render(<ItemDetail {...props} seen={seenState()} />);
-    expect(screen.getByRole('button', { name: `Changed since you looked · ${at} · Notes` })).toBe(boxToggle(box()));
+    expect(screen.getByRole('button', { name: `Changed at ${at} · Notes, not seen yet` })).toBe(boxToggle(box()));
     expect(boxToggle(box()).textContent).toBe(`Changed at ${at} · Notes`);
     view.rerender(<ItemDetail {...props} seen={seenState([{ item_id: '1.1', revision: 2 }])} />);
     expect(screen.getByRole('button', { name: `Changed at ${at} · Notes` })).toBe(boxToggle(box()));

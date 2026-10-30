@@ -131,10 +131,10 @@ export function ItemChanges({ service, store, session, item, seen, onOpenAnswer,
   const at = clockTime(currentRecords.at(-1)?.at ?? item.updated_at ?? Date.now());
   const title = unseen ? `Changed since you looked · ${at}` : `Changed at ${at}`;
   // Collapsed, the head says "Changed at 15:02" even when unseen: the diamond and the tint mark the unseen change, and the short text
-  // leaves room for the field names beside "Mark seen". The tooltip keeps the full title, and so does the toggle's accessible name,
-  // with the field names: a screen reader still hears "Changed since you looked · 15:02 · Notes".
+  // leaves room for the field names beside "Mark seen". The tooltip keeps the full title. The toggle's accessible name starts with
+  // the visible words (so a voice command can name them) and adds what the diamond says: "Changed at 15:02 · Notes, not seen yet".
   const titleText = unseen && boxOpen ? title : `Changed at ${at}`;
-  const toggleName = fieldNames ? `${title} · ${fieldNames}` : title;
+  const toggleName = `${titleText}${fieldNames ? ` · ${fieldNames}` : ''}${unseen && titleText !== title ? ', not seen yet' : ''}`;
   if (showBox) return <section className="change-box" data-state={unseen ? 'unseen' : 'seen'} data-testid="change-box" aria-label="What changed">
     <div className="change-box-head">
       <button type="button" className="change-box-toggle" aria-expanded={boxOpen} aria-label={toggleName} onClick={toggleBox}>
