@@ -19,6 +19,30 @@ export function selectQuitNote(observation, pid) {
   return { pid, message, informative, button: button.name, action: 'AXPress' };
 }
 
+// An AX element that disappears between listing it and reading it raises
+// errAEIllegalIndex (-1719) or errAENoSuchObject (-1728). The tree is live, so
+// that is "not settled yet", never a product failure. This also runs inside the
+// JXA script (embedded through toString), so it must stay self-contained.
+export function isVanishedElement(error) {
+  return /\((-1719|-1728)\)/.test(String(error && error.message || error));
+}
+
+// Errors from one osascript pass that mean "observe again": a vanished element,
+// an Apple event timeout (-1712), or osascript outliving its execFileSync
+// timeout. Every other error (permissions, wrong text, wrong PID) is fatal.
+export function isTransientNativeError(error) {
+  if (!error) return false;
+  if (error.code === 'ETIMEDOUT') return true;
+  const text = String(error.stderr || '') + String(error.message || '');
+  return isVanishedElement(text) || /\(-1712\)/.test(text);
+}
+
+// What a reviewer needs when the wait ends without a note, so a failure shows
+// whether the observer was slow, starved or never saw a dialog.
+export function noteEvidence({ passes, longest, sinceRequest, alive }) {
+  return `inspect passes: ${passes}; longest inspect: ${longest} ms; quit request to last inspect: ${sinceRequest} ms; app alive: ${alive}`;
+}
+
 // Hosted macOS26 image grants osascript Accessibility and System Events Apple
 // events. Probe both without asking for consent; never change TCC/settings.
 // https://github.com/actions/runner-images/blob/6df43a84a99f76801fac238d7b7ddb2bd5808251/images/macos/scripts/build/configure-tccdb-macos.sh
@@ -26,6 +50,7 @@ export function selectQuitNote(observation, pid) {
 // AEDeterminePermissionToAutomateTarget(..., askUserIfNeeded=false).
 export const quitNoteScript = `
 ${selectQuitNote.toString()}
+${isVanishedElement.toString()}
 function run(args) {
   ObjC.import('AppKit');
   ObjC.import('ApplicationServices');
@@ -50,10 +75,19 @@ function run(args) {
   if (processes.length !== 1) throw new Error('Owned native process is unavailable');
   const process = processes.at(0);
   if (process.unixId() !== pid) throw new Error('Owned native process is unavailable');
+  // The tree is live: skip what vanishes mid-walk and report the observation as
+  // incomplete, so a half-read dialog never reaches the text and button checks.
+  let complete = true;
+  const read = (get, fallback) => {
+    try { return get(); }
+    catch (error) { if (!isVanishedElement(error)) throw error; complete = false; return fallback; }
+  };
   function descendants(parent, elements) {
     const children = parent.uiElements;
-    for (let index = 0; index < children.length; index++) {
-      const child = children.at(index);
+    const count = read(() => children.length, 0);
+    for (let index = 0; index < count; index++) {
+      const child = read(() => children.at(index), null);
+      if (!child) continue;
       elements.push(child);
       descendants(child, elements);
     }
@@ -61,21 +95,29 @@ function run(args) {
   }
   const dialogs = [], buttons = [];
   const windows = process.windows;
-  for (let index = 0; index < windows.length; index++) {
-    const window = windows.at(index);
-    if (window.subrole() !== 'AXDialog') continue;
-    const contents = descendants(window, []);
-    const targets = contents.filter(element => element.role() === 'AXButton');
-    dialogs.push({
-      texts: contents.filter(element => element.role() === 'AXStaticText').map(element => element.value()),
-      buttons: targets.map(button => {
-        const actions = [];
-        for (let index = 0; index < button.actions.length; index++) actions.push(button.actions.at(index).name());
-        return { name: button.name(), enabled: button.enabled(), actions };
-      }),
-    });
+  const windowCount = read(() => windows.length, 0);
+  for (let index = 0; index < windowCount; index++) {
+    const window = read(() => windows.at(index), null);
+    if (!window || read(() => window.subrole(), null) !== 'AXDialog') continue;
+    const texts = [], infos = [], targets = [];
+    for (const element of descendants(window, [])) {
+      const role = read(() => element.role(), null);
+      if (role === 'AXStaticText') {
+        const value = read(() => element.value(), undefined);
+        if (value !== undefined) texts.push(value);
+      } else if (role === 'AXButton') {
+        const info = read(() => {
+          const actions = [];
+          for (let index = 0; index < element.actions.length; index++) actions.push(element.actions.at(index).name());
+          return { name: element.name(), enabled: element.enabled(), actions };
+        }, null);
+        if (info) { infos.push(info); targets.push(element); }
+      }
+    }
+    dialogs.push({ texts, buttons: infos });
     buttons.push(targets);
   }
+  if (!complete) return JSON.stringify({ complete: false });
   const note = selectQuitNote({ pid, dialogs }, pid);
   if (note && args[0] === 'press') buttons[0][0].actions.byName('AXPress').perform();
   return JSON.stringify(note ? { ...note, pressed: args[0] === 'press' } : null);
@@ -108,7 +150,7 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
     if (verified.pid !== owned.pid || verified.birth !== owned.birth) throw new Error('Quit acknowledgement witness identity mismatch');
   };
   // Refresh the prerequisite check before the Quit request exists, so a System
-  // Events relaunch is never charged against the post-request exit deadline.
+  // Events relaunch never delays the first inspect after the request.
   await preflightQuitNote();
   // The unchanged demo contains delivered Running work, so this native journey
   // must observe its note. Quiet Quit must never be substituted as passing proof.
@@ -126,21 +168,54 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
     await delay(25);
   }
   // Re-run the readiness check (relaunching System Events if needed) once the
-  // owned Quit request exists and before the first inspect, outside the
-  // note-search deadline below.
+  // owned Quit request exists and before the first inspect.
   await preflightQuitNote();
   await verify();
-  const end = Date.now() + 15000;
-  while (Date.now() < end) {
-    if (!alive(owned.pid)) throw new Error('Owned app exited without the expected native Quit note');
-    await verify();
-    if (native('inspect', owned.pid)) {
-      await verify();
-      const note = native('press', owned.pid);
-      if (!note?.pressed || note.pid !== owned.pid) throw new Error('Native Quit note was not acknowledged: ' + JSON.stringify(note));
-      return note;
+  // There is no deadline on seeing the note, by design: how long the app takes
+  // to drain before it shows the alert is not what this journey asserts. The wait
+  // ends on a press, on the app exiting without a note, or on `signal` (WDIO
+  // exiting, or the runner's phase timeout, which is the outer hang guard).
+  const requestedAt = Date.now();
+  let passes = 0, longest = 0, lastPassAt = requestedAt;
+  const evidence = () => noteEvidence({ passes, longest, sinceRequest: lastPassAt - requestedAt, alive: alive(owned.pid) });
+  // One osascript pass. `undefined` means "not seen yet": an incomplete
+  // observation or a transient Apple event error. `null` means no dialog.
+  // A transient error during a press pass may have come after the AXPress went through.
+  let pressUncertain = false;
+  const observe = mode => {
+    const started = Date.now();
+    if (mode === 'inspect') passes++;
+    try {
+      const result = native(mode, owned.pid);
+      return result && result.complete === false ? undefined : result;
+    } catch (error) {
+      if (!isTransientNativeError(error)) throw error;
+      if (mode === 'press') pressUncertain = true;
+      return undefined;
+    } finally {
+      if (mode === 'inspect') { lastPassAt = Date.now(); longest = Math.max(longest, lastPassAt - started); }
     }
-    await delay(25);
+  };
+  try {
+    for (;;) {
+      if (!alive(owned.pid)) {
+        throw new Error(pressUncertain
+          ? 'Owned app exited after a Quit note press whose outcome is unknown (' + evidence() + ')'
+          : 'Owned app exited without the expected native Quit note (' + evidence() + ')');
+      }
+      await verify();
+      if (observe('inspect')) {
+        await verify();
+        const note = observe('press');
+        // The dialog changed under the press: observe it again, then press again.
+        if (note === undefined) { await delay(25); continue; }
+        if (!note?.pressed || note.pid !== owned.pid) throw new Error('Native Quit note was not acknowledged: ' + JSON.stringify(note));
+        return note;
+      }
+      await delay(25);
+    }
+  } catch (error) {
+    if (signal?.aborted && error === signal.reason) throw new Error(String(error && error.message || error) + ' (' + evidence() + ')', { cause: error });
+    throw error;
   }
-  throw new Error('Native Quit note observation deadline');
 }

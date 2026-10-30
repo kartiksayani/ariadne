@@ -138,7 +138,7 @@ describe('owner hide and unhide actions', () => {
     const session = transport.sessions.get(route.session_id)!;
     ++session.revision;
     act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    expect(row('4')!.getAttribute('aria-disabled')).toBeNull();
+    expect(document.querySelector('[role="tree"]')!.getAttribute('aria-busy')).toBe('false');
     row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
     expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
     await act(async () => { transport.holdSession = null; release(); });
@@ -285,8 +285,8 @@ describe('owner hide and unhide actions', () => {
     // The top bar's search box opens from its "Search the Map" button.
     fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
-    // "Implement receipt lookup" is in view; "Add the receipt lookup test" is hidden, and named in the note, not shown.
-    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
+    // "Implement receipt lookup" is in view (its question and its note are two matches); "Add the receipt lookup test" is hidden, and named in the note, not shown.
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 2'));
     expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
     expect(row('1.1')).toBeNull();
     expect(chip('Open').getAttribute('aria-label')).toBe('Open 2, 1 more hidden');

@@ -63,6 +63,12 @@ pub(super) fn collect(
                         item.id.as_str()
                     ));
                 }
+                if multiline(&add.question) {
+                    let target = EntityRef::Local(ariadne_core::LocalRef {
+                        r#ref: add.r#ref.clone(),
+                    });
+                    multiline_warning(after, receipt, &target, &mut warnings);
+                }
                 prose.push(&add.question);
                 prose.extend(add.note.as_deref());
                 prose.extend(add.ask.as_deref());
@@ -79,6 +85,9 @@ pub(super) fn collect(
                 reason,
                 wording_only,
             } => {
+                if patch.question.as_deref().is_some_and(multiline) {
+                    multiline_warning(after, receipt, item, &mut warnings);
+                }
                 prose.extend(patch.question.as_deref());
                 prose.extend(patch.note.as_ref().and_then(|note| note.as_deref()));
                 if !wording_only && !has_text(reason.as_deref()) {
@@ -224,6 +233,40 @@ fn resolve_topic(target: &UuidRef, receipt: &SavedReceipt) -> Option<UuidV4> {
             }
             _ => None,
         },
+    }
+}
+
+/// A trailing line break is trimmed away; one inside the text is not.
+fn multiline(question: &str) -> bool {
+    question.trim().contains(['\n', '\r'])
+}
+
+/// Names the item the way the duplicate warning does; a new item's id comes
+/// from the receipt, which preview fills too.
+fn multiline_warning(
+    after: &Session,
+    receipt: &SavedReceipt,
+    target: &EntityRef,
+    warnings: &mut Vec<String>,
+) {
+    let id = match target {
+        EntityRef::Existing(target) => Some(&target.id),
+        EntityRef::Local(target) => match &receipt.data {
+            SavedReceiptData::Apply { allocated_refs, .. } => {
+                match allocated_refs.0.get(&target.r#ref) {
+                    Some(AllocatedRef::Item { id }) => Some(id),
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
+    };
+    if let Some(item) = id.and_then(|id| after.items.0.get(id)) {
+        warnings.push(format!(
+            "Item {} ({}): `question` is the title and shows on one line. Put the description in `note`.",
+            label(item),
+            item.id.as_str()
+        ));
     }
 }
 
@@ -1303,5 +1346,126 @@ mod tests {
             &collect(&before, &after, &request, &receipt()),
             "no brief"
         ));
+    }
+
+    const ONE_LINE: &str = "shows on one line";
+
+    /// Advice for an apply whose receipt allocates each `(ref, number,
+    /// question)` and whose saved session holds those items.
+    fn added(value: Value, refs: &[(&str, &str, &str)]) -> Vec<String> {
+        let before = seed();
+        let mut after = before.clone();
+        let mut saved = receipt();
+        for (reference, number, question) in refs {
+            add_fixture_item(&mut after, number, ItemStatus::Open);
+            let item = after
+                .items
+                .0
+                .get_mut(&ItemRef::new(*number).unwrap())
+                .unwrap();
+            item.short = None;
+            item.question = (*question).into();
+            if let SavedReceiptData::Apply { allocated_refs, .. } = &mut saved.data {
+                allocated_refs.0.insert(
+                    RequestRef::new(*reference).unwrap(),
+                    AllocatedRef::Item {
+                        id: ItemRef::new(*number).unwrap(),
+                    },
+                );
+            }
+        }
+        collect(&before, &after, &request(value), &saved)
+    }
+
+    fn add_ref(question: &str) -> Value {
+        let mut value = add(question);
+        value["operations"][0]["ref"] = json!("new");
+        value
+    }
+
+    #[test]
+    fn a_multi_line_added_question_warns_once_and_names_the_new_item() {
+        for question in [
+            "Pick a cache\nThe old one is slow",
+            "Pick a cache\r\nThe old one is slow",
+            "Pick a cache\rThe old one is slow",
+            "Pick a cache\n\nThe old one is slow\nand leaks",
+        ] {
+            let warnings = added(add_ref(question), &[("new", "3", question)]);
+            let found: Vec<_> = warnings
+                .iter()
+                .filter(|warning| warning.contains(ONE_LINE))
+                .collect();
+            assert_eq!(found.len(), 1, "{question:?}: {warnings:?}");
+            assert!(
+                found[0].starts_with("Item Pick a cache The old one is slow")
+                    && found[0].contains(
+                        "(3): `question` is the title and shows on one line. Put the description in `note`."
+                    ),
+                "{question:?}: {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_line_and_trailing_break_questions_do_not_warn() {
+        for question in [
+            "Pick a cache",
+            "Pick a cache\n",
+            "Pick a cache\r\n",
+            "\nPick a cache\n\n",
+        ] {
+            let warnings = added(add_ref(question), &[("new", "3", question)]);
+            assert!(!contains(&warnings, ONE_LINE), "{question:?}: {warnings:?}");
+        }
+    }
+
+    #[test]
+    fn a_multi_line_edited_question_warns_and_other_edits_do_not() {
+        let session = seed();
+        let edit = |patch: Value| {
+            advice(
+                &session,
+                json!({"operations":[{"op":"item.edit","item":{"id":"1"},"patch":patch}]}),
+            )
+        };
+        let warnings = edit(json!({"question":"Pick a cache\nThe old one is slow"}));
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| warning.contains(ONE_LINE))
+                .count(),
+            1,
+            "{warnings:?}"
+        );
+        let item = &session.items.0[&ItemRef::new("1").unwrap()];
+        assert!(
+            contains(&warnings, &format!("Item {} (1): ", label(item))),
+            "{warnings:?}"
+        );
+        for patch in [
+            json!({"question":"Pick a cache"}),
+            json!({"question":"Pick a cache\n"}),
+            json!({"note":"Line one\nLine two"}),
+        ] {
+            assert!(!contains(&edit(patch.clone()), ONE_LINE), "{patch}");
+        }
+    }
+
+    #[test]
+    fn a_multi_line_child_question_warns_for_the_child_only() {
+        let child = "Measure the hit rate\nUse last week's traffic";
+        let warnings = added(
+            json!({"operations":[{"op":"item.add","ref":"parent","topic":{"id":seed().topics.0.keys().next().unwrap()},
+                "type":"task","question":"Pick a cache",
+                "children":[{"ref":"kid","type":"task","question":child}]}]}),
+            &[("parent", "3", "Pick a cache"), ("kid", "3.1", child)],
+        );
+        let found: Vec<_> = warnings
+            .iter()
+            .filter(|warning| warning.contains(ONE_LINE))
+            .collect();
+        assert_eq!(found.len(), 1, "{warnings:?}");
+        assert!(found[0].contains("(3.1): "), "{warnings:?}");
     }
 }

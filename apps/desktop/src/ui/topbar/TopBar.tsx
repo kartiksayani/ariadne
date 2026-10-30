@@ -25,7 +25,7 @@ function Search({ search, narrow, disabled }: { readonly search: SearchView; rea
   }, [search.active]);
   if (!search.active) {
     if (narrow) return <button type="button" className="p-iconbtn tb-icon" title="Search ( / )" aria-label="Search the Map" disabled={disabled} onClick={search.onOpen}><i className="ph ph-magnifying-glass" aria-hidden="true" /></button>;
-    return <button type="button" className="tb-search" title="Search questions and outcomes ( / )" aria-label="Search the Map" disabled={disabled} onClick={search.onOpen}>
+    return <button type="button" className="tb-search" title="Search questions, outcomes and notes ( / )" aria-label="Search the Map" disabled={disabled} onClick={search.onOpen}>
       <i className="ph ph-magnifying-glass" aria-hidden="true" /><span className="tb-search-hint">Search the Map</span><Keycap>/</Keycap>
     </button>;
   }

@@ -11,7 +11,8 @@ import { ItemRefSession, usePeek } from '../peek/context';
 import { hitSegments } from '../../selectors/tree/search';
 
 /** Search words to mark in the text below (the Map's search in place); `current` gives the hits the current-match ring.
- * Hits are spans with a background only, so the text keeps its exact layout. */
+ * Hits are spans with a background only, so the text keeps its exact layout. Code spans and code blocks are marked too:
+ * agent text keeps paths and names in backticks, and a match there must show. */
 export const MarkdownHighlight = createContext<{ readonly terms: readonly string[]; readonly current: boolean } | null>(null);
 function Hits({ text }: { readonly text: string }) {
   const highlight = useContext(MarkdownHighlight);
@@ -101,7 +102,7 @@ export function useProjectFile(reference: string): { readonly open: () => void }
 function FileLink({ text }: { readonly text: string }) {
   const files = useContext(FileRefs), found = useContext(FoundFiles), reference = fileReference(text);
   if (!files || !found || !reference) return null;
-  return <a className="md-link md-file" {...fileLinkProps(fileLinkTitle(reference), () => files.open(found.projectId, text))}><code className="md-code md-ref">{text}</code></a>;
+  return <a className="md-link md-file" {...fileLinkProps(fileLinkTitle(reference), () => files.open(found.projectId, text))}><code className="md-code md-ref"><Hits text={text} /></code></a>;
 }
 
 function Spans({ nodes, plain = false }: { readonly nodes: readonly Inline[]; /** Inside a link label: no links within links. */ readonly plain?: boolean }) {
@@ -112,8 +113,8 @@ function Spans({ nodes, plain = false }: { readonly nodes: readonly Inline[]; /*
     switch (node.t) {
       // The newline after <br> renders as nothing but keeps the text's lines in copied and read text.
       case 'br': return <Fragment key={index}><br />{'\n'}</Fragment>;
-      case 'code': return file(node.text) ? <FileLink key={index} text={node.text} /> : <code key={index} className="md-code">{node.text}</code>;
-      case 'ref': return file(node.text) ? <FileLink key={index} text={node.text} /> : <code key={index} className="md-code md-ref">{node.text}</code>;
+      case 'code': return file(node.text) ? <FileLink key={index} text={node.text} /> : <code key={index} className="md-code"><Hits text={node.text} /></code>;
+      case 'ref': return file(node.text) ? <FileLink key={index} text={node.text} /> : <code key={index} className="md-code md-ref"><Hits text={node.text} /></code>;
       // A path that is no file in the project was only ever words.
       case 'path': return file(node.text) ? <FileLink key={index} text={node.text} /> : <Hits key={index} text={node.text} />;
       case 'strong': return <strong key={index}><Spans nodes={node.children} plain={plain} /></strong>;
@@ -138,7 +139,7 @@ function Blocks({ blocks }: { readonly blocks: readonly Block[] }): ReactNode {
       case 'p': return <p key={index}><Spans nodes={block.children} /></p>;
       // Headings inside a message are emphasis, not document structure.
       case 'h': return <p key={index} className={`md-heading md-h${block.level}`}><strong><Spans nodes={block.children} /></strong></p>;
-      case 'code': return <pre key={index} className="md-pre"><code>{block.text}</code></pre>;
+      case 'code': return <pre key={index} className="md-pre"><code><Hits text={block.text} /></code></pre>;
       case 'quote': return <blockquote key={index}><Blocks blocks={block.children} /></blockquote>;
       case 'hr': return <hr key={index} />;
       case 'list': {

@@ -4,12 +4,17 @@
 
 export const normalizeSearch = (text: string): string => text.normalize('NFKC').toLowerCase();
 
-export type MatchField = 'question' | 'outcome';
-/** One match: an item's question or its outcome holds every word of the search. */
+export type MatchField = 'question' | 'outcome' | 'note';
+/** One match: an item's question, its outcome or its note holds every word of the search. */
 export interface MapMatch { readonly id: string; readonly field: MatchField }
 
 /** The search as normalised words; none while the search is empty. */
 export const searchTerms = (query: string): readonly string[] => normalizeSearch(query).split(/\s+/u).filter(Boolean);
+
+// `[label](target)`: a label without brackets, a target with no whitespace and at most one level of balanced parentheses.
+const MARKDOWN_LINK = /\[([^[\]\n]*)\]\(((?:[^\s()]|\([^\s()]*\))*)\)/gu;
+/** Markdown `text` as it reads, for search: each `[label](target)` becomes its label, so a link target never matches. */
+export const searchableMarkdown = (text: string): string => text.replace(MARKDOWN_LINK, (_link, label: string) => label);
 
 /** Whether `text` holds every word. */
 export function holdsTerms(text: string | null | undefined, terms: readonly string[]): boolean {

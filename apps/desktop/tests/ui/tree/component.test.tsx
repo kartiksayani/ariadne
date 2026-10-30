@@ -901,6 +901,8 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
 
   it.each(['click', 'Enter'] as const)('opens a row at once from the loaded copy while a read is held, with %s', async method => {
     const value = await mount(), { release } = await staleTree(value);
+    // A held read is no write: the tree is not busy and the row opens.
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('false');
     expect(row('3').getAttribute('aria-disabled')).toBeNull();
     vi.useFakeTimers();
     if (method === 'click') fireEvent.click(row('3'));
@@ -1239,8 +1241,8 @@ describe('session tree filters', () => {
   const searchCount = (status: ReturnType<typeof vi.fn>) => (status.mock.calls.at(-1)?.[0] as { count: string } | null)?.count ?? null;
   it('counts the matches themselves, excluding context and forced selections', async () => {
     const status = vi.fn(), { rerender } = await mount({ props: { query: 'receipt', selectedId: '4', onSearchStatus: status } });
-    // "Implement receipt lookup" and "Add the receipt lookup test": not their parent 1, not the selected 4.
-    expect(searchCount(status)).toBe('1 of 2');
+    // "Implement receipt lookup" (question, then its note "Receipt lookup is underway.") and "Add the receipt lookup test": not their parent 1, not the selected 4.
+    expect(searchCount(status)).toBe('1 of 3');
     expect(ids()).toHaveLength(9);
     expect(screen.queryByText(/items matching/)).toBeNull();
     rerender({ query: '' });
@@ -1276,7 +1278,8 @@ describe('session tree filters', () => {
       const session = value.sessions.get(route.session_id)!;
       session.topics[session.items['8']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
     }, props: { query: 'receipt', onSearchStatus: status } });
-    expect(searchCount(status)).toBe('1 of 2');
+    // Item 3 counts twice (its question and its note), 1.1 once.
+    expect(searchCount(status)).toBe('1 of 3');
     viewOf(view.transport).filters.archived = true;
     await act(async () => { await view.navigation.refresh(); });
     expect(searchCount(status)).toBe('No matches');
@@ -1506,7 +1509,9 @@ describe('session tree filters', () => {
     transport.failNext = 'preferences_patch';
     fireEvent.click(chip('Open'));
     await waitFor(() => expect((chip('In progress') as HTMLButtonElement).disabled).toBe(true));
-    expect(row('4').getAttribute('aria-disabled')).toBe('true');
+    // The tree says it is busy (aria-busy); the rows carry no flag of their own.
+    expect(screen.getByRole('tree').getAttribute('aria-busy')).toBe('true');
+    expect(row('4').getAttribute('aria-disabled')).toBeNull();
   });
 });
 

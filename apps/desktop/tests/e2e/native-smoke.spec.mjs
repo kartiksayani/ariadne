@@ -394,7 +394,7 @@ describe('native owner FIFO and real process restoration', () => {
       // port and physical locks from Node before WDIO can run its forced teardown.
       await browser.execute(nonce => { void window.__TAURI_INTERNALS__.invoke('native_e2e_quit', { request: { nonce } }); }, nonce);
       await wait(async () => { try { await stat(join(root, 'quit-request.json')); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }, 'Native Quit did not enter the normal shutdown path');
-      const quit = await proveQuit(root, process.env.ARIADNE_E2E_BINARY, nonce, observed, process.env.ARIADNE_HOME, configuration.bindingId, Number(process.env.ARIADNE_E2E_PORT));
+      const quit = await proveQuit(root, process.env.ARIADNE_E2E_BINARY, nonce, observed, process.env.ARIADNE_HOME, configuration.bindingId, Number(process.env.ARIADNE_E2E_PORT), join(evidence, 'quit-note.json'));
       await json(join(evidence, 'quit.json'), quit);
       // The embedded WebDriver server died with the independently verified app.
       // WDIO must not issue DELETE /session against that disposed server. This is

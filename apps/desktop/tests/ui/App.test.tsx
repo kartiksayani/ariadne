@@ -1113,7 +1113,9 @@ describe('ordinary desktop composition', () => {
     await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
-    expect(parent.getAttribute('aria-disabled')).toBe('true');
+    const tree = screen.getByRole('tree', { name: 'Session items' });
+    expect(tree.getAttribute('aria-busy')).toBe('true');
+    expect(parent.hasAttribute('aria-disabled')).toBe(false);
     expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(true);
     const revealReads = transport.queries.filter(query => query.request.command === 'reveal_item').length;
     fireEvent.click(parent); fireEvent.keyDown(parent, { key: 'Enter' });
@@ -1122,13 +1124,14 @@ describe('ordinary desktop composition', () => {
     await act(async () => { release(); await gate; });
     if (completion === 'reconciled') {
       const reconcile = await screen.findByRole('button', { name: /^(Check|Try) again$/ });
-      expect(parent.getAttribute('aria-disabled')).toBe('true');
+      // An uncertain write keeps the tree busy and the clicks refused until it is reconciled.
+      expect(tree.getAttribute('aria-busy')).toBe('true');
       fireEvent.click(parent); fireEvent.keyDown(parent, { key: 'Enter' });
       expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(revealReads);
       fireEvent.click(reconcile);
     }
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
-    await waitFor(() => expect(parent.hasAttribute('aria-disabled')).toBe(false));
+    await waitFor(() => expect(tree.getAttribute('aria-busy')).toBe('false'));
     fireEvent.keyDown(parent, { key: 'Enter' });
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
