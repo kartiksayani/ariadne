@@ -131,11 +131,13 @@ export function ItemChanges({ service, store, session, item, seen, onOpenAnswer,
   const at = clockTime(currentRecords.at(-1)?.at ?? item.updated_at ?? Date.now());
   const title = unseen ? `Changed since you looked · ${at}` : `Changed at ${at}`;
   // Collapsed, the head says "Changed at 15:02" even when unseen: the diamond and the tint mark the unseen change, and the short text
-  // leaves room for the field names beside "Mark seen". The tooltip keeps the full title.
+  // leaves room for the field names beside "Mark seen". The tooltip keeps the full title, and so does the toggle's accessible name,
+  // with the field names: a screen reader still hears "Changed since you looked · 15:02 · Notes".
   const titleText = unseen && boxOpen ? title : `Changed at ${at}`;
+  const toggleName = fieldNames ? `${title} · ${fieldNames}` : title;
   if (showBox) return <section className="change-box" data-state={unseen ? 'unseen' : 'seen'} data-testid="change-box" aria-label="What changed">
     <div className="change-box-head">
-      <button type="button" className="change-box-toggle" aria-expanded={boxOpen} onClick={toggleBox}>
+      <button type="button" className="change-box-toggle" aria-expanded={boxOpen} aria-label={toggleName} onClick={toggleBox}>
         <i className={boxOpen ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
         <span className="change-box-title" title={title}>{unseen && <i className="change-diamond" aria-hidden="true" />}<span className="change-box-title-text">{titleText}</span></span>
         {fieldNames && <span className="change-box-summary" data-testid="change-box-summary" title={fieldNames}>{` · ${fieldNames}`}</span>}

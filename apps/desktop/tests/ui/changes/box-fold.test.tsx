@@ -116,6 +116,16 @@ describe('the change box starts collapsed', () => {
     expect(within(box()).queryByText(`Changed since you looked · ${at}`)).toBeNull();
   });
 
+  it('names the toggle with the full title and the field names: "Changed since you looked" while unseen, "Changed at" once seen', async () => {
+    const { props } = await changed();
+    const view = render(<ItemDetail {...props} seen={seenState()} />);
+    expect(screen.getByRole('button', { name: `Changed since you looked · ${at} · Notes` })).toBe(boxToggle(box()));
+    expect(boxToggle(box()).textContent).toBe(`Changed at ${at} · Notes`);
+    view.rerender(<ItemDetail {...props} seen={seenState([{ item_id: '1.1', revision: 2 }])} />);
+    expect(screen.getByRole('button', { name: `Changed at ${at} · Notes` })).toBe(boxToggle(box()));
+    expect(screen.getByRole('button', { name: /^Changed (at|since you looked)/ })).toBe(boxToggle(box()));
+  });
+
   it('opening an unseen box shows "Changed since you looked", and closing it goes back to "Changed at"', async () => {
     const { props } = await changed();
     render(<ItemDetail {...props} seen={seenState()} />);
