@@ -151,7 +151,7 @@ describe('the change box starts collapsed', () => {
 });
 
 describe('opening and closing the change box', () => {
-  it('shows the rows on a click, hides them on the next, and a keyboard-activated native button works the same', async () => {
+  it('shows the rows on a click and hides them on the next; the toggle is a native type=button button', async () => {
     const { props } = await changed();
     render(<ItemDetail {...props} seen={seenState([{ item_id: '1.1', revision: 2 }])} />);
     const toggle = boxToggle(box());
