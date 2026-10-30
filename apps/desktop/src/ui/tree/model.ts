@@ -86,6 +86,8 @@ export function outcomeShown(item: Immutable<Item>, later: boolean, replacedBy: 
  */
 export function matchFields(item: Immutable<Item>, later: boolean, replacedBy: Immutable<Item> | null, terms: readonly string[]): MatchField[] {
   const fields: MatchField[] = [];
+  // No search: no Markdown is rewritten on a build (a Map can hold thousands of items).
+  if (!terms.length) return fields;
   if (holdsTerms(item.question, terms)) fields.push('question');
   // Outcome and note are Markdown: a link's target is never drawn, so only its label counts.
   if (outcomeShown(item, later, replacedBy) && holdsTerms(item.outcome && searchableMarkdown(item.outcome), terms)) fields.push('outcome');
