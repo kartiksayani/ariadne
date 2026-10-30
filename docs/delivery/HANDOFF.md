@@ -21,9 +21,9 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `2a7dd5c3` (#185). Alpha.26 released as
-[`v0.1.0-alpha.26`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.26)**
-(tag at `2a7dd5c3`). Alpha.25 is `v0.1.0-alpha.25` (tag at `79942f51`, #183), alpha.24 is
+**Main: `55c95136` (#187). Alpha.27 released as
+[`v0.1.0-alpha.27`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.27)**
+(tag at `55c95136`). Alpha.26 is `v0.1.0-alpha.26` (tag at `2a7dd5c3`, #185), alpha.25 is `v0.1.0-alpha.25` (tag at `79942f51`, #183), alpha.24 is
 `v0.1.0-alpha.24` (tag at `6aa66024`, #181), alpha.23 is
 `v0.1.0-alpha.23` (tag at `37cdfc69`, #179), alpha.22 is
 `v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
@@ -36,6 +36,20 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.27 released
+
+[#187](https://github.com/kartiksayani/ariadne/pull/187), `55c95136`, "Fold and follow": the "Changed at" box starts folded, and the blue thread on the Map is one unbroken line. The release is a pre-release with the asset `ariadne-0.1.0-alpha.27-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.27` on 2026-10-30. Version 0.1.0-alpha.27. What changed for the owner:
+
+- Details: the "Changed at" box starts collapsed as one line, "› Changed at 02:30 · Name, Notes".
+  - Clicking the head shows the before and after rows. The choice is kept per item while the app runs, in Details and in the Conversation view. Nothing is saved.
+  - While collapsed, the text always reads "Changed at". The ◇ and the tint mark an unseen change, the tooltip keeps "Changed since you looked", and the screen-reader name adds ", not seen yet".
+  - "Mark seen" works without opening the box. "Older history (N)" stays under the head.
+  - Opening the box or Older history keeps the clicked head in place. Before, the pane could jump to the end.
+- Map: the blue thread from a topic down to the selected item is one unbroken line, in light and dark.
+  - There is no longer a 2px notch at each row boundary, because the halo is side-only.
+  - The elbow turns into the row in blue. Before, its halo painted over the blue, since alpha.20 ([#171](https://github.com/kartiksayani/ariadne/pull/171)).
+  - Pixel probes in the `map-thread` design test pin both.
 
 ## Alpha.26 released
 
@@ -241,9 +255,11 @@ built.
 
 ## Next steps
 
-Alpha.26 made Map search find an item's notes, stopped a click redrawing every row twice, added the CLI warning for a multi-line `question`, and fixed the native Quit note check. It closed the alpha.25 follow-ups on search, the warning, the wording, `sameValue`, the extra redraw and the Quit note flake. Item 1 is the follow-ups carried to the next release (alpha.27); the owner picks the order.
+Alpha.27 folded the "Changed at" box into one line that opens on a click, and made the Map's blue thread one unbroken line with a blue elbow. It added two follow-ups of its own and kept the alpha.26 ones. Item 1 is the follow-ups carried to the next release (alpha.28); the owner picks the order.
 
 1. **Follow-ups carried to the next release** (none blocks it).
+   - After the owner opens the change box (or Older history), the clicked head is held in place. Until the owner scrolls or clicks elsewhere, a new message at the end of Details does not auto-scroll to it.
+   - `tests/e2e/tree-layout/map-still.spec.mts` "Details keeps the change box…" (around :999) measures the unseen state right after the row press, and the real 1 s seen-dwell can win on a slow runner. The new collapsed-head design check holds the dwell by reporting the window as unfocused (`page.addInitScript`); `map-still` could use the same seam.
    - Rows with an Ack slot (`ackDisabled`) and topic rows (`AckAll` `disabled`) still redraw on a view write, because those props disable real buttons.
    - Details lights note hits but shows no current-match ring. The larger Conversation view does not light hits.
    - A word only in a link URL no longer counts at all.
@@ -267,6 +283,7 @@ Alpha.26 made Map search find an item's notes, stopped a click redrawing every r
   (skill text, plugin files) also needs `cargo test --workspace` before push. Alpha.25's
   first CI run failed on `setup.rs`'s packaged-skill size cap for that reason.
 - A review fix landed after the full local gate and added work to every Map build (Markdown rewriting with no search); it was fixed in `4df1e331`. After a late fix that touches the tree model, run the 2,000-item design specs (`landing`, `map-still`) once before pushing.
+- A design check that compares `scrollWidth > clientWidth` misses a sub-pixel ellipsis, because both are rounded. To tell whether text is cut, compare a `Range` over the text with the element's content box.
 - Fix rounds, moved UI code, saved formats, CI parity and flakes follow the
   ORCHESTRATOR rules under "Delivery feedback rules" ([ORCHESTRATOR](../../ORCHESTRATOR.md)).
 
