@@ -8,7 +8,7 @@ import type { BindingSummary, Input, Item, ItemOption, ItemStatus, PresenceObser
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import type { SupervisorHealth } from '../../data/service';
-import { hitSegments, holdsTerms, searchTerms, type MatchField, type Segment } from '../../selectors/tree/search';
+import { hitSegments, holdsTerms, searchableMarkdown, searchTerms, type MatchField, type Segment } from '../../selectors/tree/search';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentReceived, stoppedAttempt, stuckInput } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
@@ -87,8 +87,9 @@ export function outcomeShown(item: Immutable<Item>, later: boolean, replacedBy: 
 export function matchFields(item: Immutable<Item>, later: boolean, replacedBy: Immutable<Item> | null, terms: readonly string[]): MatchField[] {
   const fields: MatchField[] = [];
   if (holdsTerms(item.question, terms)) fields.push('question');
-  if (outcomeShown(item, later, replacedBy) && holdsTerms(item.outcome, terms)) fields.push('outcome');
-  if (holdsTerms(item.note, terms)) fields.push('note');
+  // Outcome and note are Markdown: a link's target is never drawn, so only its label counts.
+  if (outcomeShown(item, later, replacedBy) && holdsTerms(item.outcome && searchableMarkdown(item.outcome), terms)) fields.push('outcome');
+  if (holdsTerms(item.note && searchableMarkdown(item.note), terms)) fields.push('note');
   return fields;
 }
 

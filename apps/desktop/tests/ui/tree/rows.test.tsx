@@ -8,6 +8,7 @@ import { sentenceRows } from './scope';
 import { matchFields, topicCounts } from '../../../src/ui/tree/model';
 import { branchSlot } from '../../../src/ui/tree/branch';
 import { chipCounts, savedChips, toggleSavedChip, type LocalChip } from '../../../src/selectors/tree/filter';
+import { searchableMarkdown } from '../../../src/selectors/tree/search';
 import { shimTree } from './shimTree';
 import { closedSessionQuestion, waitingOnOwner } from '../../../src/selectors/sessionClosed';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -170,6 +171,19 @@ describe('canonical sentence tree projection', () => {
     const item = immutable({ ...base, status: 'open' as const, note: 'The gateway keeps a spare copy.', outcome: 'The gateway is final.' });
     expect(matchFields(item, true, null, ['gateway'])).toEqual(['note']);
     expect(matchFields(item, false, null, ['gateway'])).toEqual(['outcome', 'note']);
+  });
+  it('matches the label of a Markdown link in a note or an outcome, never its target', () => {
+    const session = seed(), base = session.items['1']!;
+    const item = (outcome: string, note: string) => immutable({ ...base, status: 'done' as const, question: 'Q?', outcome, note });
+    const target = item('See [the cap](item:3.2).', 'Read [the PR](https://example.test/pull/7) and [docs](https://example.test/a_(b)).');
+    expect(matchFields(target, false, null, ['item'])).toEqual([]);
+    expect(matchFields(target, false, null, ['example'])).toEqual([]);
+    expect(matchFields(target, false, null, ['pull'])).toEqual([]);
+    expect(matchFields(target, false, null, ['3.2'])).toEqual([]);
+    expect(matchFields(target, false, null, ['cap'])).toEqual(['outcome']);
+    expect(matchFields(target, false, null, ['the', 'pr'])).toEqual(['note']);
+    expect(matchFields(target, false, null, ['docs'])).toEqual(['note']);
+    expect(searchableMarkdown('[a](b) and [c](d e) and plain')).toBe('a and [c](d e) and plain');
   });
   it('reports the fields in Map order: question, outcome, note', () => {
     const session = seed(), base = session.items['1']!;
