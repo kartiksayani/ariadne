@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-29
+# Ariadne handoff — 2026-10-30
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,9 +21,10 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `79942f51` (#183). Alpha.25 released as
-[`v0.1.0-alpha.25`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.25)**
-(tag at `79942f51`). Alpha.24 is `v0.1.0-alpha.24` (tag at `6aa66024`, #181), alpha.23 is
+**Main: `2a7dd5c3` (#185). Alpha.26 released as
+[`v0.1.0-alpha.26`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.26)**
+(tag at `2a7dd5c3`). Alpha.25 is `v0.1.0-alpha.25` (tag at `79942f51`, #183), alpha.24 is
+`v0.1.0-alpha.24` (tag at `6aa66024`, #181), alpha.23 is
 `v0.1.0-alpha.23` (tag at `37cdfc69`, #179), alpha.22 is
 `v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
 `v0.1.0-alpha.21` (tag at `8ed87b66`, #173), alpha.20 is
@@ -35,6 +36,28 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.26 released
+
+[#185](https://github.com/kartiksayani/ariadne/pull/185), `2a7dd5c3`, "Find it in the notes": Map search now finds words in an item's notes. The release is a pre-release with the asset `ariadne-0.1.0-alpha.26-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.26` on 2026-10-30. What changed for the owner:
+
+- Search: Map search also matches an item's notes. The search box says "Search questions, outcomes and notes".
+  - An In progress row that shows its note lights the hit there. Any other matching row shows an "In notes" tag, ringed when it is the current match.
+  - Details lights the hit in Notes.
+  - Words inside `code` light up, in outcome previews too.
+  - A link's target never matches, only its label.
+- Map: a click no longer redraws every row twice. The row `disabled` prop was removed; the tree sets `aria-busy` while it loads or while a view write is pending. `sameValue` now compares only arrays and plain objects, member by member.
+- Agents:
+  - `ariadne apply` warns when a `question` spans more than one line, and saves it unchanged.
+  - `review.md` puts proposed comment text in `note`.
+  - The fields table's `note` row names the question layers, and rule 1 names questions.
+  - The core skill is 10,671 of 10,900 bytes (Claude copy).
+- The native Quit note check:
+  - It has no note-timing assertion, following the 2026-10-06 ruling.
+  - It retries a half-read dialog and transient AE errors (-1719, -1728, -1712, timeout).
+  - Its 30 s exit clock starts after the note is pressed.
+  - It reports evidence on failure.
+- Two first occurrences of CI flakes, and P11.14 closed (details under Known flakes).
 
 ## Alpha.25 released
 
@@ -218,23 +241,19 @@ built.
 
 ## Next steps
 
-Alpha.25 gave every item a body in Details, the answer dock and the change views, and rewrote the skill's field rules. No alpha.24 follow-up closed, so all stay open. Item 1 is the follow-ups carried to the next release (alpha.26); the owner picks the order.
+Alpha.26 made Map search find an item's notes, stopped a click redrawing every row twice, added the CLI warning for a multi-line `question`, and fixed the native Quit note check. It closed the alpha.25 follow-ups on search, the warning, the wording, `sameValue`, the extra redraw and the Quit note flake. Item 1 is the follow-ups carried to the next release (alpha.27); the owner picks the order.
 
 1. **Follow-ups carried to the next release** (none blocks it).
-   - Map search does not match `note`: `ui/tree/model.ts` matches only `question` and a shown `outcome`.
-   - A CLI warning for a multi-line `question`.
+   - Rows with an Ack slot (`ackDisabled`) and topic rows (`AckAll` `disabled`) still redraw on a view write, because those props disable real buttons.
+   - Details lights note hits but shows no current-match ring. The larger Conversation view does not light hits.
+   - A word only in a link URL no longer counts at all.
+   - The core skill is 10,671 of 10,900 bytes, so a large skill addition needs trimming.
    - Owner check: in the installed (WebKit) app, an item chip inside a struck before value in the "Changed at" box should be struck. It was verified only in Chromium.
-   - Minor wording from the review: `integrations/rules/review.md` says "Put proposed text in `outcome`", and the fields table's `note` row does not name the question layers.
-   - The core skill is 10,820 of 10,900 bytes, so the next skill addition needs trimming.
    - Existing items with long `question` titles stay until the owner asks an agent to tidy them.
-   - Native "Quit note observation" failed once locally and passed on rerun: a second occurrence (alpha.23, alpha.24), so investigate before the next merge (see Known flakes).
    - Owner checks for alpha.24: the two-finger swipe direction and feel on a real trackpad, the width of the dashed `n` box on depth-1 items, and its colour in the light theme.
-   - `ui/tree/model.ts` `sameValue` treats Sets, Maps and Dates as equal. This is latent, since no row field holds one today. Recurse only into arrays and plain objects.
    - Owner hardware check for F4: put the window on the external display, unplug it, wait more than 2 s, quit, replug and relaunch; it should open on the external display at the owner's size. Also drag the window between a 2x and a 1x display and relaunch.
    - After install, check whether `/reload-plugins` alone loads the new plugin and whether it fires `session.end`. Pending the owner's report.
-   - F6e residual: `disabled` flips on all rows during a view write, so a click causes two full-row redraws.
-2. Follow-up from #162, a small task: P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
-3. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
+2. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
 
 ## Process lessons
 
@@ -247,6 +266,7 @@ Alpha.25 gave every item a body in Details, the answer dock and the change views
 - The local gate's coverage stage runs `--ts-only`, so a change to installed resources
   (skill text, plugin files) also needs `cargo test --workspace` before push. Alpha.25's
   first CI run failed on `setup.rs`'s packaged-skill size cap for that reason.
+- A review fix landed after the full local gate and added work to every Map build (Markdown rewriting with no search); it was fixed in `4df1e331`. After a late fix that touches the tree model, run the 2,000-item design specs (`landing`, `map-still`) once before pushing.
 - Fix rounds, moved UI code, saved formats, CI parity and flakes follow the
   ORCHESTRATOR rules under "Delivery feedback rules" ([ORCHESTRATOR](../../ORCHESTRATOR.md)).
 
@@ -260,6 +280,14 @@ Refresh this page, tasks.json and the roadmap chart using
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
 
+- **CI design suite, a Playwright worker out of memory.** First occurrence (alpha.26, 2026-10-30); not fixed.
+  - Evidence: quality run 40982484493 on `e592c0e3`. Node hit its ~2 GB heap after about 10.7 minutes in one worker. “final 10.1 narrow: … emptying the bin” timed out, and a `map-still.spec.mts:900` “Show more then Show less” worker exited with SIGABRT. Both pass locally.
+  - Suspected cause: worker memory growth over a long run on the CI Mac.
+
+- **`tests/e2e/tree-layout/landing.spec.mts:184`, “a long way jumps all but the last screen, then eases over it”.** First occurrence (alpha.26, 2026-10-30); not fixed.
+  - Evidence: it hit the 240 s test timeout in the CI rerun of the same run (40982484493). The suite took 35.5 min, against 31.2 min in alpha.25's green run. The spec takes 46.5 s locally on main and 40.6 s on alpha.26.
+  - Suspected cause: a slow CI runner on a 2,000-item world.
+
 - **`tests/ui/app/hide-moves.test.tsx`, “row 23: hiding the focused root ends Focus in the same write and selects the next root” and “row 23: Undo of a hide that ended Focus puts the Focus back…”.** First occurrence (alpha.25, 2026-10-29); not fixed.
   - Evidence: local full coverage run under load; the write count was 2 vs 1 and 3 vs 2. The file passed 29/29 twice alone on the same head.
   - Suspected cause: a slow run splits one preferences write in two, so the assertion counts the split write.
@@ -272,10 +300,11 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - Evidence: CI static job; `settled.length` was 2, expected more than 2 (line 118). The spec passed 42/42 locally (all tests ×3) and in the CI rerun.
   - Suspected cause: CI frame timing leaves only two frames after the settle window.
 
-- **Native Quit note observation deadline (`scripts/native-quit-note.mjs:145`, the delivery phase).** Second occurrence; not fixed. Investigate before the next merge.
-  - First failed: local alpha.23 integration run, 2026-10-22, under machine load. A rerun passed 10/10 blocks and CI native passed.
-  - Second occurrence: a local alpha.24 run failed once and passed on rerun.
-  - Suspected cause: the System Events accessibility inspect is slow under load. No alpha.23 change touches quit.
+- **Native Quit note entry (`scripts/native-quit-note.mjs`, the delivery phase).** Fixed in alpha.26 (#185).
+  - First failed: local alpha.23 integration run, 2026-10-22, under machine load, at the 15 s note observation deadline (`:145`). A rerun passed 10/10 blocks and CI native passed.
+  - Second occurrence: a local alpha.24 run failed once and passed on rerun. This time the failure was an osascript `Invalid index. (-1719)` from the inspect (around `:137`), not the deadline.
+  - Cause: the System Events inspect read a half-built dialog and threw on transient AE errors, and the 30 s exit clock started before the note was pressed.
+  - Fix: the check retries a half-read dialog and the transient errors (-1719, -1728, -1712, timeout), starts the exit clock after the note is pressed, reports evidence on failure, and has no note-timing assertion (2026-10-06 ruling).
 
 - **Native tree journey, row click refused with “still loading this session's latest changes” (`apps/desktop/tests/e2e/tree.spec.mjs`, `selectRow`).** Fixed in alpha.23 (#179).
   - First failed: alpha.22 integration CI at 1024×677, 2 of 3 runs. Never on main at 1300 wide. Alpha.22 added a test-side retry in `selectRow`.
@@ -297,6 +326,7 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
 - **`tests/integrations/claude/register.test.js`, "admits claims again after an owner command is refused".** Fixed in P11.26.
   - First failed: local #162 full coverage run, 2026-10-15. Line 780 waited for 2 matching calls and saw 1. Task P11.14.
   - Evidence: the file passed 3 times in a row on its own. #162 does not touch the Claude integration.
+  - P11.14 closed in alpha.26: no second occurrence (3 of 3 passes on 2026-10-30, none in the alpha.24 or alpha.25 gates).
   - Cause: the `vi.waitFor` default limit is 1 s. Fix: the `claude-mod` project's `setup-timeouts.js` makes the default 10 s (a caller's own limit still wins) and its test limit 30 s. A wait returns the moment its callback passes, so only a wait that cannot succeed takes longer.
 
 - **`tests/e2e/tree-layout/tree-layout.spec.mts:442`, "Map look: continuous rails, clamp threshold, reserved selection tags and clear reveals" (light theme only).** Fixed in P11.26 (cause not reproduced locally).

@@ -110,10 +110,12 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-29T00:00:00Z",
-    "headline": "Alpha.25 released (v0.1.0-alpha.25, #183): every item has a body, with notes shown in Details for every status, markdown in the answer dock and in the change views, Notes and Progress labels, and a skill that keeps the question to one line and puts the description in the notes. It follows alpha.24 (#181, hide moves on), alpha.23 (#179, nothing blocks you) and alpha.22 (#177, fixes and fit).",
+    "updated_at": "2026-10-30T00:00:00Z",
+    "headline": "Alpha.26 released (v0.1.0-alpha.26, #185): Map search finds an item's notes, with the hit lit in the row and in Details, and words inside code light up. A click no longer redraws every row twice, ariadne apply warns about a multi-line question, and the native Quit note check no longer fails under load. It follows alpha.25 (#183, every item has a body), alpha.24 (#181, hide moves on) and alpha.23 (#179, nothing blocks you).",
     "notes": [
-      "Next: the follow-ups carried from alpha.25 are in HANDOFF (Next steps, item 1): Map search not matching note, a CLI warning for a multi-line question, the owner check for a struck item chip in the Changed at box in the installed app, two minor wording fixes from the review, the core skill being 10,820 of 10,900 bytes, the native Quit note observation flake (second occurrence), the owner checks for the swipe and the dashed n box, the tree model sameValue treating Sets, Maps and Dates as equal, the owner hardware check for the saved window size, the /reload-plugins check, and the extra full-row redraw on a click.",
+      "Next: the follow-ups carried from alpha.26 are in HANDOFF (Next steps, item 1): rows with an Ack slot and topic rows still redraw on a view write, Details shows note hits without a current-match ring, a word only in a link URL no longer counts, the owner check for a struck item chip in the Changed at box in the installed app, existing long question titles, the owner checks for the swipe and the dashed n box, the owner hardware check for the saved window size, and the /reload-plugins check.",
+      "Alpha.26 closed Map search not matching note, the CLI warning for a multi-line question, the review.md and note-row wording, the sameValue follow-up, the extra full-row redraw on a click (F6e), the native Quit note flake and P11.14 (no second occurrence). It recorded two first-occurrence CI flakes (a design-suite Playwright worker out of memory, and the landing.spec.mts:184 timeout); see Known flakes in HANDOFF.",
+      "Alpha.25 recorded three first-occurrence flakes (hide-moves row 23 write counts, the native filter target, and the details-keys slow-frames spec); see Known flakes in HANDOFF.",
       "Alpha.25 recorded three first-occurrence flakes (hide-moves row 23 write counts, the native filter target, and the details-keys slow-frames spec); see Known flakes in HANDOFF.",
       "Alpha.24 fixed the alpha.23 follow-up about the keyboard focus ring hiding after . or Enter.",
       "Alpha.23 finished P11.12 (Reveal selected opens Details in both views; the owner chose this on 2026-10-22). It follows alpha.22, which finished the alpha.18 follow-ups (P11.17–P11.21, P11.24, P11.25, P11.27), the #162 Graph follow-ups (P11.10, P11.11, P11.13), the recovery edge cases (P11.7) and the previous-release read test (P11.8). Still open from #162: P11.14 (flake watch).",
@@ -3207,7 +3209,17 @@
       "checks": [
         "Watch only until a second failure; then follow the Flakes rule in ORCHESTRATOR."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/185"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          185
+        ],
+        "note": "Closed in alpha.26: fixed by P11.26; no second occurrence."
+      }
     },
     {
       "id": "P11.15",
