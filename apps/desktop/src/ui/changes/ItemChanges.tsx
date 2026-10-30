@@ -10,6 +10,7 @@ import { ChangeValue, Compare, isBlockValue, labelFor } from './Compare';
 import { Markdown } from '../shared/MarkdownText';
 import { clockTime } from './clock';
 import { causeLabel } from './model';
+import { useBoxOpen } from './boxOpen';
 
 /** Read all bounded change pages without repeating the current item or losing large before-values. */
 export async function loadItemChanges(service: RendererService, route: SessionRef, revision: number, itemId: string, signal: AbortSignal): Promise<Page<ItemChangeRecord>> {
@@ -41,7 +42,7 @@ function ChangeRows({ session, item, records, onOpenAnswer }: { readonly session
   const sourceItem = answer?.item_id ?? input?.target.item_id;
   const sourceMessage = answer?.message_id ?? input?.message_id;
   const reasonLabel = row.fields.some(field => field.field === 'why') ? 'Agent’s reason' : 'Why';
-  return <div className="change-rows">
+  return <div className="change-rows" data-testid="change-rows">
     {row.fields.map(field => {
       // A multi-line value stacks: the struck before as a block, then → and the after as a block. A one-line value keeps its line.
       const stacked = isBlockValue(field.before, field.field) || isBlockValue(field.current, field.field);
@@ -93,8 +94,9 @@ function ChangeEventExtras({ session, item, record, onOpenAnswer }: { readonly s
 
 /**
  * The change box (SPEC 6.7) and the history. The box shows for an item with a recorded change: the changes unseen when Details
- * opened, or the latest one for an item already seen. The 1 s dwell or Mark seen changes only its head ("Changed since you looked
- * · 20:51" becomes "Changed at 20:51"), so the explanation stays for this visit. With no box but a history, "HISTORY N events" lists it.
+ * opened, or the latest one for an item already seen. The 1 s dwell or Mark seen changes only its head (an open box's "Changed since
+ * you looked · 20:51" becomes "Changed at 20:51"), so the explanation stays for this visit. The box starts collapsed to its head, one line
+ * "Changed at 20:51 · Notes" (the diamond and tint mark an unseen change) naming the changed fields; opening it shows the rows, and the choice is kept per item for the running app (`boxOpen.ts`). With no box but a history, "HISTORY N events" lists it.
  * `part` splits the two for the body's layout (SPEC 5.3, 9.11): the box sits under the "why", the bare history after the conversation.
  */
 export function ItemChanges({ service, store, session, item, seen, onOpenAnswer, onMarkSeen, part = 'both' }: { readonly service: RendererService; readonly store: SessionStore;
@@ -121,17 +123,27 @@ export function ItemChanges({ service, store, session, item, seen, onOpenAnswer,
   const known = history.data?.items ?? item.changes ?? [];
   const older = (showBox ? known.filter(record => !currentRecords.some(current => current.revision === record.revision)) : known).slice().reverse();
   const toggle = () => setAsked(!historyOpen);
+  const [boxOpen, toggleBox] = useBoxOpen(session.project_id, session.id, item.id);
+  // The collapsed head names what changed: the box's own fields, once each, labelled as the rows are ("Progress" or "Notes").
+  const fieldNames = useMemo(() => showBox ? [...new Set(changeRow(session, item, currentRecords).fields.map(field => labelFor(field.field, item)))].join(', ') : '', [showBox, session, item, currentRecords]);
   const timeline = historyOpen && <Timeline session={session} item={item} records={older} loading={history.loading} error={history.error} retry={history.retry} onOpenAnswer={onOpenAnswer} />;
   if (!drawn) return null;
   const at = clockTime(currentRecords.at(-1)?.at ?? item.updated_at ?? Date.now());
   const title = unseen ? `Changed since you looked · ${at}` : `Changed at ${at}`;
+  // Collapsed, the head says "Changed at 15:02" even when unseen: the diamond and the tint mark the unseen change, and the short text
+  // leaves room for the field names beside "Mark seen". The tooltip keeps the full title.
+  const titleText = unseen && boxOpen ? title : `Changed at ${at}`;
   if (showBox) return <section className="change-box" data-state={unseen ? 'unseen' : 'seen'} data-testid="change-box" aria-label="What changed">
     <div className="change-box-head">
-      <span className="change-box-title" title={title}>{unseen && <i className="change-diamond" aria-hidden="true" />}<span className="change-box-title-text">{title}</span></span>
+      <button type="button" className="change-box-toggle" aria-expanded={boxOpen} onClick={toggleBox}>
+        <i className={boxOpen ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
+        <span className="change-box-title" title={title}>{unseen && <i className="change-diamond" aria-hidden="true" />}<span className="change-box-title-text">{titleText}</span></span>
+        {fieldNames && <span className="change-box-summary" data-testid="change-box-summary" title={fieldNames}>{` · ${fieldNames}`}</span>}
+      </button>
       {unseen && onMarkSeen && <button type="button" className="btn btn-secondary change-box-mark" onClick={() => onMarkSeen(item.id, item.revision)}>
         <i className="ph ph-check" aria-hidden="true" />Mark seen</button>}
     </div>
-    <ChangeRows session={session} item={item} records={currentRecords} onOpenAnswer={onOpenAnswer} />
+    {boxOpen && <ChangeRows session={session} item={item} records={currentRecords} onOpenAnswer={onOpenAnswer} />}
     {older.length > 0 || historyOpen ? <button type="button" className="change-box-older" aria-expanded={historyOpen} onClick={toggle}>
       <i className={historyOpen ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />Older history ({older.length})</button> : null}
     {timeline}

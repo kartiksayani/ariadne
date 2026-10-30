@@ -136,6 +136,38 @@
   min-height: 26px;
 }
 
+/* The head's words are one button: caret, title and the changed field names. Mark seen stays beside it, never inside. It keeps the
+   global focus ring, like the box's other buttons. */
+.change-box-toggle {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.change-box-toggle > .ph { flex: none; }
+
+/* The field names are one quiet line after the title; they give way first, so the title keeps its words until they are gone. */
+.change-box-summary {
+  flex: 0 999 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 400;
+  color: var(--a-label);
+}
+
 .change-box-title {
   display: flex;
   align-items: center;
