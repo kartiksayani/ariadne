@@ -322,6 +322,39 @@ for (const theme of ['dark', 'light'] as const) {
   });
 
   /**
+   * Alpha.27: opening the change box (or Older history) at the end of a short Details grows the pane. The pane sticks to its end when
+   * the owner is within 80px of it, which used to carry the head the owner just clicked off the top. The clicked head keeps its place.
+   */
+  test(`Opening the change box or Older history at the end of a short Details keeps the clicked head in place (${theme})`, async ({ page, origin }) => {
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+      window.addEventListener('focus', event => event.stopImmediatePropagation(), true);
+    });
+    await openApp(page, origin, { ...frameSpec('changes-notes'), theme, height: 930 });
+    const pane = page.getByTestId('detail-body'), box = pane.getByTestId('change-box');
+    await box.getByRole('button', { name: 'Mark seen', exact: true }).click();
+    await expect(box).toHaveAttribute('data-state', 'seen');
+    const toggle = box.locator('.change-box-toggle'), older = box.locator('.change-box-older');
+    // Short Details: the pane scrolls only a little, so the owner at its end is inside the 80px that sticks to it.
+    const end = () => pane.evaluate(element => { element.scrollTop = element.scrollHeight; return element.scrollHeight - element.clientHeight; });
+    const topOf = (target: Locator) => target.evaluate(element => element.getBoundingClientRect().top);
+    const hold = async (button: Locator, shown: Locator) => {
+      expect(await end(), 'the pane scrolls, so there is an end to stick to').toBeGreaterThan(0);
+      await expect.poll(() => pane.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(80);
+      const before = await topOf(button);
+      expect(before, 'the head is inside the pane before the click, so the click does not scroll').toBeGreaterThan(await topOf(pane));
+      await button.click();
+      await expect(shown).toBeVisible();
+      await settle(page);
+      expect(Math.abs(await topOf(button) - before), 'the clicked head keeps its screen position (px)').toBeLessThanOrEqual(1);
+    };
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await hold(toggle, box.getByTestId('change-rows'));
+    await expect(older).toHaveAttribute('aria-expanded', 'false');
+    await hold(older, box.getByTestId('change-timeline'));
+  });
+
+  /**
    * Alpha.25: an item's `note` is its body and the change comparisons draw prose as Markdown. jsdom has no stylesheets, so the
    * pixels are checked here: Notes above Why, block label, full text colour, list markers kept, no doubled breaks, the before struck
    * and muted in the box and not struck in the popover, the timeline's rule on its own list only.
