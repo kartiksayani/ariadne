@@ -45,6 +45,17 @@
   pointer-events: none;
 }
 
+/* The focus box alone is lifted above the row's box slices and the selected box (all z-index -1, and the row isolates): its place
+   is the item's own padding, so the slices would otherwise paint over its left and right edges. The `n` box stays at -1 above, so
+   its arrival pulse (a background) cannot cover the row's text. The ring is a border with a clear inside, so it covers no text; the
+   chevron, the status icon and the hover bar paint above it, and on a focused ancestor of the selected item the thread paints over it.
+   The selectors are the shared block's own, in its order, so they cannot come before it without losing to its z-index. */
+/* stylelint-disable-next-line no-descending-specificity */
+.tree-item:focus-visible:not([aria-selected="true"], [data-next-unseen])::before,
+.tree-column[data-kbd] .tree-item:focus:not([aria-selected="true"], [data-next-unseen])::before {
+  z-index: 0;
+}
+
 .tree-heading {
   display: flex;
   align-items: flex-start;

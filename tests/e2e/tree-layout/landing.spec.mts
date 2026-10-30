@@ -7,6 +7,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
+import { closeDetails } from './closeDetails';
 
 type Motion = 'reduce' | 'no-preference';
 const row = (page: Page, id: string) => page.locator(`[role="treeitem"][data-item-id="${id}"]`);
@@ -570,6 +571,174 @@ for (const theme of ['light', 'dark'] as const) test(`the focus and n boxes sit 
   await expect(row(page, '11')).toHaveAttribute('data-next-unseen', 'true');
   sameBox(await boxOf(page, '11', '::after'));
   expect((await boxOf(page, '11', 'selected'))!.line).not.toContain('1.5px');
+}));
+
+/**
+ * Paint, not style (alpha.28): the computed ::before can be the dotted ring while a box slice of the row paints over it. So one
+ * screenshot of the row before the key (the ground) and one after are read pixel for pixel on each edge of the box, in a band 3px
+ * across the edge's centre line and 8px along it (a dotted 1.5px line at DPR 1 is antialiased round dots with gaps, and no pixel of it
+ * is whole). The expected colour of a pixel is `mix` x the ink + (1 - mix) x that pixel's ground. A dotted edge shows when some pixel of
+ * its band moved from its ground value toward that colour by a third of the way or more (the same fraction on every channel); an
+ * opaque dashed edge (`full`) when some pixel moved to within 24 per channel of it.
+ * The top edge is read left of the hover bar, which covers the row's top 5px around its centre once the row is focused.
+ */
+type Edge = 'left' | 'right' | 'top' | 'bottom';
+interface EdgeReading { readonly edge: Edge; readonly hits: number; readonly of: number; readonly groundFar: boolean; readonly best: readonly number[]; readonly want: readonly number[]; readonly cover: number }
+const shot = async (page: Page) => (await page.screenshot()).toString('base64');
+const readEdges = (page: Page, args: { ground: string; after: string; id: string; part: '::before' | '::after'; ink: string; mix: number; full: boolean }) => page.evaluate(async ({ ground, after, id, part, ink, mix, full }) => {
+  const element = document.querySelector(`[role="treeitem"][data-item-id="${id}"]`)!;
+  const rect = element.getBoundingClientRect(), style = getComputedStyle(element, part);
+  const left = rect.left + parseFloat(style.left), top = rect.top + parseFloat(style.top);
+  const right = rect.right - parseFloat(style.right), bottom = rect.bottom - parseFloat(style.bottom);
+  // The hover bar is the row's one child that carries a side (above, below or inside).
+  const bar = element.querySelector('[data-side]')!.getBoundingClientRect();
+  const colour = (css: string) => {
+    const swatch = document.createElement('canvas'); swatch.width = swatch.height = 1;
+    const context = swatch.getContext('2d')!; context.fillStyle = css; context.fillRect(0, 0, 1, 1);
+    return [...context.getImageData(0, 0, 1, 1).data];
+  };
+  let source = ink;
+  if (ink === 'accent') { const swatch = document.createElement('span'); swatch.style.color = 'var(--color-accent)'; element.append(swatch); source = getComputedStyle(swatch).color; swatch.remove(); }
+  const wanted = colour(source);
+  const decode = async (base64: string) => {
+    const image = new Image();
+    await new Promise<void>((done, fail) => { image.onload = () => done(); image.onerror = fail; image.src = `data:image/png;base64,${base64}`; });
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0);
+    return context;
+  };
+  const [before, now] = [await decode(ground), await decode(after)];
+  const pixel = (context: CanvasRenderingContext2D, x: number, y: number) => [...context.getImageData(x, y, 1, 1).data];
+  // The run of the straight sides lies between the corner radii (7.5px).
+  const runX = [left + 7.5, right - 7.5], runY = [top + 7.5, bottom - 7.5];
+  const topEnd = Math.min(runX[0]! + (runX[1]! - runX[0]!) / 4, bar.left - 2);
+  const bands: Record<Edge, { xs: number[]; ys: number[] }> = {
+    left: { xs: [-1, 0, 1].map(step => Math.floor(left + 0.75) + step), ys: Array.from({ length: 8 }, (_, at) => Math.floor((runY[0]! + runY[1]!) / 2) - 4 + at) },
+    right: { xs: [-1, 0, 1].map(step => Math.floor(right - 0.75) + step), ys: Array.from({ length: 8 }, (_, at) => Math.floor((runY[0]! + runY[1]!) / 2) - 4 + at) },
+    top: { xs: Array.from({ length: 8 }, (_, at) => Math.floor((runX[0]! + topEnd) / 2) - 4 + at), ys: [-1, 0, 1].map(step => Math.floor(top + 0.75) + step) },
+    bottom: { xs: Array.from({ length: 8 }, (_, at) => Math.floor((runX[0]! + runX[1]!) / 2) - 4 + at), ys: [-1, 0, 1].map(step => Math.floor(bottom - 0.75) + step) },
+  };
+  const readings: EdgeReading[] = [];
+  for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
+    let hits = 0, of = 0, groundFar = false, best: number[] = [], bestScore = -Infinity, bestWant: number[] = [], bestCover = 0;
+    for (const x of bands[edge].xs) for (const y of bands[edge].ys) {
+      const was = pixel(before, x, y), got = pixel(now, x, y);
+      const expected = [0, 1, 2].map(channel => mix * wanted[channel]! + (1 - mix) * was[channel]!);
+      const away = (value: number[]) => Math.max(...[0, 1, 2].map(channel => Math.abs(value[channel]! - expected[channel]!)));
+      // How far the pixel moved from its ground toward the expected colour, per channel that has room to move (0 = still the ground, 1 = all the way).
+      const covers = [0, 1, 2].filter(channel => Math.abs(was[channel]! - expected[channel]!) > 24).map(channel => (was[channel]! - got[channel]!) / (was[channel]! - expected[channel]!));
+      const cover = covers.length ? covers.reduce((sum, value) => sum + value, 0) / covers.length : 0;
+      const along = covers.length > 0 && Math.max(...covers) - Math.min(...covers) <= 0.15;
+      of++;
+      if (away(was) > 24) groundFar = true;
+      // A full line (an opaque colour) is within 24 of the colour; a dotted 1.5px line is antialiased round dots, none of them whole pixels.
+      const painted = full ? away(got) <= 24 && away(was) > 24 : along && cover >= 0.35 && cover <= 1.2;
+      if (painted) hits++;
+      const score = full ? -away(got) : along ? cover : -1;
+      if (score > bestScore) { bestScore = score; best = got.slice(0, 3); bestWant = expected.map(Math.round); bestCover = cover; }
+    }
+    readings.push({ edge, hits, of, groundFar, best, want: bestWant, cover: Math.round(bestCover * 100) / 100 });
+  }
+  return readings;
+}, args);
+const describeEdges = (readings: readonly EdgeReading[]) => readings.map(read => `${read.edge}: ${read.hits}/${read.of} band pixels painted (best [${read.best}] = ${read.cover} of the way to [${read.want}])`).join('; ');
+/** Every edge's band must differ meaningfully from its colour, or the check could not tell a painted edge from the ground. */
+function showsAllEdges(readings: readonly EdgeReading[], what: string) {
+  console.log(`${what}: ${describeEdges(readings)}`);
+  for (const read of readings) expect.soft(read.groundFar, `${what}, ${read.edge}: the ground is not already the ring's colour`).toBe(true);
+  for (const read of readings) expect.soft(read.hits, `${what}, ${read.edge} edge is painted (${describeEdges(readings)})`).toBeGreaterThan(0);
+}
+
+for (const theme of ['light', 'dark'] as const) for (const details of ['open', 'closed'] as const) {
+  test(`the dotted focus box is painted on all four edges, not only styled (${theme}, Details ${details})`, async ({ page }) => serve(page, async open => {
+    await open('still', 'reduce');
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    await select(page, '9');
+    if (details === 'closed') {
+      await closeDetails(page, true);
+      await expect(page.getByRole('button', { name: 'More actions', exact: true })).toHaveCount(0);
+      await row(page, '9').focus();
+    }
+    await page.mouse.move(1, 1);
+    await quiet(page);
+    const was = await row(page, '10').boundingBox();
+    const ground = await shot(page);
+    await page.keyboard.press('ArrowDown');
+    await expect(row(page, '10')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-kbd');
+    await settle(page);
+    expect(await row(page, '10').boundingBox(), 'the row stays where it was').toEqual(was);
+    expect(await boxOf(page, '10', '::before'), 'the dotted box is the computed one').not.toBeNull();
+    showsAllEdges(await readEdges(page, { ground, after: await shot(page), id: '10', part: '::before', ink: 'accent', mix: 0.7, full: false }), `focus box (${theme}, Details ${details})`);
+  }));
+}
+
+for (const theme of ['light', 'dark'] as const) test(`the dashed n box is painted on all four edges, in the attention colour (${theme})`, async ({ page }) => serve(page, async open => {
+  await open('still', 'reduce');
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+  await select(page, '9');
+  // The row is in clear view already, so the `n` landing leaves the Map where it is and the ground is the same pixels.
+  await row(page, '11').evaluate(element => element.scrollIntoView({ block: 'center' }));
+  await page.mouse.move(1, 1);
+  await quiet(page);
+  const was = await row(page, '11').boundingBox();
+  const ground = await shot(page);
+  await page.keyboard.press('n');
+  await expect(row(page, '11')).toHaveAttribute('data-next-unseen', 'true');
+  await expect(row(page, '11')).toBeFocused();
+  await page.waitForTimeout(1100); await settle(page);
+  expect(await row(page, '11').boundingBox(), 'the row stays where it was').toEqual(was);
+  const attention = await row(page, '11').getByTestId('change-marker').evaluate(element => getComputedStyle(element).backgroundColor);
+  showsAllEdges(await readEdges(page, { ground, after: await shot(page), id: '11', part: '::after', ink: attention, mix: 1, full: true }), `n box (${theme})`);
+}));
+
+/**
+ * A focused, unselected ancestor of the selected item: the selection thread crosses its ring (accepted by design, alpha.28). The thread
+ * and the elbow paint later at z-index 0 than the ring, so where they meet the ring the pixel reads the accent stroke, not the ring.
+ */
+for (const theme of ['light', 'dark'] as const) test(`on a focused ancestor of the selected item the thread and the elbow still paint over the dotted box (${theme})`, async ({ page }) => serve(page, async open => {
+  await open('still', 'reduce');
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+  // 1.1 is item 1's child: the selection chain runs through item 1.
+  if (await row(page, '1.1').count() === 0) await row(page, '1').getByRole('button', { name: 'Expand or collapse' }).click();
+  await expect(row(page, '1.1')).toHaveCount(1);
+  await select(page, '1.1');
+  const parent = '1';
+  for (let presses = 0; presses < 12 && !(await row(page, parent).evaluate(element => element === document.activeElement)); presses++) await page.keyboard.press('ArrowUp');
+  await expect(row(page, parent)).toBeFocused();
+  await expect(row(page, parent)).not.toHaveAttribute('aria-selected', 'true');
+  expect(await boxOf(page, parent, '::before'), 'the dotted box is the computed one').not.toBeNull();
+  await page.mouse.move(1, 1);
+  await settle(page);
+  const base64 = await shot(page);
+  const probes = await row(page, parent).evaluate(async (element, png) => {
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element, '::before');
+    const ring = { left: rect.left + parseFloat(style.left), bottom: rect.bottom - parseFloat(style.bottom) };
+    const own = (name: string) => [...element.children].find(child => child.classList.contains(name))?.getBoundingClientRect();
+    const elbow = own('tree-thread-elbow'), thread = own('tree-thread');
+    const swatch = document.createElement('span'); swatch.style.color = 'var(--color-accent)'; element.append(swatch);
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const paint = canvas.getContext('2d')!; paint.fillStyle = getComputedStyle(swatch).color; paint.fillRect(0, 0, 1, 1); swatch.remove();
+    const accent = [...paint.getImageData(0, 0, 1, 1).data];
+    const image = new Image();
+    await new Promise<void>((done, fail) => { image.onload = () => done(); image.onerror = fail; image.src = `data:image/png;base64,${png}`; });
+    const page = document.createElement('canvas'); page.width = image.width; page.height = image.height;
+    const context = page.getContext('2d')!; context.drawImage(image, 0, 0);
+    const read = (name: string, meets: boolean, x: number, y: number) => {
+      const got = [...context.getImageData(x, y, 1, 1).data];
+      return { name, meets, x, y, got: got.slice(0, 3), accent: accent.slice(0, 3), ok: [0, 1, 2].every(channel => Math.abs(got[channel]! - accent[channel]!) <= 10) };
+    };
+    return [
+      // The elbow's horizontal arm runs across the ring's left edge, and the thread's stroke down across the ring's bottom edge.
+      elbow && read('elbow arm over the ring\'s left edge', elbow.left < ring.left && ring.left < elbow.right, Math.floor(ring.left + 0.75), Math.floor(elbow.bottom - 1.5)),
+      thread && read('thread over the ring\'s bottom edge', thread.top < ring.bottom - 1.5 && ring.bottom < thread.bottom, Math.floor(thread.left + 1.5), Math.floor(ring.bottom - 0.75)),
+    ];
+  }, base64);
+  expect(probes.every(Boolean), 'the focused parent draws a thread and an elbow').toBe(true);
+  for (const probe of probes) {
+    expect(probe!.meets, `${probe!.name}: the line does cross the ring there`).toBe(true);
+    expect(probe!.ok, `${probe!.name} (${probe!.x},${probe!.y}) reads the accent [${probe!.accent}], got [${probe!.got}]`).toBe(true);
+  }
 }));
 
 /** Presses `key` until a Map item has focus (the keys go to what is focused outside the Map first); returns its id. */
