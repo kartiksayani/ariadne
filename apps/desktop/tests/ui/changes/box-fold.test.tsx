@@ -92,7 +92,7 @@ describe('the change box starts collapsed', () => {
     const view = render(<ItemDetail {...props} seen={seenState()} onMarkSeen={onMarkSeen} />);
     expect(box().getAttribute('data-state')).toBe('unseen');
     expect(boxToggle(box()).getAttribute('aria-expanded')).toBe('false');
-    expect(boxToggle(box()).textContent).toBe(`Changed since you looked · ${at} · Notes`);
+    expect(boxToggle(box()).textContent).toBe(`Changed at ${at} · Notes`);
     const mark = within(box()).getByRole('button', { name: 'Mark seen' });
     expect(boxToggle(box()).contains(mark)).toBe(false);
     fireEvent.click(mark);
@@ -101,6 +101,42 @@ describe('the change box starts collapsed', () => {
     view.rerender(<ItemDetail {...props} seen={seenState([{ item_id: '1.1', revision: 2 }])} onMarkSeen={onMarkSeen} />);
     expect(boxToggle(box()).getAttribute('aria-expanded')).toBe('false');
     expect(boxToggle(box()).textContent).toBe(`Changed at ${at} · Notes`);
+  });
+
+  it('a collapsed unseen box says "Changed at", keeps the full title as its tooltip and shows the diamond', async () => {
+    const { props } = await changed();
+    render(<ItemDetail {...props} seen={seenState()} />);
+    expect(box().getAttribute('data-state')).toBe('unseen');
+    const title = within(box()).getByTitle(`Changed since you looked · ${at}`);
+    expect(within(title).getByText(`Changed at ${at}`)).toBeTruthy();
+    expect(title.textContent).toBe(`Changed at ${at}`);
+    // The diamond is the title's first child, drawn only while unseen (decorative, so no role to query).
+    expect(title.childElementCount).toBe(2);
+    expect(title.firstElementChild!.getAttribute('aria-hidden')).toBe('true');
+    expect(within(box()).queryByText(`Changed since you looked · ${at}`)).toBeNull();
+  });
+
+  it('opening an unseen box shows "Changed since you looked", and closing it goes back to "Changed at"', async () => {
+    const { props } = await changed();
+    render(<ItemDetail {...props} seen={seenState()} />);
+    fireEvent.click(boxToggle(box()));
+    const title = within(box()).getByTitle(`Changed since you looked · ${at}`);
+    expect(within(title).getByText(`Changed since you looked · ${at}`)).toBeTruthy();
+    fireEvent.click(boxToggle(box()));
+    expect(within(title).getByText(`Changed at ${at}`)).toBeTruthy();
+    expect(within(box()).queryByText(`Changed since you looked · ${at}`)).toBeNull();
+  });
+
+  it('keeps the collapsed head text the same through Mark seen; only the diamond and the tooltip change', async () => {
+    const { props } = await changed();
+    const view = render(<ItemDetail {...props} seen={seenState()} />);
+    expect(boxToggle(box()).textContent).toBe(`Changed at ${at} · Notes`);
+    view.rerender(<ItemDetail {...props} seen={seenState([{ item_id: '1.1', revision: 2 }])} />);
+    expect(boxToggle(box()).textContent).toBe(`Changed at ${at} · Notes`);
+    expect(boxToggle(box()).getAttribute('aria-expanded')).toBe('false');
+    const title = within(box()).getByTitle(`Changed at ${at}`);
+    expect(title.childElementCount).toBe(1);
+    expect(within(box()).queryByTitle(`Changed since you looked · ${at}`)).toBeNull();
   });
 });
 

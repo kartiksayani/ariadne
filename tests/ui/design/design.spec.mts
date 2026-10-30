@@ -236,7 +236,7 @@ for (const theme of ['dark', 'light'] as const) {
   });
 
   /**
-   * Alpha.27: the change box starts collapsed to one head line, "› Changed since you looked · 20:51 · Notes" with Mark seen at the right.
+   * Alpha.27: the change box starts collapsed to one head line, "› Changed at 20:51 · Notes" (the same text unseen and seen) with Mark seen at the right.
    * jsdom has no layout, so the pixels are checked here: one line (the head's 26px), the summary giving way before the title when the
    * box is narrow, Mark seen beside the toggle and never over it, and the head the same height unseen and seen.
    */
@@ -272,14 +272,20 @@ for (const theme of ['dark', 'light'] as const) {
     expect(unseen.markLeft).not.toBeNull();
     expect(unseen.markLeft!).toBeGreaterThanOrEqual(unseen.toggleRight - 0.5);
     expect(unseen.markRight!).toBeLessThanOrEqual(unseen.boxRight);
+    // At the real width the unseen head shows the full time and a visible summary: "Changed at 15:02 · Notes", no ellipsis on the title.
+    expect(unseen.text).toMatch(/^Changed at \d{2}:\d{2} · Notes$/);
+    expect(unseen.titleCut, 'the unseen title shows its full time, no ellipsis').toBe(false);
+    expect(unseen.summaryWidth, 'the unseen head has room for the field names').toBeGreaterThan(0);
+    expect(unseen.summaryCut, 'the field names are not cut at the real width').toBe(false);
     await testInfo.attach(`change-box-collapsed-unseen-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
-    // Seen: the head's text flips, Mark seen goes, the head keeps its height, and the field names show after the title.
+    // Seen: the head's text does not change, Mark seen goes, the head keeps its height, and the field names show after the title.
     await box.getByRole('button', { name: 'Mark seen', exact: true }).click();
     await expect(box).toHaveAttribute('data-state', 'seen');
     const seen = await head();
     measure('seen', seen);
     expect(seen.markLeft).toBeNull();
     expect(seen.head).toBe(unseen.head);
+    expect(seen.text).toBe(unseen.text);
     expect(seen.summaryWidth, 'the field names are drawn once the head has room').toBeGreaterThan(0);
     expect(seen.summaryCut).toBe(false);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');

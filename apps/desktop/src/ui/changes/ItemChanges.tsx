@@ -94,9 +94,9 @@ function ChangeEventExtras({ session, item, record, onOpenAnswer }: { readonly s
 
 /**
  * The change box (SPEC 6.7) and the history. The box shows for an item with a recorded change: the changes unseen when Details
- * opened, or the latest one for an item already seen. The 1 s dwell or Mark seen changes only its head ("Changed since you looked
- * · 20:51" becomes "Changed at 20:51"), so the explanation stays for this visit. The box starts collapsed to its head, one line naming the
- * changed fields; opening it shows the rows, and the choice is kept per item for the running app (`boxOpen.ts`). With no box but a history, "HISTORY N events" lists it.
+ * opened, or the latest one for an item already seen. The 1 s dwell or Mark seen changes only its head (an open box's "Changed since
+ * you looked · 20:51" becomes "Changed at 20:51"), so the explanation stays for this visit. The box starts collapsed to its head, one line
+ * "Changed at 20:51 · Notes" (the diamond and tint mark an unseen change) naming the changed fields; opening it shows the rows, and the choice is kept per item for the running app (`boxOpen.ts`). With no box but a history, "HISTORY N events" lists it.
  * `part` splits the two for the body's layout (SPEC 5.3, 9.11): the box sits under the "why", the bare history after the conversation.
  */
 export function ItemChanges({ service, store, session, item, seen, onOpenAnswer, onMarkSeen, part = 'both' }: { readonly service: RendererService; readonly store: SessionStore;
@@ -130,11 +130,14 @@ export function ItemChanges({ service, store, session, item, seen, onOpenAnswer,
   if (!drawn) return null;
   const at = clockTime(currentRecords.at(-1)?.at ?? item.updated_at ?? Date.now());
   const title = unseen ? `Changed since you looked · ${at}` : `Changed at ${at}`;
+  // Collapsed, the head says "Changed at 15:02" even when unseen: the diamond and the tint mark the unseen change, and the short text
+  // leaves room for the field names beside "Mark seen". The tooltip keeps the full title.
+  const titleText = unseen && boxOpen ? title : `Changed at ${at}`;
   if (showBox) return <section className="change-box" data-state={unseen ? 'unseen' : 'seen'} data-testid="change-box" aria-label="What changed">
     <div className="change-box-head">
       <button type="button" className="change-box-toggle" aria-expanded={boxOpen} onClick={toggleBox}>
         <i className={boxOpen ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
-        <span className="change-box-title" title={title}>{unseen && <i className="change-diamond" aria-hidden="true" />}<span className="change-box-title-text">{title}</span></span>
+        <span className="change-box-title" title={title}>{unseen && <i className="change-diamond" aria-hidden="true" />}<span className="change-box-title-text">{titleText}</span></span>
         {fieldNames && <span className="change-box-summary" data-testid="change-box-summary" title={fieldNames}>{` · ${fieldNames}`}</span>}
       </button>
       {unseen && onMarkSeen && <button type="button" className="btn btn-secondary change-box-mark" onClick={() => onMarkSeen(item.id, item.revision)}>
