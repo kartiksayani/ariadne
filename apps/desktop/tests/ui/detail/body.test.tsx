@@ -12,9 +12,11 @@ import type { ItemActionView } from '../../../src/ui/detail/itemActions';
 import { clockTime } from '../../../src/ui/changes/clock';
 import { route } from '../app/transport';
 import { setup } from '../history/fixtures';
+import { openBox } from '../changes/open-box';
+import { resetBoxOpen } from '../../../src/ui/changes/boxOpen';
 
 const opened: Pick<ReturnType<typeof setup>, 'sessions'>[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); resetBoxOpen(); });
 
 const SINCE = '2026-10-01T00:00:00.000Z', CHANGED_AT = '2026-10-04T09:30:00.000Z';
 const seenState = (items: SessionSeen['items'] = []): SessionSeen => ({ session: route, since: SINCE, items, topics: [] });
@@ -37,7 +39,7 @@ describe('the badge row and Mark seen', () => {
     const view = render(<ItemDetail {...props} seen={seenState()} onMarkSeen={onMarkSeen} />);
     const head = document.querySelector<HTMLElement>('.detail-head')!;
     expect(within(head).getByRole('img', { name: 'Changed' })).toBeTruthy();
-    const box = screen.getByRole('region', { name: 'What changed' });
+    const box = openBox(screen.getByRole('region', { name: 'What changed' }));
     expect(within(box).getByText(`Changed since you looked · ${clockTime(CHANGED_AT)}`)).toBeTruthy();
     // The title keeps one line and shortens with "…" when narrow, so its full words ride in its tooltip.
     expect(within(box).getByTitle(`Changed since you looked · ${clockTime(CHANGED_AT)}`)).toBeTruthy();

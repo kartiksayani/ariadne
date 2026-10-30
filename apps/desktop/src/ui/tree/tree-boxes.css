@@ -121,7 +121,11 @@
 }
 
 /* The thread: from the topic down to the selected item, a 3px accent line over a 7px halo so it reads over the tints.
-   The elbow turns into the row's chevron or icon with a round corner (radius 7, halo radius 9). */
+   The elbow turns into the row's chevron or icon with a round corner (radius 7, halo radius 9).
+   Paint order keeps the blue unbroken. The halo shows only at the line's sides: a spread shadow would also reach 2px above and
+   below, and the next row (an isolated stacking context that paints after the row above) would cover the last 2px of the blue
+   above at every row boundary. The elbow is not a stacking context: its halo (::before) and its accent (::after) are two plain
+   positioned layers, the accent last, and both paint over the box tints and the selected box (z-index -1 in the row). */
 .tree-thread {
   position: absolute;
   z-index: 0;
@@ -129,7 +133,7 @@
   bottom: -1px;
   width: 3px;
   background: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--tree-halo);
+  box-shadow: -2px 0 0 var(--tree-halo), 2px 0 0 var(--tree-halo);
   pointer-events: none;
 }
 
@@ -137,23 +141,30 @@
 
 .tree-thread-elbow {
   position: absolute;
-  z-index: 0;
   top: 0;
   height: calc(var(--tree-bullet-y) + 1.5px);
-  border-bottom: 3px solid var(--color-accent);
-  border-left: 3px solid var(--color-accent);
-  border-bottom-left-radius: 7px;
   pointer-events: none;
 }
 
-.tree-thread-elbow::before {
+.tree-thread-elbow::before,
+.tree-thread-elbow::after {
   content: '';
   position: absolute;
-  z-index: -1;
-  inset: 0 0 -5px -5px;
+}
+
+/* The halo reaches 2px past the 3px stroke on the left and the bottom. */
+.tree-thread-elbow::before {
+  inset: 0 0 -2px -2px;
   border-bottom: 7px solid var(--tree-halo);
   border-left: 7px solid var(--tree-halo);
   border-bottom-left-radius: 9px;
+}
+
+.tree-thread-elbow::after {
+  inset: 0;
+  border-bottom: 3px solid var(--color-accent);
+  border-left: 3px solid var(--color-accent);
+  border-bottom-left-radius: 7px;
 }
 
 /* The folded branch's chip ("4 inside"): the fill of the box two steps deeper than its row, in the branch's ink. */

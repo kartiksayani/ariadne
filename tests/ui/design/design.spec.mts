@@ -150,6 +150,14 @@ async function openChanges(page: Page) {
   return popover;
 }
 
+/** The Details change box starts collapsed (alpha.27): open it to read its rows. Clicks only while it is closed. */
+async function openChangeBox(box: Locator) {
+  const toggle = box.getByRole('button', { name: /^Changed (at|since you looked)/ });
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  return box;
+}
+
 async function compactCompare(surface: Locator) {
   const control = surface.getByRole('button', { name: 'Show before and after', exact: true }).first();
   await control.scrollIntoViewIfNeeded();
@@ -199,6 +207,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The change box on the item itself draws before → after inline, and its older history is a timeline behind one toggle.
     const current = page.getByTestId('change-box');
     await current.scrollIntoViewIfNeeded();
+    await openChangeBox(current);
     await expect(current.locator('.change-row del').first()).toBeVisible();
     await changesFit(current);
     await current.getByRole('button', { name: /^Older history/ }).click();
@@ -224,6 +233,125 @@ for (const theme of ['dark', 'light'] as const) {
     await changesFit(sinceCard);
     expect(answerControl.width).toBeGreaterThanOrEqual(24);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  /**
+   * Alpha.27: the change box starts collapsed to one head line, "› Changed at 20:51 · Notes" (the same text unseen and seen) with Mark seen at the right.
+   * jsdom has no layout, so the pixels are checked here: one line (the head's 26px), the summary giving way before the title when the
+   * box is narrow, Mark seen beside the toggle and never over it, and the head the same height unseen and seen.
+   */
+  test(`The collapsed change box is one line: caret, title, field names, Mark seen at the right (${theme})`, async ({ page, origin }, testInfo) => {
+    // The app's 1 s seen-dwell only counts while the window has focus (`useSeenDwell`). A window that never has focus holds the box
+    // "unseen" however slow the runner is; the click on Mark seen below is a real press, which is what clears it in the app too.
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+      window.addEventListener('focus', event => event.stopImmediatePropagation(), true);
+    });
+    await openApp(page, origin, { ...frameSpec('changes-notes'), theme });
+    const box = page.getByTestId('change-box');
+    await box.scrollIntoViewIfNeeded();
+    const toggle = box.getByRole('button', { name: /^Changed (at|since you looked)/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(box.getByTestId('change-row-value')).toHaveCount(0);
+    const head = async () => box.evaluate(element => {
+      const rect = (target: Element | null) => target?.getBoundingClientRect() ?? null;
+      const button = element.querySelector('.change-box-toggle')!, title = element.querySelector('.change-box-title-text')!, summary = element.querySelector('.change-box-summary')!;
+      const mark = element.querySelector('.change-box-mark'), headBox = element.querySelector('.change-box-head')!;
+      const overflowing = (target: Element) => target.scrollWidth > target.clientWidth;
+      // The title's ellipsis can start at a sub-pixel; `scrollWidth` and `clientWidth` round to whole pixels and miss "Changed at 15:…".
+      // So measure the words' own width with a Range and compare it to the room the title text and its wrapper give them.
+      const wordsCut = (text: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        return range.getBoundingClientRect().width > Math.min(rect(text)!.width, rect(text.parentElement)!.width) + 0.01;
+      };
+      return { state: element.getAttribute('data-state'), head: rect(headBox)!.height, toggle: rect(button)!.height, toggleRight: rect(button)!.right,
+        boxRight: rect(element)!.right, markLeft: rect(mark)?.left ?? null, markRight: rect(mark)?.right ?? null, caret: button.firstElementChild!.className,
+        text: button.textContent, summaryWidth: rect(summary)!.width, boxWidth: rect(element)!.width, spare: rect(button)!.width - (rect(summary)!.right - rect(button.firstElementChild)!.left),summaryTop: rect(summary)!.top, titleTop: rect(title)!.top, titleRight: rect(title)!.right,summaryCut: overflowing(summary), titleCut: wordsCut(title),
+        overflow: element.scrollWidth - element.clientWidth };
+    });
+    const measure = (state: string, size: Awaited<ReturnType<typeof head>>) => {
+      expect(size.state).toBe(state);
+      expect(size.toggle, 'one line: the toggle is at most the head\'s 26px').toBeLessThanOrEqual(26.5);
+      expect(size.head).toBeLessThanOrEqual(26.5);
+      expect(size.caret).toContain('ph-caret-right');
+      expect(size.text).toMatch(/ · Notes$/);
+      expect(Math.abs(size.summaryTop - size.titleTop), 'the summary is on the title\'s line').toBeLessThanOrEqual(2);
+      expect(size.overflow, 'the box does not scroll sideways').toBeLessThanOrEqual(1);
+    };
+    // Unseen: Mark seen sits at the right of the toggle, not over it, inside the box.
+    const unseen = await head();
+    measure('unseen', unseen);
+    expect(unseen.markLeft).not.toBeNull();
+    expect(unseen.markLeft!).toBeGreaterThanOrEqual(unseen.toggleRight - 0.5);
+    expect(unseen.markRight!).toBeLessThanOrEqual(unseen.boxRight);
+    // At the real width the unseen head shows the full time and a visible summary: "Changed at 15:02 · Notes", no ellipsis on the title.
+    expect(unseen.text).toMatch(/^Changed at \d{2}:\d{2} · Notes$/);
+    expect(unseen.titleCut, 'the unseen title shows its full time, no ellipsis').toBe(false);
+    expect(unseen.summaryWidth, 'the unseen head has room for the field names').toBeGreaterThan(0);
+    expect(unseen.summaryCut, 'the field names are not cut at the real width').toBe(false);
+    await testInfo.attach(`change-box-collapsed-unseen-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    // Seen: the head's text does not change, Mark seen goes, the head keeps its height, and the field names show after the title.
+    await box.getByRole('button', { name: 'Mark seen', exact: true }).click();
+    await expect(box).toHaveAttribute('data-state', 'seen');
+    const seen = await head();
+    measure('seen', seen);
+    expect(seen.markLeft).toBeNull();
+    expect(seen.head).toBe(unseen.head);
+    expect(seen.text).toBe(unseen.text);
+    expect(seen.summaryWidth, 'the field names are drawn once the head has room').toBeGreaterThan(0);
+    expect(seen.summaryCut).toBe(false);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await testInfo.attach(`change-box-collapsed-seen-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    // A narrower box (the head's spare room and half of the field names' width lost): the field names are cut with an ellipsis first, and the title keeps its words.
+    // Then nearly all of them lost: the title still has every word, down to the last sub-pixel.
+    for (const [lost, label] of [[0.5, 'narrow'], [0.9, 'narrower']] as const) {
+      await box.evaluate((element, width) => { element.style.width = `${width}px`; }, seen.boxWidth - seen.spare - seen.summaryWidth * lost);
+      const cut = await head();
+      measure('seen', cut);
+      expect(cut.summaryCut, `the field names give way first (${label})`).toBe(true);
+      expect(cut.titleCut, `the title keeps its words while the field names are cut (${label})`).toBe(false);
+      await testInfo.attach(`change-box-collapsed-${label}-${theme}`, { body: await box.screenshot(), contentType: 'image/png' });
+    }
+    // So narrow that the title alone does not fit: it ends in "…" and stays inside the toggle.
+    await box.evaluate(element => { element.style.width = '110px'; });
+    const tiny = await head();
+    measure('seen', tiny);
+    expect(tiny.titleCut, 'the title alone does not fit, so it is cut').toBe(true);
+    expect(tiny.titleRight, 'the cut title stays inside the toggle').toBeLessThanOrEqual(tiny.toggleRight + 0.5);
+  });
+
+  /**
+   * Alpha.27: opening the change box (or Older history) at the end of a short Details grows the pane. The pane sticks to its end when
+   * the owner is within 80px of it, which used to carry the head the owner just clicked off the top. The clicked head keeps its place.
+   */
+  test(`Opening the change box or Older history at the end of a short Details keeps the clicked head in place (${theme})`, async ({ page, origin }) => {
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+      window.addEventListener('focus', event => event.stopImmediatePropagation(), true);
+    });
+    await openApp(page, origin, { ...frameSpec('changes-notes'), theme, height: 930 });
+    const pane = page.getByTestId('detail-body'), box = pane.getByTestId('change-box');
+    await box.getByRole('button', { name: 'Mark seen', exact: true }).click();
+    await expect(box).toHaveAttribute('data-state', 'seen');
+    const toggle = box.locator('.change-box-toggle'), older = box.locator('.change-box-older');
+    // Short Details: the pane scrolls only a little, so the owner at its end is inside the 80px that sticks to it.
+    const end = () => pane.evaluate(element => { element.scrollTop = element.scrollHeight; return element.scrollHeight - element.clientHeight; });
+    const topOf = (target: Locator) => target.evaluate(element => element.getBoundingClientRect().top);
+    const hold = async (button: Locator, shown: Locator) => {
+      expect(await end(), 'the pane scrolls, so there is an end to stick to').toBeGreaterThan(0);
+      await expect.poll(() => pane.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(80);
+      const before = await topOf(button);
+      expect(before, 'the head is inside the pane before the click, so the click does not scroll').toBeGreaterThan(await topOf(pane));
+      await button.click();
+      await expect(shown).toBeVisible();
+      await settle(page);
+      expect(Math.abs(await topOf(button) - before), 'the clicked head keeps its screen position (px)').toBeLessThanOrEqual(1);
+    };
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await hold(toggle, box.getByTestId('change-rows'));
+    await expect(older).toHaveAttribute('aria-expanded', 'false');
+    await hold(older, box.getByTestId('change-timeline'));
   });
 
   /**
@@ -260,6 +388,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The change box: the Notes row stacks the struck before, the arrow and the after.
     const box = page.getByTestId('change-box');
     await box.scrollIntoViewIfNeeded();
+    await openChangeBox(box);
     const value = box.getByTestId('change-row-value').first();
     await expect(value.locator('del a')).toBeVisible();
     const stack = await value.evaluate(element => {
@@ -624,6 +753,83 @@ async function threadRuns(page: Page) {
     return { runs: merged, reach, topic: { top: topic.top, bottom: topic.bottom }, selected: selected ? { top: selected.top, bottom: selected.bottom } : null };
   });
 }
+interface Probe { readonly name: string; readonly x: number; readonly y: number; readonly want: 'accent' | 'halo' }
+interface ProbeRead extends Probe { readonly got: readonly number[]; readonly expected: readonly number[]; readonly ok: boolean }
+interface ThreadPixels { readonly seams: number; readonly notch: readonly ProbeRead[]; readonly elbow: readonly ProbeRead[]; readonly note: string }
+
+/**
+ * What the thread really paints, read from one screenshot (getComputedStyle cannot see paint order). Notch probes: down the
+ * thread's column, the 2px above and the 1px below each row boundary between the band and the selected row. Elbow probes: the
+ * selected row's elbow, its vertical stroke, its horizontal stroke and the halo just inside the vertical's right edge. Probe points
+ * are CSS px, which are screenshot px (deviceScaleFactor 1). The expected bytes are the page's own --color-accent and
+ * --tree-halo (oklch tokens), painted on a 1x1 canvas.
+ */
+async function readThreadPixels(page: Page, png: Buffer): Promise<ThreadPixels> {
+  return page.evaluate(async ({ base64 }) => {
+    const group = document.querySelector('.tree-topic-group')!;
+    const origin = group.getBoundingClientRect(), band = group.querySelector('.tree-topic')!.getBoundingClientRect();
+    const scroller = document.querySelector('.tree-scroll')!.getBoundingClientRect();
+    const selected = group.querySelector('[aria-selected="true"]')!;
+    const accentSource = group.querySelector('.tree-thread, .tree-thread-elbow')!;
+    const resolveColour = (css: string) => {
+      const swatch = document.createElement('canvas'); swatch.width = swatch.height = 1;
+      const context = swatch.getContext('2d')!; context.fillStyle = css; context.fillRect(0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    const haloProbe = document.createElement('div'); haloProbe.style.color = 'var(--tree-halo)'; group.append(haloProbe);
+    const halo = resolveColour(getComputedStyle(haloProbe).color); haloProbe.remove();
+    const accentVar = getComputedStyle(accentSource).getPropertyValue('--color-accent').trim();
+    const accent = resolveColour(accentVar || getComputedStyle(group).getPropertyValue('--color-accent').trim());
+
+    const notch: Probe[] = [];
+    const threads = [...group.querySelectorAll<HTMLElement>('.tree-thread')].map(line => line.getBoundingClientRect()).filter(rect => rect.height > 0);
+    let seams = 0;
+    for (const below of threads) {
+      // A seam: this piece starts where another piece of the same column ends (they overlap by the 1px bottom: -1px).
+      const above = threads.find(other => Math.abs(other.left - below.left) < 0.5 && Math.abs(other.bottom - 1 - below.top) < 1);
+      if (!above || below.top < band.bottom + 3 || below.top > scroller.bottom - 3) continue;
+      const x = Math.floor(below.left + 1.5), seam = Math.round(below.top);
+      // Only a boundary the screenshot shows: nothing (the "back to selection" pill) sits over the probed pixels.
+      if ([seam - 2, seam].some(y => document.elementFromPoint(x, y)?.closest('.tree-back'))) continue;
+      seams++;
+      notch.push({ name: `column ${Math.round(below.left - origin.left)} seam ${seam}, 2px above`, x, y: seam - 2, want: 'accent' },
+        { name: `column ${Math.round(below.left - origin.left)} seam ${seam}, 1px above`, x, y: seam - 1, want: 'accent' },
+        { name: `column ${Math.round(below.left - origin.left)} seam ${seam}, 1px below`, x, y: seam, want: 'accent' });
+    }
+    const elbow: Probe[] = [];
+    let note = '';
+    const line = selected.querySelector('.tree-thread-elbow');
+    if (!line) note = 'the selected row has no elbow';
+    else {
+      const rect = line.getBoundingClientRect(), chevron = selected.querySelector('.tree-chevron')?.getBoundingClientRect();
+      const x = Math.min(rect.right - 4, chevron ? chevron.left - 2 : Infinity);
+      const vx = Math.floor(rect.left + 1.5), vy = Math.floor(rect.top + 6);
+      elbow.push({ name: 'elbow vertical stroke', x: vx, y: vy, want: 'accent' },
+        { name: 'elbow halo inside the vertical right edge', x: Math.floor(rect.left + 3.5), y: vy, want: 'halo' });
+      if (x < rect.left + 10) note = `no straight stretch for the horizontal stroke: x ${x}, left ${rect.left}`;
+      else elbow.push({ name: 'elbow horizontal stroke', x: Math.floor(x), y: Math.floor(rect.bottom - 1.5), want: 'accent' });
+    }
+    // The plain thread's halo, 2px to either side of its centre, half way down a piece.
+    const mid = threads.find(rect => rect.top >= band.bottom + 3 && rect.height > 20 && rect.bottom < scroller.bottom - 3);
+    if (mid) {
+      const y = Math.floor(mid.top + mid.height / 2);
+      notch.push({ name: 'thread halo, 2px left of the centre', x: Math.floor(mid.left - 0.5), y, want: 'halo' },
+        { name: 'thread halo, 2px right of the centre', x: Math.floor(mid.left + 3.5), y, want: 'halo' });
+    }
+
+    const image = new Image();
+    await new Promise<void>((done, fail) => { image.onload = () => done(); image.onerror = fail; image.src = `data:image/png;base64,${base64}`; });
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0);
+    const read = (probe: Probe): ProbeRead => {
+      const got = [...context.getImageData(probe.x, probe.y, 1, 1).data], expected = probe.want === 'accent' ? accent : halo;
+      return { ...probe, got, expected, ok: [0, 1, 2].every(channel => Math.abs(got[channel]! - expected[channel]!) <= 10) };
+    };
+    return { seams, notch: notch.map(read), elbow: elbow.map(read), note };
+  }, { base64: png.toString('base64') });
+}
+const describeProbes = (reads: readonly ProbeRead[]) => reads.map(read => `${read.ok ? 'ok  ' : 'FAIL'} ${read.name} (${read.x},${read.y}) want ${read.want} [${read.expected.slice(0, 3)}] got [${read.got.slice(0, 3)}]`).join('\n');
+
 /** The topic's changes live in the band's popover now, so no card sits between the band and the first item. */
 for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
   test(`The thread is one unbroken line from the band to the selected item: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
@@ -634,7 +840,17 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
     expect(runs[0]![0], 'it starts inside the band').toBeLessThanOrEqual(topic.bottom);
     expect(runs[0]![1], 'it runs on below the band, into the branch of the selected row').toBeGreaterThan(topic.bottom + 10);
     expect(reach, 'it reaches the selected row').toBeGreaterThanOrEqual(selected!.top);
-    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await page.locator('.tree-topic-group [aria-selected="true"]').first().evaluate(row => row.scrollIntoView({ block: 'end' }));
+    await settle(page);
+    const shot = await page.screenshot();
+    await testInfo.attach(`thread-${theme}`, { body: shot, contentType: 'image/png' });
+    // Paint order, not positions: the blue must be unbroken at every row boundary and through the elbow, with the halo at its sides.
+    const pixels = await readThreadPixels(page, shot);
+    expect(pixels.note, 'the elbow can be probed').toBe('');
+    expect(pixels.seams, 'a row boundary lies between the band and the selected row').toBeGreaterThan(0);
+    // Soft, so a failing run names the notch probes and the elbow probes each on their own.
+    expect.soft(describeProbes(pixels.notch.filter(read => !read.ok)), 'notches at the row boundaries, or a halo missing at the thread sides').toBe('');
+    expect.soft(describeProbes(pixels.elbow.filter(read => !read.ok)), 'the elbow into the selected row is not blue over its halo').toBe('');
   });
 }
 

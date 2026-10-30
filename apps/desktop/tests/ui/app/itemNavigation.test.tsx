@@ -9,11 +9,13 @@ import { goToSession } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { changesFixture } from '../changes/fixture';
+import { openBox } from '../changes/open-box';
+import { resetBoxOpen } from '../../../src/ui/changes/boxOpen';
 import { closeDetailsWith } from '../shell/closeDetails';
 import { useWideWindow } from '../shell/wideWindow';
 useWideWindow();
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); resetBoxOpen(); });
 async function click(element: Element) {
   await act(async () => { fireEvent.click(element); });
   // These navigation regressions deliberately follow references through their peek.
@@ -100,7 +102,7 @@ describe('composed item navigation', () => {
     transport.sessions.set(value.session.id, value.session);
     transport.preferences.seen = [value.seen];
     await setup(transport); await openSession(); await pick('updated-0');
-    const context = screen.getByRole('region', { name: 'What changed' });
+    const context = openBox(screen.getByRole('region', { name: 'What changed' }));
     await click(within(context).getByRole('button', { name: 'Changed after your typed answer ↗' }));
     selected(value.answer.item_id);
     expect(document.activeElement?.getAttribute('data-message-id')).toBe(value.answer.message_id);

@@ -219,6 +219,10 @@ export function ItemConversation({ drafts, store, itemId, searchQuery = '', late
   // Following an ask is distinct from following the transcript's end: later context can follow the ask.
   const followingAsk = useRef(false), positionedScroll = useRef<number | null>(null);
   const resizeWatch = useRef<{ observer: ResizeObserver; targets: Set<Element> } | null>(null);
+  // The change box's toggle or Older history the owner just clicked: it keeps its place on screen while the pane resizes around it,
+  // instead of the stick-to-end below carrying it off the top. `scroll` is the pane's scrollTop after the last hold; any other
+  // scroll (the owner's, or a message arriving at the end) lets go.
+  const heldHead = useRef<{ element: Element; top: number; scroll: number } | null>(null);
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
@@ -334,7 +338,7 @@ export function ItemConversation({ drafts, store, itemId, searchQuery = '', late
     positionedScroll.current = pane.scrollTop;
     atEnd.current = nearEnd(pane);
   };
-  useEffect(() => { atEnd.current = true; followingAsk.current = false; positionedScroll.current = null; openingChangePositioned.current = false; setTitleExpanded(false); }, [itemId]);
+  useEffect(() => { atEnd.current = true; followingAsk.current = false; positionedScroll.current = null; openingChangePositioned.current = false; heldHead.current = null; setTitleExpanded(false); }, [itemId]);
   const sentJustNow = () => { navigationVisits.record(current.route, itemId, 'answered'); justSent.current = true; showLatest(); };
   const chatKey = model ? model.chat.map(entry => `${entry.id}:${entry.message.body}:${entry.result}:${entry.pending?.input.state}:${entry.asks.map(ask => `${ask.text}:${ask.now}`).join(',')}:${entry.forks.length}`).join('|') : null;
   useEffect(() => {
@@ -359,7 +363,12 @@ export function ItemConversation({ drafts, store, itemId, searchQuery = '', late
         .some(target => (sizes.get(target) ?? '0:0') !== (next.get(target) ?? '0:0'));
       sizes = next; viewport = nextViewport;
       if (!changed) return;
-      if (followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
+      const held = heldHead.current;
+      if (held?.element.isConnected) {
+        // The owner's own click opened or closed something: put the clicked head back where it was; never stick to the end.
+        element.scrollTop += held.element.getBoundingClientRect().top - element.getBoundingClientRect().top - held.top;
+        held.scroll = element.scrollTop;
+      } else if (followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
       else if (atEnd.current) {
         element.scrollTop = element.scrollHeight;
         positionedScroll.current = element.scrollTop;
@@ -546,8 +555,13 @@ export function ItemConversation({ drafts, store, itemId, searchQuery = '', late
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
   }, route: id => ({ project_id: session.project_id, session_id: session.id, item_id: id }), onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className={`item-detail${expanded ? ' item-conversation' : ''}`} data-detail-item-id={itemId} data-item-revision={item.revision} data-status={model.status} aria-label={`Detail of ${item.question}`}>
-    <div className="detail-body" data-testid="detail-body" ref={body} onScroll={event => {
+    <div className="detail-body" data-testid="detail-body" ref={body} onClickCapture={event => {
+      const head = (event.target as Element).closest('.change-box-toggle, .change-box-older');
       const pane = event.currentTarget;
+      heldHead.current = head ? { element: head, top: head.getBoundingClientRect().top - pane.getBoundingClientRect().top, scroll: pane.scrollTop } : null;
+    }} onScroll={event => {
+      const pane = event.currentTarget;
+      if (heldHead.current && pane.scrollTop !== heldHead.current.scroll) heldHead.current = null;
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
       atEnd.current = nearEnd(pane);
     }}>

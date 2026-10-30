@@ -10,8 +10,10 @@ import { OpenSessions } from '../../../src/data/session-store';
 import { AppTransport, route } from '../app/transport';
 import { changesFixture } from './fixture';
 import { setupChanges, stores } from './harness';
+import { openBox } from './open-box';
+import { resetBoxOpen } from '../../../src/ui/changes/boxOpen';
 
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.useRealTimers(); localStorage.clear(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.useRealTimers(); localStorage.clear(); resetBoxOpen(); });
 
 const BEFORE = '- **From:** the old team\n- see [old thread](https://example.com/old)';
 const AFTER = '- **From:** the new team\n- see [new thread](https://example.com/new)\n\n1. first step\n2. second step';
@@ -25,7 +27,7 @@ async function mountBox(patch: (value: ReturnType<typeof changesFixture>) => voi
   const service = createDesktopService(transport), opened = new OpenSessions(service);
   const store = opened.open(route); await store.refresh();
   const view = render(<ItemChanges service={service} store={store} session={value.session} item={item} seen={value.seen} onOpenAnswer={vi.fn()} onMarkSeen={vi.fn()} />);
-  return { value, item, opened, view, box: screen.getByRole('region', { name: 'What changed' }) };
+  return { value, item, opened, view, box: openBox(screen.getByRole('region', { name: 'What changed' })) };
 }
 const rowOf = (box: HTMLElement, label: string) => within(within(box).getByText(label).parentElement!).getByTestId('change-row-value');
 
