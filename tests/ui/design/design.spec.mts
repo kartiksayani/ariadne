@@ -241,6 +241,12 @@ for (const theme of ['dark', 'light'] as const) {
    * box is narrow, Mark seen beside the toggle and never over it, and the head the same height unseen and seen.
    */
   test(`The collapsed change box is one line: caret, title, field names, Mark seen at the right (${theme})`, async ({ page, origin }, testInfo) => {
+    // The app's 1 s seen-dwell only counts while the window has focus (`useSeenDwell`). A window that never has focus holds the box
+    // "unseen" however slow the runner is; the click on Mark seen below is a real press, which is what clears it in the app too.
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+      window.addEventListener('focus', event => event.stopImmediatePropagation(), true);
+    });
     await openApp(page, origin, { ...frameSpec('changes-notes'), theme });
     const box = page.getByTestId('change-box');
     await box.scrollIntoViewIfNeeded();
