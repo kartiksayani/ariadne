@@ -624,6 +624,83 @@ async function threadRuns(page: Page) {
     return { runs: merged, reach, topic: { top: topic.top, bottom: topic.bottom }, selected: selected ? { top: selected.top, bottom: selected.bottom } : null };
   });
 }
+interface Probe { readonly name: string; readonly x: number; readonly y: number; readonly want: 'accent' | 'halo' }
+interface ProbeRead extends Probe { readonly got: readonly number[]; readonly expected: readonly number[]; readonly ok: boolean }
+interface ThreadPixels { readonly seams: number; readonly notch: readonly ProbeRead[]; readonly elbow: readonly ProbeRead[]; readonly note: string }
+
+/**
+ * What the thread really paints, read from one screenshot (getComputedStyle cannot see paint order). Notch probes: down the
+ * thread's column, the 2px above and the 1px below each row boundary between the band and the selected row. Elbow probes: the
+ * selected row's elbow, its vertical stroke, its horizontal stroke and the halo just inside the vertical's right edge. Probe points
+ * are CSS px, which are screenshot px (deviceScaleFactor 1). The expected bytes are the page's own --color-accent and
+ * --tree-halo (oklch tokens), painted on a 1x1 canvas.
+ */
+async function readThreadPixels(page: Page, png: Buffer): Promise<ThreadPixels> {
+  return page.evaluate(async ({ base64 }) => {
+    const group = document.querySelector('.tree-topic-group')!;
+    const origin = group.getBoundingClientRect(), band = group.querySelector('.tree-topic')!.getBoundingClientRect();
+    const scroller = document.querySelector('.tree-scroll')!.getBoundingClientRect();
+    const selected = group.querySelector('[aria-selected="true"]')!;
+    const accentSource = group.querySelector('.tree-thread, .tree-thread-elbow')!;
+    const resolveColour = (css: string) => {
+      const swatch = document.createElement('canvas'); swatch.width = swatch.height = 1;
+      const context = swatch.getContext('2d')!; context.fillStyle = css; context.fillRect(0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    const haloProbe = document.createElement('div'); haloProbe.style.color = 'var(--tree-halo)'; group.append(haloProbe);
+    const halo = resolveColour(getComputedStyle(haloProbe).color); haloProbe.remove();
+    const accentVar = getComputedStyle(accentSource).getPropertyValue('--color-accent').trim();
+    const accent = resolveColour(accentVar || getComputedStyle(group).getPropertyValue('--color-accent').trim());
+
+    const notch: Probe[] = [];
+    const threads = [...group.querySelectorAll<HTMLElement>('.tree-thread')].map(line => line.getBoundingClientRect()).filter(rect => rect.height > 0);
+    let seams = 0;
+    for (const below of threads) {
+      // A seam: this piece starts where another piece of the same column ends (they overlap by the 1px bottom: -1px).
+      const above = threads.find(other => Math.abs(other.left - below.left) < 0.5 && Math.abs(other.bottom - 1 - below.top) < 1);
+      if (!above || below.top < band.bottom + 3 || below.top > scroller.bottom - 3) continue;
+      const x = Math.floor(below.left + 1.5), seam = Math.round(below.top);
+      // Only a boundary the screenshot shows: nothing (the "back to selection" pill) sits over the probed pixels.
+      if ([seam - 2, seam].some(y => document.elementFromPoint(x, y)?.closest('.tree-back'))) continue;
+      seams++;
+      notch.push({ name: `column ${Math.round(below.left - origin.left)} seam ${seam}, 2px above`, x, y: seam - 2, want: 'accent' },
+        { name: `column ${Math.round(below.left - origin.left)} seam ${seam}, 1px above`, x, y: seam - 1, want: 'accent' },
+        { name: `column ${Math.round(below.left - origin.left)} seam ${seam}, 1px below`, x, y: seam, want: 'accent' });
+    }
+    const elbow: Probe[] = [];
+    let note = '';
+    const line = selected.querySelector('.tree-thread-elbow');
+    if (!line) note = 'the selected row has no elbow';
+    else {
+      const rect = line.getBoundingClientRect(), chevron = selected.querySelector('.tree-chevron')?.getBoundingClientRect();
+      const x = Math.min(rect.right - 4, chevron ? chevron.left - 2 : Infinity);
+      const vx = Math.floor(rect.left + 1.5), vy = Math.floor(rect.top + 6);
+      elbow.push({ name: 'elbow vertical stroke', x: vx, y: vy, want: 'accent' },
+        { name: 'elbow halo inside the vertical right edge', x: Math.floor(rect.left + 3.5), y: vy, want: 'halo' });
+      if (x < rect.left + 10) note = `no straight stretch for the horizontal stroke: x ${x}, left ${rect.left}`;
+      else elbow.push({ name: 'elbow horizontal stroke', x: Math.floor(x), y: Math.floor(rect.bottom - 1.5), want: 'accent' });
+    }
+    // The plain thread's halo, 2px to either side of its centre, half way down a piece.
+    const mid = threads.find(rect => rect.top >= band.bottom + 3 && rect.height > 20 && rect.bottom < scroller.bottom - 3);
+    if (mid) {
+      const y = Math.floor(mid.top + mid.height / 2);
+      notch.push({ name: 'thread halo, 2px left of the centre', x: Math.floor(mid.left - 0.5), y, want: 'halo' },
+        { name: 'thread halo, 2px right of the centre', x: Math.floor(mid.left + 3.5), y, want: 'halo' });
+    }
+
+    const image = new Image();
+    await new Promise<void>((done, fail) => { image.onload = () => done(); image.onerror = fail; image.src = `data:image/png;base64,${base64}`; });
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0);
+    const read = (probe: Probe): ProbeRead => {
+      const got = [...context.getImageData(probe.x, probe.y, 1, 1).data], expected = probe.want === 'accent' ? accent : halo;
+      return { ...probe, got, expected, ok: [0, 1, 2].every(channel => Math.abs(got[channel]! - expected[channel]!) <= 10) };
+    };
+    return { seams, notch: notch.map(read), elbow: elbow.map(read), note };
+  }, { base64: png.toString('base64') });
+}
+const describeProbes = (reads: readonly ProbeRead[]) => reads.map(read => `${read.ok ? 'ok  ' : 'FAIL'} ${read.name} (${read.x},${read.y}) want ${read.want} [${read.expected.slice(0, 3)}] got [${read.got.slice(0, 3)}]`).join('\n');
+
 /** The topic's changes live in the band's popover now, so no card sits between the band and the first item. */
 for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
   test(`The thread is one unbroken line from the band to the selected item: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
@@ -634,7 +711,17 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
     expect(runs[0]![0], 'it starts inside the band').toBeLessThanOrEqual(topic.bottom);
     expect(runs[0]![1], 'it runs on below the band, into the branch of the selected row').toBeGreaterThan(topic.bottom + 10);
     expect(reach, 'it reaches the selected row').toBeGreaterThanOrEqual(selected!.top);
-    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await page.locator('.tree-topic-group [aria-selected="true"]').first().evaluate(row => row.scrollIntoView({ block: 'end' }));
+    await settle(page);
+    const shot = await page.screenshot();
+    await testInfo.attach(`thread-${theme}`, { body: shot, contentType: 'image/png' });
+    // Paint order, not positions: the blue must be unbroken at every row boundary and through the elbow, with the halo at its sides.
+    const pixels = await readThreadPixels(page, shot);
+    expect(pixels.note, 'the elbow can be probed').toBe('');
+    expect(pixels.seams, 'a row boundary lies between the band and the selected row').toBeGreaterThan(0);
+    // Soft, so a failing run names the notch probes and the elbow probes each on their own.
+    expect.soft(describeProbes(pixels.notch.filter(read => !read.ok)), 'notches at the row boundaries, or a halo missing at the thread sides').toBe('');
+    expect.soft(describeProbes(pixels.elbow.filter(read => !read.ok)), 'the elbow into the selected row is not blue over its halo').toBe('');
   });
 }
 
