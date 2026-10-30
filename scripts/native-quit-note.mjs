@@ -180,6 +180,8 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
   const evidence = () => noteEvidence({ passes, longest, sinceRequest: lastPassAt - requestedAt, alive: alive(owned.pid) });
   // One osascript pass. `undefined` means "not seen yet": an incomplete
   // observation or a transient Apple event error. `null` means no dialog.
+  // A transient error during a press pass may have come after the AXPress went through.
+  let pressUncertain = false;
   const observe = mode => {
     const started = Date.now();
     if (mode === 'inspect') passes++;
@@ -188,6 +190,7 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
       return result && result.complete === false ? undefined : result;
     } catch (error) {
       if (!isTransientNativeError(error)) throw error;
+      if (mode === 'press') pressUncertain = true;
       return undefined;
     } finally {
       if (mode === 'inspect') { lastPassAt = Date.now(); longest = Math.max(longest, lastPassAt - started); }
@@ -195,7 +198,11 @@ export async function acknowledgeQuitNote(root, binary, nonce, owned, signal) {
   };
   try {
     for (;;) {
-      if (!alive(owned.pid)) throw new Error('Owned app exited without the expected native Quit note (' + evidence() + ')');
+      if (!alive(owned.pid)) {
+        throw new Error(pressUncertain
+          ? 'Owned app exited after a Quit note press whose outcome is unknown (' + evidence() + ')'
+          : 'Owned app exited without the expected native Quit note (' + evidence() + ')');
+      }
       await verify();
       if (observe('inspect')) {
         await verify();

@@ -334,6 +334,20 @@ test('an app that exits without showing the note fails at once with the same evi
   });
 });
 
+test('an app that exits after a press that failed transiently says the press outcome is unknown', async () => {
+  let checks = 0;
+  const { run, passes } = acknowledger({ natives: [receipt, vanished()], alive: () => ++checks <= 1 });
+  await assert.rejects(run(), error => {
+    assert.match(error.message, /^Owned app exited after a Quit note press whose outcome is unknown \(inspect passes: 1; .*app alive: false\)$/);
+    return true;
+  });
+  assert.deepEqual(passes, ['inspect', 'press']);
+  // An incomplete walk during the press never pressed, so it stays the plain exit.
+  let more = 0;
+  const incomplete = acknowledger({ natives: [receipt, { complete: false }], alive: () => ++more <= 1 });
+  await assert.rejects(incomplete.run(), /^Error: Owned app exited without the expected native Quit note/);
+});
+
 test('noteEvidence names every field', () => {
   assert.equal(noteEvidence({ passes: 7, longest: 812, sinceRequest: 9000, alive: true }),
     'inspect passes: 7; longest inspect: 812 ms; quit request to last inspect: 9000 ms; app alive: true');
