@@ -694,7 +694,8 @@ for (const theme of ['light', 'dark'] as const) test(`the dashed n box is painte
 
 /**
  * A focused, unselected ancestor of the selected item: the selection thread crosses its ring (accepted by design, alpha.28). The thread
- * and the elbow paint later at z-index 0 than the ring, so where they meet the ring the pixel reads the accent stroke, not the ring.
+ * and the elbow paint later at z-index 0 than the ring. The probes sit on their opaque halos (not on the accent stroke, which the ring's
+ * accent would hide), where a ring painted on top would tint the halo.
  */
 for (const theme of ['light', 'dark'] as const) test(`on a focused ancestor of the selected item the thread and the elbow still paint over the dotted box (${theme})`, async ({ page }) => serve(page, async open => {
   await open('still', 'reduce');
@@ -716,28 +717,34 @@ for (const theme of ['light', 'dark'] as const) test(`on a focused ancestor of t
     const ring = { left: rect.left + parseFloat(style.left), bottom: rect.bottom - parseFloat(style.bottom) };
     const own = (name: string) => [...element.children].find(child => child.classList.contains(name))?.getBoundingClientRect();
     const elbow = own('tree-thread-elbow'), thread = own('tree-thread');
-    const swatch = document.createElement('span'); swatch.style.color = 'var(--color-accent)'; element.append(swatch);
-    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
-    const paint = canvas.getContext('2d')!; paint.fillStyle = getComputedStyle(swatch).color; paint.fillRect(0, 0, 1, 1); swatch.remove();
-    const accent = [...paint.getImageData(0, 0, 1, 1).data];
+    // The bytes of a colour variable (the halo is an oklch colour): the 1x1 canvas converts it.
+    const bytesOf = (variable: string) => {
+      const swatch = document.createElement('span'); swatch.style.color = `var(${variable})`; element.append(swatch);
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+      const paint = canvas.getContext('2d')!; paint.fillStyle = getComputedStyle(swatch).color; paint.fillRect(0, 0, 1, 1); swatch.remove();
+      return [...paint.getImageData(0, 0, 1, 1).data];
+    };
+    const halo = bytesOf('--tree-halo');
     const image = new Image();
     await new Promise<void>((done, fail) => { image.onload = () => done(); image.onerror = fail; image.src = `data:image/png;base64,${png}`; });
     const page = document.createElement('canvas'); page.width = image.width; page.height = image.height;
     const context = page.getContext('2d')!; context.drawImage(image, 0, 0);
     const read = (name: string, meets: boolean, x: number, y: number) => {
       const got = [...context.getImageData(x, y, 1, 1).data];
-      return { name, meets, x, y, got: got.slice(0, 3), accent: accent.slice(0, 3), ok: [0, 1, 2].every(channel => Math.abs(got[channel]! - accent[channel]!) <= 10) };
+      return { name, meets, x, y, got: got.slice(0, 3), halo: halo.slice(0, 3), ok: [0, 1, 2].every(channel => Math.abs(got[channel]! - halo[channel]!) <= 3) };
     };
+    // The ring is the accent at 70%, so over the 3px accent stroke it would still read accent. The halos are opaque and differ from the
+    // ring: a halo pixel that crosses the ring reads the halo only if the line paints over the ring (the ring on top would tint it).
     return [
-      // The elbow's horizontal arm runs across the ring's left edge, and the thread's stroke down across the ring's bottom edge.
-      elbow && read('elbow arm over the ring\'s left edge', elbow.left < ring.left && ring.left < elbow.right, Math.floor(ring.left + 0.75), Math.floor(elbow.bottom - 1.5)),
-      thread && read('thread over the ring\'s bottom edge', thread.top < ring.bottom - 1.5 && ring.bottom < thread.bottom, Math.floor(thread.left + 1.5), Math.floor(ring.bottom - 0.75)),
+      // The elbow's 2px halo just below its stroke runs across the ring's left edge; the thread's left halo (2px, left of the stroke) across the ring's bottom edge.
+      elbow && read('elbow halo over the ring\'s left edge', elbow.left < ring.left && ring.left < elbow.right && ring.left - elbow.left > 9, Math.floor(ring.left + 0.75), Math.ceil(elbow.bottom)),
+      thread && read('thread halo over the ring\'s bottom edge', thread.top < ring.bottom - 1.5 && ring.bottom < thread.bottom, Math.floor(thread.left - 1), Math.floor(ring.bottom - 0.75)),
     ];
   }, base64);
   expect(probes.every(Boolean), 'the focused parent draws a thread and an elbow').toBe(true);
   for (const probe of probes) {
     expect(probe!.meets, `${probe!.name}: the line does cross the ring there`).toBe(true);
-    expect(probe!.ok, `${probe!.name} (${probe!.x},${probe!.y}) reads the accent [${probe!.accent}], got [${probe!.got}]`).toBe(true);
+    expect.soft(probe!.ok, `${probe!.name} (${probe!.x},${probe!.y}) reads the halo [${probe!.halo}], got [${probe!.got}]`).toBe(true);
   }
 }));
 
