@@ -28,7 +28,12 @@
    ring: the selected box's place grown by the ring's 1.5px, so the line covers the ring's place. Focus is a soft dotted ring; the `n`
    target a dashed one in the attention colour. Precedence: `n` > selected > focus. No outline goes round the item's whole width (the
    page's focus-visible one). A topic band or a strip keeps its focus ring (tree.css). The dotted box also draws for :focus-visible
-   without the column's keyboard mode: a Tab into the Map from outside never passes a key through the column. */
+   without the column's keyboard mode: a Tab into the Map from outside never passes a key through the column.
+   The ring is lifted to z-index 0, above the row's box slices and the hover wash (z-index -1; the row isolates): its place is the
+   item's own padding, so the slices would otherwise paint over its left and right edges. A focus ring never shares a row with the
+   selected box, because selected rows are excluded. The `n` box is set back to -1 (its rule below), so its arrival pulse (a
+   background) cannot cover the row's text. The ring is a border with a clear inside, so it covers no text; the chevron, the icon,
+   the hover bar and the end cluster paint above it, and on a focused ancestor of the selected item the thread does too. */
 .product-app .tree-item:focus-visible {
   outline: none;
 }
@@ -38,7 +43,7 @@
 .tree-item[data-next-unseen]::after {
   content: '';
   position: absolute;
-  z-index: -1;
+  z-index: 0;
   inset: 1.5px calc(10.5px + (var(--depth) - 1) * 6px) 1.5px calc(var(--tree-x) - 11.5px);
   border: 1.5px dotted color-mix(in srgb, var(--color-accent) 70%, transparent);
   border-radius: 7.5px;
@@ -218,6 +223,7 @@
 /* The next unseen target (n): its dashed box (placed with the focus box above), kept after its arrival pulse. Hovered, the box
    keeps its place and takes the hover wash; on a selected row the selected box keeps its wash and the dashed line is its ring. */
 .tree-item[data-next-unseen]::after {
+  z-index: -1;
   border: 1.5px dashed var(--attention);
 }
 
