@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-30
+# Ariadne handoff — 2026-10-31
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
@@ -21,9 +21,9 @@ native journey) once on the integrated head before push, and plans time for it. 
 designs come from Claude Design: the owner approves them (the approved board is
 `designs/Ariadne-final-board.zip`), and implementation follows the board.
 
-**Main: `55c95136` (#187). Alpha.27 released as
-[`v0.1.0-alpha.27`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.27)**
-(tag at `55c95136`). Alpha.26 is `v0.1.0-alpha.26` (tag at `2a7dd5c3`, #185), alpha.25 is `v0.1.0-alpha.25` (tag at `79942f51`, #183), alpha.24 is
+**Main: `1ad8f2f3` (#189). Alpha.28 released as
+[`v0.1.0-alpha.28`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.28)**
+(tag at `1ad8f2f3`). Alpha.27 is `v0.1.0-alpha.27` (tag at `55c95136`, #187), alpha.26 is `v0.1.0-alpha.26` (tag at `2a7dd5c3`, #185), alpha.25 is `v0.1.0-alpha.25` (tag at `79942f51`, #183), alpha.24 is
 `v0.1.0-alpha.24` (tag at `6aa66024`, #181), alpha.23 is
 `v0.1.0-alpha.23` (tag at `37cdfc69`, #179), alpha.22 is
 `v0.1.0-alpha.22` (tag at `66e7a3f8`, #177), alpha.21 is
@@ -36,6 +36,19 @@ designs come from Claude Design: the owner approves them (the approved board is
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.28 released
+
+[#189](https://github.com/kartiksayani/ariadne/pull/189), `1ad8f2f3`, "The focus box shows": moving with the arrow keys now draws the focus box. The release is a pre-release with the asset `ariadne-0.1.0-alpha.28-macos-arm64.tar.gz`, tagged `v0.1.0-alpha.28` on 2026-10-31. Version 0.1.0-alpha.28. What changed for the owner:
+
+- Map: moving with the arrow keys draws the soft dotted blue focus box around the item you are on, separate from the solid box of the selected item.
+  - Since alpha.24 ([#181](https://github.com/kartiksayani/ariadne/pull/181)) the box was the row's `::before` at `z-index: -1`. The row's own branch box slices (`<Boxes>`, also -1, opaque, later in tree order) covered its left and right edges, so it was styled but never painted on a normal row.
+  - The focus `::before` now paints at `z-index: 0`. The `n` box's `::after` stays at -1, so its arrival pulse stays under the text.
+  - On a focused ancestor of the selected item, the selection thread paints over the box, by design.
+- Tests: `landing.spec.mts` now checks paint, not just style.
+  - The dotted box on all four edges, light and dark, with Details open and closed.
+  - The `n` box in the attention colour.
+  - The thread's and elbow's halo over the box.
 
 ## Alpha.27 released
 
@@ -255,9 +268,10 @@ built.
 
 ## Next steps
 
-Alpha.27 folded the "Changed at" box into one line that opens on a click, and made the Map's blue thread one unbroken line with a blue elbow. It added two follow-ups of its own and kept the alpha.26 ones. Item 1 is the follow-ups carried to the next release (alpha.28); the owner picks the order.
+Alpha.28 made the arrow-key focus box paint, with tests that check the pixels. It added one follow-up of its own (the strip rows) and kept every earlier one. Item 1 is the follow-ups carried to the next release (alpha.29); the owner picks the order.
 
 1. **Follow-ups carried to the next release** (none blocks it).
+   - A strip row's keyboard focus (the "N hidden" strip, and the archive strip) is an inset `box-shadow` on the row (`apps/desktop/src/ui/tree/tree.css:130-132`, `Strip.tsx:72,85`). On a strip at depth 2 or more, the `<Boxes>` slices cover its top and bottom runs, leaving only side stubs. The same fix applies (a ring at `z-index: 0`), but it changes the look from an inset shadow to a ring.
    - After the owner opens the change box (or Older history), the clicked head is held in place. Until the owner scrolls or clicks elsewhere, a new message at the end of Details does not auto-scroll to it.
    - `tests/e2e/tree-layout/map-still.spec.mts` "Details keeps the change box…" (around :999) measures the unseen state right after the row press, and the real 1 s seen-dwell can win on a slow runner. The new collapsed-head design check holds the dwell by reporting the window as unfocused (`page.addInitScript`); `map-still` could use the same seam.
    - Rows with an Ack slot (`ackDisabled`) and topic rows (`AckAll` `disabled`) still redraw on a view write, because those props disable real buttons.
@@ -284,6 +298,7 @@ Alpha.27 folded the "Changed at" box into one line that opens on a click, and ma
   first CI run failed on `setup.rs`'s packaged-skill size cap for that reason.
 - A review fix landed after the full local gate and added work to every Map build (Markdown rewriting with no search); it was fixed in `4df1e331`. After a late fix that touches the tree model, run the 2,000-item design specs (`landing`, `map-still`) once before pushing.
 - A design check that compares `scrollWidth > clientWidth` misses a sub-pixel ellipsis, because both are rounded. To tell whether text is cut, compare a `Range` over the text with the element's content box.
+- A computed-style check (`getComputedStyle(…, '::before')`) proves a rule applies, not that it paints. The alpha.24 focus box passed style tests for four releases while covered. Pair every "X is drawn" test with a pixel check against a before screenshot. Where a probe sits on the accent stroke, probe the halo instead: a 70%-alpha accent ring over accent still reads accent.
 - Fix rounds, moved UI code, saved formats, CI parity and flakes follow the
   ORCHESTRATOR rules under "Delivery feedback rules" ([ORCHESTRATOR](../../ORCHESTRATOR.md)).
 
